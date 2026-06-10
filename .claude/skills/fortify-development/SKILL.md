@@ -8,6 +8,8 @@ metadata:
 
 # Laravel Fortify Development
 
+> **ADVS domain reference:** the three roles and exactly what each can/cannot access are specified in [`ADVS_System_Reference.md`](../../../ADVS_System_Reference.md) `§3`. Activate the `advs-system-reference` skill for ADVS auth/role work.
+
 Fortify is a headless authentication backend that provides authentication routes and controllers for Laravel applications.
 
 ## Documentation

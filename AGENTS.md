@@ -1,3 +1,25 @@
+# ADVS — Agent Instructions
+
+> **Project domain reference: [`ADVS_System_Reference.md`](ADVS_System_Reference.md).**
+> This is the authoritative specification of *what the Automated Document Validation System does* — the end-to-end document-validation pipeline (preprocessing → OCR → classification → signature/stamp detection & verification → risk scoring → officer review), the composite risk-score formula, role-based permissions, dashboard navigation, notifications, storage model, and the **complete table of tunable parameters and their defaults** (`§9`).
+>
+> **Read the relevant section before implementing any domain logic.** Use this map:
+>
+> | If you are working on… | Read |
+> |---|---|
+> | Upload validation, MIME/size limits, multi-page PDFs | `§2` File Upload Constraints, `§9` Parameters |
+> | Auth, roles, route gating (`role:` middleware) | `§3` Access Control and User Roles |
+> | Sidebars, dashboard pages, role-scoped nav | `§4` Dashboard Navigation Structure |
+> | Any Python pipeline stage / Service / Job | `§5` Processing Pipeline (Stages 0–6) |
+> | Risk-score computation, weights, thresholds | `§5` Stage 5, `§6` Risk Drill-Down, `§9` Parameters |
+> | Signature / stamp verification & enrollment | `§5` Stages 4–4b |
+> | Notifications & alerting | `§7` Notification and Alerting |
+> | Migrations, storage paths, embeddings, retention | `§8` Database and Storage |
+>
+> `AGENTS.md` (the Laravel Boost guidelines below) and `CLAUDE.md` cover *how* to build — stack, versions, conventions, and structure. `ADVS_System_Reference.md` covers *what* to build. When a domain task is in scope, the `advs-system-reference` skill activates automatically; consult the reference even if the skill does not fire.
+
+---
+
 <laravel-boost-guidelines>
 === foundation rules ===
 

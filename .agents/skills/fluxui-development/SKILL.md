@@ -8,6 +8,8 @@ metadata:
 
 # Flux UI Development
 
+> **ADVS domain reference:** dashboard sidebars, role-scoped tabs, and the risk-score drill-down breakdown are specified in [`ADVS_System_Reference.md`](../../../ADVS_System_Reference.md) `§4`, `§6`. Activate the `advs-system-reference` skill for ADVS UI work.
+
 ## Documentation
 
 Use `search-docs` for detailed Flux UI patterns and documentation.

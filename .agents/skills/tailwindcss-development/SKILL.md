@@ -8,6 +8,8 @@ metadata:
 
 # Tailwind CSS Development
 
+> **ADVS domain reference:** dashboard layout and risk-level color coding (Low 0–30 / Medium 31–60 / High 61–100) are specified in [`ADVS_System_Reference.md`](../../../ADVS_System_Reference.md) `§4`, `§6`. Activate the `advs-system-reference` skill for ADVS UI work.
+
 ## Documentation
 
 Use `search-docs` for detailed Tailwind CSS v4 patterns and documentation.

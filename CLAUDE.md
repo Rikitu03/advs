@@ -3,6 +3,9 @@
 > This file is the authoritative reference for Claude Code when working on this project.
 > Read it fully before writing any code, generating migrations, or modifying existing files.
 
+> **Domain reference — [`ADVS_System_Reference.md`](ADVS_System_Reference.md).**
+> `CLAUDE.md` governs *how* to build (stack, conventions, structure, phases); `ADVS_System_Reference.md` governs *what* the system does (the document-validation pipeline, risk-score math, role permissions, dashboard layout, notifications, storage, and the complete tunable-parameter table). **Before implementing any pipeline stage, risk score, signature/stamp verification, role gate, dashboard view, or threshold, read the relevant section of `ADVS_System_Reference.md`** so behavior matches the thesis design. The `advs-system-reference` skill auto-activates on this domain work. Where the two documents disagree on a detail, prefer `CLAUDE.md` for stack/version facts and `ADVS_System_Reference.md` for product behavior, and flag the conflict.
+
 ---
 
 ## 1. Project Overview
@@ -17,7 +20,9 @@ The ADVS replaces manual document review by automatically classifying uploaded v
 **Users:**
 - **Vendors (external):** Submit accreditation documents through a secure portal.
 - **Compliance Officers / Accrediting Officers (internal):** Review AI-generated validation reports, risk scores, and make final accreditation decisions via the Admin Dashboard.
-- **Risk Managers (internal):** Monitor submission trends and compliance status in aggregate.
+- **System Administrators (internal):** Manage users, configure thresholds, oversee the platform, and monitor submission trends and compliance status in aggregate.
+
+> **Roles are `vendor`, `compliance_officer`, `admin` — three roles (see [`ADVS_System_Reference.md`](ADVS_System_Reference.md) §3 and the live `users.role` enum).** There is no separate `risk_manager` role; aggregate risk/trend monitoring is an admin/compliance-officer dashboard capability.
 
 ---
 
@@ -149,7 +154,6 @@ advs/
 │   │   │   └── confirm-password.blade.php
 │   │   ├── vendor/dashboard.blade.php          # role landing pages (Blade + Flux)
 │   │   ├── admin/dashboard.blade.php
-│   │   ├── risk/dashboard.blade.php
 │   │   ├── dashboard.blade.php                 # starter-kit default (kept for reference)
 │   │   ├── components/
 │   │   │   ├── layouts/                        # Flux app shell (sidebar/header) + auth shells
@@ -257,7 +261,6 @@ class User extends Authenticatable implements MustVerifyEmail
 {
     public const ROLE_VENDOR = 'vendor';
     public const ROLE_COMPLIANCE_OFFICER = 'compliance_officer';
-    public const ROLE_RISK_MANAGER = 'risk_manager';
     public const ROLE_ADMIN = 'admin';
 
     public function hasRole(string ...$roles): bool
@@ -269,7 +272,6 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return match ($this->role) {
             self::ROLE_ADMIN, self::ROLE_COMPLIANCE_OFFICER => 'admin.dashboard',
-            self::ROLE_RISK_MANAGER => 'risk.dashboard',
             default => 'vendor.dashboard',
         };
     }
@@ -287,12 +289,12 @@ class User extends Authenticatable implements MustVerifyEmail
 2. `POST /register` → `CreateNewUser` validates and creates the user **with `role = vendor`** (public registration is vendor-only), fires `Registered` (queues the verification email), logs the user in, and redirects to `/dashboard`.
 3. The user lands on the verify-email screen until they click the link in the email.
 
-> Internal staff (compliance officers, risk managers, admins) are **not** self-registered — they are provisioned via `DatabaseSeeder` (or future admin tooling).
+> Internal staff (compliance officers, admins) are **not** self-registered — they are provisioned via `DatabaseSeeder` (or future admin tooling).
 
 ### Role-Based Access
-- `users.role` column: `vendor`, `compliance_officer`, `risk_manager`, `admin`.
-- The **`role:` middleware alias** (`app/Http/Middleware/EnsureUserHasRole`) guards routes and returns 403 on mismatch: `role:vendor`, `role:admin,compliance_officer`, `role:risk_manager,admin`.
-- Role landing pages: `vendor.dashboard`, `admin.dashboard` (admin + compliance_officer), `risk.dashboard` (risk_manager + admin).
+- `users.role` column: `vendor`, `compliance_officer`, `admin`.
+- The **`role:` middleware alias** (`app/Http/Middleware/EnsureUserHasRole`) guards routes and returns 403 on mismatch: `role:vendor`, `role:admin,compliance_officer`.
+- Role landing pages: `vendor.dashboard`, `admin.dashboard` (admin + compliance_officer).
 - Prefer the `role:` middleware (or a Gate/Policy) over inline `if ($user->role === …)` checks.
 
 ### Two-Factor Authentication (scaffolded, not yet enabled)
@@ -317,7 +319,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', fn () => redirect()->route(auth()->user()->dashboardRoute()))->name('dashboard');
     Route::view('vendor/dashboard', 'vendor.dashboard')->middleware('role:vendor')->name('vendor.dashboard');
     Route::view('admin/dashboard', 'admin.dashboard')->middleware('role:admin,compliance_officer')->name('admin.dashboard');
-    Route::view('risk/dashboard', 'risk.dashboard')->middleware('role:risk_manager,admin')->name('risk.dashboard');
 });
 ```
 
@@ -706,7 +707,6 @@ Auth is browser/session-based (Fortify), so test it in the browser, not via API 
 |---|---|---|
 | `vendor@advs.test` | vendor | `/vendor/dashboard` |
 | `officer@advs.test` | compliance_officer | `/admin/dashboard` |
-| `risk@advs.test` | risk_manager | `/risk/dashboard` |
 | `admin@advs.test` | admin | `/admin/dashboard` |
 
 ```bash
@@ -756,7 +756,7 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 **Goal:** Full registration → email verification → login flow with role-based redirects, via Laravel Fortify.
 
 **Tasks (completed):**
-- ✅ Added `role` column to `users` (`vendor` | `compliance_officer` | `risk_manager` | `admin`).
+- ✅ Added `role` column to `users` (`vendor` | `compliance_officer` | `admin`).
 - ✅ `User implements MustVerifyEmail` + `role`/`dashboardRoute()` helpers.
 - ✅ Installed Fortify; `views => true` with Blade form views in `resources/views/auth/*`.
 - ✅ `CreateNewUser` assigns `role = vendor` on public registration.
@@ -897,7 +897,7 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 - [ ] Verify Fortify login throttling (5/min per email+IP) returns a throttle error after repeated failures.
 - [ ] If 2FA is enabled, test the challenge + recovery-code path.
 - [ ] Run `php artisan route:list` and confirm no unexpected exposed routes.
-- [ ] Verify role-based access: a vendor cannot access `admin.dashboard` / `risk.dashboard` (403). *(covered by `DashboardTest`)*
+- [ ] Verify role-based access: a vendor cannot access `admin.dashboard` (403). *(covered by `DashboardTest`)*
 
 #### 9b — Python Script Debugging Checklist
 - [ ] Run `pytest python/tests/ -v --tb=short`. Fix any failures.

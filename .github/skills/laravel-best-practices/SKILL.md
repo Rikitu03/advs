@@ -8,6 +8,8 @@ metadata:
 
 # Laravel Best Practices
 
+> **ADVS domain reference:** the document-validation pipeline, queued jobs, risk-score formula, storage model, and all tunable parameters are specified in [`ADVS_System_Reference.md`](../../../ADVS_System_Reference.md) `§5`, `§8`, `§9`. Activate the `advs-system-reference` skill for ADVS backend work.
+
 Best practices for Laravel, prioritized by impact. Each rule teaches what to do and why. For exact API syntax, verify with `search-docs`.
 
 ## Consistency First
