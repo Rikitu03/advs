@@ -18,8 +18,9 @@ class DatabaseSeeder extends Seeder
         $accounts = [
             ['Vendor User', 'vendor@advs.test', User::ROLE_VENDOR],
             ['Compliance Officer', 'officer@advs.test', User::ROLE_COMPLIANCE_OFFICER],
-            ['Risk Manager', 'risk@advs.test', User::ROLE_RISK_MANAGER],
+            ['Compliance Officer 2', 'officer2@advs.test', User::ROLE_COMPLIANCE_OFFICER],
             ['System Admin', 'admin@advs.test', User::ROLE_ADMIN],
+            ['System Admin 2', 'admin2@advs.test', User::ROLE_ADMIN],
         ];
 
         foreach ($accounts as [$name, $email, $role]) {
@@ -33,5 +34,10 @@ class DatabaseSeeder extends Seeder
                 ],
             );
         }
+
+        $this->call([
+            DocumentTypeSeeder::class,
+            SystemSettingSeeder::class,
+        ]);
     }
 }

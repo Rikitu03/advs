@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -22,7 +23,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Role dispatcher: Fortify's `home` (/dashboard) lands here and forwards
     // each user to the dashboard for their role.
     Route::get('dashboard', function () {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
 
         return redirect()->route($user->dashboardRoute());
@@ -37,11 +38,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('admin/dashboard', 'admin.dashboard')
         ->middleware('role:admin,compliance_officer')
         ->name('admin.dashboard');
-
-    // Risk manager dashboard
-    Route::view('risk/dashboard', 'risk.dashboard')
-        ->middleware('role:risk_manager,admin')
-        ->name('risk.dashboard');
 });
 
 /*

@@ -38,14 +38,6 @@ class DashboardTest extends TestCase
         $this->actingAs($user)->get(route('admin.dashboard'))->assertOk();
     }
 
-    public function test_risk_manager_is_dispatched_to_the_risk_dashboard(): void
-    {
-        $user = User::factory()->role(User::ROLE_RISK_MANAGER)->create();
-
-        $this->actingAs($user)->get('/dashboard')->assertRedirect(route('risk.dashboard'));
-        $this->actingAs($user)->get(route('risk.dashboard'))->assertOk();
-    }
-
     public function test_admin_is_dispatched_to_the_admin_dashboard(): void
     {
         $user = User::factory()->role(User::ROLE_ADMIN)->create();

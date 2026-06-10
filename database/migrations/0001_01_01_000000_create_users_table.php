@@ -15,8 +15,15 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
+            // ADVS uses three roles (see ADVS_System_Reference.md §3). No separate roles table.
+            $table->enum('role', ['vendor', 'compliance_officer', 'admin'])->default('vendor')->index();
+            $table->boolean('is_active')->default(true)->index();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
+            // Fortify two-factor columns (feature scaffolded; see config/fortify.php).
+            $table->text('two_factor_secret')->nullable();
+            $table->text('two_factor_recovery_codes')->nullable();
+            $table->timestamp('two_factor_confirmed_at')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -10,7 +11,7 @@ use Illuminate\Support\Str;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
+    /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
     /**
@@ -19,8 +20,6 @@ class User extends Authenticatable implements MustVerifyEmail
     public const ROLE_VENDOR = 'vendor';
 
     public const ROLE_COMPLIANCE_OFFICER = 'compliance_officer';
-
-    public const ROLE_RISK_MANAGER = 'risk_manager';
 
     public const ROLE_ADMIN = 'admin';
 
@@ -86,7 +85,6 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return match ($this->role) {
             self::ROLE_ADMIN, self::ROLE_COMPLIANCE_OFFICER => 'admin.dashboard',
-            self::ROLE_RISK_MANAGER => 'risk.dashboard',
             default => 'vendor.dashboard',
         };
     }
