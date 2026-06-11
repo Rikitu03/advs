@@ -55,7 +55,17 @@ class User extends Authenticatable implements MustVerifyEmail
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'signature_enrolled_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Whether the vendor has completed the signature-enrollment step of
+     * registration (see the EnsureSignatureEnrolled middleware).
+     */
+    public function hasEnrolledSignature(): bool
+    {
+        return $this->signature_enrolled_at !== null;
     }
 
     /**

@@ -24,7 +24,7 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($accounts as [$name, $email, $role]) {
-            User::firstOrCreate(
+            $user = User::firstOrCreate(
                 ['email' => $email],
                 [
                     'name' => $name,
@@ -33,6 +33,16 @@ class DatabaseSeeder extends Seeder
                     'email_verified_at' => now(),
                 ],
             );
+
+            // Seeded vendors skip the signature-enrollment gate so the demo
+            // account lands on the dashboard. (signature_path is a placeholder;
+            // no real reference image exists for seeded data.)
+            if ($role === User::ROLE_VENDOR && ! $user->hasEnrolledSignature()) {
+                $user->forceFill([
+                    'signature_path' => "signatures/{$user->id}/seeded-reference.jpg",
+                    'signature_enrolled_at' => now(),
+                ])->save();
+            }
         }
 
         $this->call([

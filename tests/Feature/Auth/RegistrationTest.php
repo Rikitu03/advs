@@ -25,11 +25,14 @@ class RegistrationTest extends TestCase
         ]);
 
         $this->assertAuthenticated();
-        $response->assertRedirect('/dashboard');
+
+        // Step 2 of registration: enroll a reference signature before email verification.
+        $response->assertRedirect(route('signature.create'));
 
         $this->assertDatabaseHas('users', [
             'email' => 'test@example.com',
             'role' => User::ROLE_VENDOR,
+            'signature_enrolled_at' => null,
         ]);
     }
 

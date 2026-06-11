@@ -2,12 +2,13 @@
 
 namespace Database\Factories;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\User>
+ * @extends Factory<User>
  */
 class UserFactory extends Factory
 {
@@ -28,9 +29,23 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
-            'role' => \App\Models\User::ROLE_VENDOR,
+            'role' => User::ROLE_VENDOR,
+            // Like email_verified_at, factory users default to having completed
+            // onboarding (signature enrollment); use unenrolled() to test the gate.
+            'signature_enrolled_at' => now(),
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /**
+     * Indicate that the vendor has not completed signature enrollment.
+     */
+    public function unenrolled(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'signature_path' => null,
+            'signature_enrolled_at' => null,
+        ]);
     }
 
     /**
