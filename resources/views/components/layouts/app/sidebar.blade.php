@@ -28,7 +28,7 @@
                         <flux:navlist.item icon="archive-box" :href="route('admin.archived')" :current="request()->routeIs('admin.archived')" wire:navigate>Archived Reports</flux:navlist.item>
                         <flux:navlist.item icon="identification" :href="route('admin.vendors')" :current="request()->routeIs('admin.vendors') || request()->routeIs('admin.vendors.*')" wire:navigate>Vendor Profiles</flux:navlist.item>
                         <flux:navlist.item icon="clipboard-document-list" :href="route('admin.risk-logs')" :current="request()->routeIs('admin.risk-logs')" wire:navigate>Risk Logs</flux:navlist.item>
-                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" wire:navigate>Notifications</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" :badge="\App\Support\DemoStore::unreadCount() ?: null" wire:navigate>Notifications</flux:navlist.item>
                     </flux:navlist.group>
 
                     @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))

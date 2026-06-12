@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\User;
-use App\Support\DemoData;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -35,41 +34,30 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('role:vendor')
         ->name('vendor.dashboard');
 
-    // Compliance officer / admin dashboard + review workflow
+    // Compliance officer / admin dashboard + review workflow.
+    // All pages are full-page Volt components backed by the session-scoped
+    // DemoStore, so officer actions (decisions, read-states) work end to end.
     Route::middleware('role:admin,compliance_officer')->group(function () {
-        Route::view('admin/dashboard', 'admin.dashboard')->name('admin.dashboard');
+        Volt::route('admin/dashboard', 'admin.dashboard')->name('admin.dashboard');
 
         // Pending Submissions queue (ADVS_System_Reference.md §4).
-        Route::view('admin/pending', 'admin.pending')->name('admin.pending');
+        Volt::route('admin/pending', 'admin.pending')->name('admin.pending');
 
-        // Validation Results drill-down for one submission (§6).
-        Route::get('admin/submissions/{submission}', function (string $submission) {
-            $data = DemoData::findSubmission($submission);
-
-            abort_if($data === null, 404);
-
-            return view('admin.submissions.show', ['submission' => $data]);
-        })->name('admin.submissions.show');
+        // Validation Results drill-down + officer decision for one submission (§6).
+        Volt::route('admin/submissions/{submission}', 'admin.submissions.show')->name('admin.submissions.show');
 
         // Archived Reports — searchable archive of decided submissions (§4).
-        Route::view('admin/archived', 'admin.archived')->name('admin.archived');
+        Volt::route('admin/archived', 'admin.archived')->name('admin.archived');
 
         // Vendor Profiles — directory of registered vendors (§4 / §8).
-        Route::view('admin/vendors', 'admin.vendors.index')->name('admin.vendors');
-
-        Route::get('admin/vendors/{vendor}', function (string $vendor) {
-            $data = DemoData::findVendor($vendor);
-
-            abort_if($data === null, 404);
-
-            return view('admin.vendors.show', ['vendor' => $data]);
-        })->name('admin.vendors.show');
+        Volt::route('admin/vendors', 'admin.vendors.index')->name('admin.vendors');
+        Volt::route('admin/vendors/{vendor}', 'admin.vendors.show')->name('admin.vendors.show');
 
         // Risk Logs — chronological audit log of raised flags (§4).
-        Route::view('admin/risk-logs', 'admin.risk-logs')->name('admin.risk-logs');
+        Volt::route('admin/risk-logs', 'admin.risk-logs')->name('admin.risk-logs');
 
         // Notifications — officer alert feed (§7).
-        Route::view('admin/notifications', 'admin.notifications')->name('admin.notifications');
+        Volt::route('admin/notifications', 'admin.notifications')->name('admin.notifications');
     });
 });
 
