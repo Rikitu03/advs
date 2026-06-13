@@ -3,7 +3,7 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white dark:bg-zinc-800">
+    <body class="min-h-screen bg-white dark:bg-cu-bg">
         <flux:sidebar sticky stashable class="border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
@@ -11,24 +11,38 @@
                 <x-app-logo class="size-8" href="#"></x-app-logo>
             </a>
 
+            @php($user = auth()->user())
+
             <flux:navlist variant="outline">
-                <flux:navlist.group heading="Platform" class="grid">
-                    @php($dashboardRoute = auth()->user()->dashboardRoute())
-                    <flux:navlist.item icon="home" :href="route($dashboardRoute)" :current="request()->routeIs($dashboardRoute)" wire:navigate>Dashboard</flux:navlist.item>
-                </flux:navlist.group>
+                @if ($user->hasRole(\App\Models\User::ROLE_VENDOR))
+                    <flux:navlist.group heading="Vendor" class="grid">
+                        <flux:navlist.item icon="home" :href="route('vendor.dashboard')" :current="request()->routeIs('vendor.dashboard')" wire:navigate>Dashboard</flux:navlist.item>
+                        <x-nav-soon icon="arrow-up-tray" label="Submit Documents" />
+                        <x-nav-soon icon="document-text" label="My Submissions" />
+                        <x-nav-soon icon="bell" label="Notifications" />
+                    </flux:navlist.group>
+                @else
+                    <flux:navlist.group heading="Review" class="grid">
+                        <flux:navlist.item icon="home" :href="route('admin.dashboard')" :current="request()->routeIs('admin.dashboard')" wire:navigate>Dashboard</flux:navlist.item>
+                        <flux:navlist.item icon="inbox-stack" :href="route('admin.pending')" :current="request()->routeIs('admin.pending') || request()->routeIs('admin.submissions.*')" wire:navigate>Pending Submissions</flux:navlist.item>
+                        <flux:navlist.item icon="archive-box" :href="route('admin.archived')" :current="request()->routeIs('admin.archived')" wire:navigate>Archived Reports</flux:navlist.item>
+                        <flux:navlist.item icon="identification" :href="route('admin.vendors')" :current="request()->routeIs('admin.vendors') || request()->routeIs('admin.vendors.*')" wire:navigate>Vendor Profiles</flux:navlist.item>
+                        <flux:navlist.item icon="clipboard-document-list" :href="route('admin.risk-logs')" :current="request()->routeIs('admin.risk-logs')" wire:navigate>Risk Logs</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" :badge="\App\Support\DemoStore::unreadCount() ?: null" wire:navigate>Notifications</flux:navlist.item>
+                    </flux:navlist.group>
+
+                    @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))
+                        <flux:navlist.group heading="Administration" class="mt-2 grid">
+                            <x-nav-soon icon="users" label="User Management" />
+                            <x-nav-soon icon="cog-6-tooth" label="System Settings" />
+                            <x-nav-soon icon="cpu-chip" label="ML Models" />
+                            <x-nav-soon icon="shield-check" label="Audit Trail" />
+                        </flux:navlist.group>
+                    @endif
+                @endif
             </flux:navlist>
 
             <flux:spacer />
-
-            <flux:navlist variant="outline">
-                <flux:navlist.item icon="folder-git-2" href="https://github.com/laravel/livewire-starter-kit" target="_blank">
-                    Repository
-                </flux:navlist.item>
-
-                <flux:navlist.item icon="book-open-text" href="https://laravel.com/docs/starter-kits" target="_blank">
-                    Documentation
-                </flux:navlist.item>
-            </flux:navlist>
 
             <!-- Desktop User Menu -->
             <flux:dropdown position="bottom" align="start">

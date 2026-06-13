@@ -34,10 +34,31 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('role:vendor')
         ->name('vendor.dashboard');
 
-    // Compliance officer / admin dashboard
-    Route::view('admin/dashboard', 'admin.dashboard')
-        ->middleware('role:admin,compliance_officer')
-        ->name('admin.dashboard');
+    // Compliance officer / admin dashboard + review workflow.
+    // All pages are full-page Volt components backed by the session-scoped
+    // DemoStore, so officer actions (decisions, read-states) work end to end.
+    Route::middleware('role:admin,compliance_officer')->group(function () {
+        Volt::route('admin/dashboard', 'admin.dashboard')->name('admin.dashboard');
+
+        // Pending Submissions queue (ADVS_System_Reference.md §4).
+        Volt::route('admin/pending', 'admin.pending')->name('admin.pending');
+
+        // Validation Results drill-down + officer decision for one submission (§6).
+        Volt::route('admin/submissions/{submission}', 'admin.submissions.show')->name('admin.submissions.show');
+
+        // Archived Reports — searchable archive of decided submissions (§4).
+        Volt::route('admin/archived', 'admin.archived')->name('admin.archived');
+
+        // Vendor Profiles — directory of registered vendors (§4 / §8).
+        Volt::route('admin/vendors', 'admin.vendors.index')->name('admin.vendors');
+        Volt::route('admin/vendors/{vendor}', 'admin.vendors.show')->name('admin.vendors.show');
+
+        // Risk Logs — chronological audit log of raised flags (§4).
+        Volt::route('admin/risk-logs', 'admin.risk-logs')->name('admin.risk-logs');
+
+        // Notifications — officer alert feed (§7).
+        Volt::route('admin/notifications', 'admin.notifications')->name('admin.notifications');
+    });
 });
 
 /*
@@ -46,6 +67,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
 |--------------------------------------------------------------------------
 */
 Route::middleware(['auth'])->group(function () {
+    // Step 2 of vendor registration: enroll a reference signature before email
+    // verification. Auth-only (the user is not verified yet) and exempt from the
+    // EnsureSignatureEnrolled gate by its route name.
+    Volt::route('signature/enroll', 'auth.signature-enroll')->name('signature.create');
+
     Route::redirect('settings', 'settings/profile');
 
     Volt::route('settings/profile', 'settings.profile')->name('settings.profile');

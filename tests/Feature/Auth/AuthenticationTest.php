@@ -25,7 +25,9 @@ class AuthenticationTest extends TestCase
         ]);
 
         $this->assertAuthenticated();
-        $response->assertRedirect('/dashboard');
+        // Login now lands users on their role dashboard directly (skipping the
+        // /dashboard dispatcher); the factory default role is vendor.
+        $response->assertRedirect(route('vendor.dashboard'));
     }
 
     public function test_users_can_not_authenticate_with_invalid_password(): void

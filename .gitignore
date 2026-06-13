@@ -6,6 +6,7 @@
 /storage/*.key
 /storage/pail
 /vendor
+/claude-talk-to-figma-mcp
 /.claude
 /.agents
 .DS_Store

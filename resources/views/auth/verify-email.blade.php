@@ -5,6 +5,12 @@
             :description="__('Please verify your email address by clicking the link we just emailed to you.')"
         />
 
+        @if (session('status') == 'signature-enrolled')
+            <flux:text class="text-center font-medium !text-green-600">
+                {{ __('Your reference signature was enrolled successfully.') }}
+            </flux:text>
+        @endif
+
         @if (session('status') == 'verification-link-sent')
             <flux:text class="text-center font-medium !text-green-600">
                 {{ __('A new verification link has been sent to the email address you provided during registration.') }}
