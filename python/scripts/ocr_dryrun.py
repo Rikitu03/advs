@@ -549,13 +549,16 @@ def _normalise_value(key: str, value: str) -> str:
 # 2x-upscaled pixel space the Otsu pipeline produces, so the y-offsets are tuned
 # for Form 2303 at that scale.
 # ---------------------------------------------------------------------------
-def _find_phrase(words: list[dict], phrase: str):
-    """Box (left, top, right, bottom) of the first consecutive run of words
-    whose normalised text equals the phrase tokens; None if absent."""
+def _find_phrase(words: list[dict], phrase: str, max_typos: int = 0):
+    """Box (left, top, right, bottom) of the first consecutive run of words whose
+    normalised text matches the phrase tokens; None if absent. ``max_typos`` > 0
+    allows fuzzy per-token matching (tolerates OCR typos in a caption); the
+    default 0 is an exact match, preserving the original behaviour."""
     tokens = [_norm_token(t) for t in phrase.split()]
     for i in range(len(words) - len(tokens) + 1):
         seg = words[i:i + len(tokens)]
-        if [_norm_token(w["text"]) for w in seg] == tokens:
+        if all(_fuzzy_token_eq(w["text"], tok, max_typos)
+               for w, tok in zip(seg, tokens)):
             return (
                 min(w["left"] for w in seg),
                 min(w["top"] for w in seg),

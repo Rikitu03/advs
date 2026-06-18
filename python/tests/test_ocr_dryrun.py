@@ -514,6 +514,25 @@ def test_fuzzy_token_eq_caps_tolerance_below_token_length() -> None:
     assert ocr_dryrun._fuzzy_token_eq("TIN", "FOR", 4) is False
 
 
+# --- fuzzy phrase finder over word boxes --------------------------------------
+
+def _word(text: str, left: int, top: int, width: int = 80, height: int = 20) -> dict:
+    return {"text": text, "conf": 90, "left": left, "top": top,
+            "width": width, "height": height}
+
+
+def test_find_phrase_exact_by_default() -> None:
+    words = [_word("TRADE", 10, 10, 50), _word("NAME", 70, 10, 50)]
+    assert ocr_dryrun._find_phrase(words, "TRADE NAME") == (10, 10, 120, 30)
+    assert ocr_dryrun._find_phrase(words, "TRADE NAMEX") is None  # exact: no match
+
+
+def test_find_phrase_fuzzy_tolerates_caption_typo() -> None:
+    words = [_word("REGISTRAUION", 100, 50, 180), _word("DATE", 290, 50, 60)]
+    assert ocr_dryrun._find_phrase(words, "REGISTRATION DATE", max_typos=4) == (100, 50, 350, 70)
+    assert ocr_dryrun._find_phrase(words, "REGISTRATION DATE") is None  # exact fails
+
+
 if __name__ == "__main__":  # runnable without pytest: `python tests/test_ocr_dryrun.py`
     import sys
     import traceback
