@@ -577,6 +577,31 @@ def test_positional_registered_name_none_without_header() -> None:
     ) is None
 
 
+# --- text-only fallback tolerates the header typo too -------------------------
+
+def test_extract_registered_name_text_fallback_tolerates_typo() -> None:
+    text = (
+        "TIN NAME REGISTRAUION DATE\n"
+        "000-132-541-000 MINING AND PETROLEUM SERVICES 08/12/1998\n"
+        "CORPORATION\n"
+        "REGISTERED ADDRESS\n"
+    )
+    val = ocr_dryrun.extract_fields(text, {})["registered_name"]["value"]
+    assert val is not None                      # header found despite REGISTRAUION
+    name = val.upper()
+    assert "MINING AND PETROLEUM SERVICES" in name
+    assert "CORPORATION" in name
+    assert "000-132-541-000" not in name        # flanking TIN stripped
+    assert "08/12/1998" not in name             # flanking date stripped
+
+
+def test_extract_registered_name_text_fallback_still_matches_clean_header() -> None:
+    # Regression: the existing clean-header path must keep working.
+    name = ocr_dryrun.extract_fields(SAMPLE_OCR_TEXT, {})["registered_name"]["value"].upper()
+    assert "GOVERNANCE" in name
+    assert "REGISTRATION DATE" not in name
+
+
 if __name__ == "__main__":  # runnable without pytest: `python tests/test_ocr_dryrun.py`
     import sys
     import traceback

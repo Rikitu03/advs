@@ -466,6 +466,19 @@ _TIN_TOKEN = re.compile(r"\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{
 _DATE_TOKEN = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}")
 
 
+def _line_is_name_header(line: str) -> bool:
+    """True if a line is the 'TIN | NAME | REGISTRATION DATE' header row, matched
+    fuzzily so an OCR typo in the long caption (e.g. REGISTRAUION) still flags it.
+    NAME/DATE use a 1-typo budget (short, only checked for presence); the long
+    REGISTRATION caption gets the full 4."""
+    toks = line.split()
+    return (
+        any(_fuzzy_token_eq(t, "NAME", 1) for t in toks)
+        and any(_fuzzy_token_eq(t, "REGISTRATION", 4) for t in toks)
+        and any(_fuzzy_token_eq(t, "DATE", 1) for t in toks)
+    )
+
+
 def _extract_registered_name(lines: list[str]) -> str | None:
     """Pull the registrant name from the TIN | NAME | REGISTRATION DATE table.
 
@@ -475,8 +488,7 @@ def _extract_registered_name(lines: list[str]) -> str | None:
     flanking TIN and date (both format-distinctive) and the column divider.
     """
     for i, line in enumerate(lines):
-        upper = line.upper()
-        if "NAME" in upper and "REGISTRATION DATE" in upper:  # the caption row
+        if _line_is_name_header(line):  # the TIN|NAME|REGISTRATION DATE caption row
             parts: list[str] = []
             for cont in lines[i + 1:]:
                 if re.search(r"REGISTERED (ADDRESS|ACTIVIT)", cont.upper()):
