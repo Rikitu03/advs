@@ -533,6 +533,50 @@ def test_find_phrase_fuzzy_tolerates_caption_typo() -> None:
     assert ocr_dryrun._find_phrase(words, "REGISTRATION DATE") is None  # exact fails
 
 
+# --- positional registered_name (middle column of the header table) -----------
+
+def _name_header_words(registration_token: str = "REGISTRATION") -> list:
+    """Synthetic TIN | NAME | REGISTRATION DATE header with a two-row name value,
+    plus the REGISTERED ADDRESS caption that bounds the band below. Mirrors the
+    bir2.jpg layout; ``registration_token`` lets a test inject the OCR typo."""
+    return [
+        _word("TIN", 30, 100, 40), _word("NAME", 400, 100, 70),
+        _word(registration_token, 1000, 100, 180), _word("DATE", 1200, 100, 60),
+        _word("000-132-541-000", 100, 140, 250),
+        _word("MINING", 410, 140, 110), _word("AND", 530, 140, 60),
+        _word("PETROLEUM", 600, 140, 150), _word("SERVICES", 760, 140, 130),
+        _word("08/12/1998", 1040, 140, 160),
+        _word("CORPORATION", 410, 175, 200),
+        _word("REGISTERED", 400, 215, 200), _word("ADDRESS", 610, 215, 130),
+    ]
+
+
+def test_positional_registered_name_reads_middle_column() -> None:
+    name = ocr_dryrun._positional_fields(_WORDS)["registered_name"].upper()
+    assert "CENTER FOR LOCAL GOVERNANCE" in name
+    assert "PROFESSIONAL DEVT" in name
+    assert "009-028-463-000" not in name   # flanking TIN column excluded
+    assert "06/01/2015" not in name        # flanking date column excluded
+    assert "REGISTERED ADDRESS" not in name  # next section not pulled in
+
+
+def test_positional_registered_name_tolerates_header_typo() -> None:
+    name = ocr_dryrun._positional_registered_name(
+        _name_header_words(registration_token="REGISTRAUION")
+    ).upper()
+    assert "MINING AND PETROLEUM SERVICES" in name
+    assert "CORPORATION" in name
+    assert "000-132-541-000" not in name
+    assert "08/12/1998" not in name
+
+
+def test_positional_registered_name_none_without_header() -> None:
+    # No NAME/REGISTRATION DATE captions -> nothing to anchor on -> None.
+    assert ocr_dryrun._positional_registered_name(
+        [_word("PUROK", 100, 100, 80), _word("ORIENTAL", 190, 100, 120)]
+    ) is None
+
+
 if __name__ == "__main__":  # runnable without pytest: `python tests/test_ocr_dryrun.py`
     import sys
     import traceback

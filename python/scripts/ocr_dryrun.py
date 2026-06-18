@@ -590,6 +590,38 @@ def _join_clean(words: list[dict]) -> str | None:
     return re.sub(r"\s+", " ", " ".join(parts)).strip() or None
 
 
+def _positional_registered_name(words: list[dict]) -> str | None:
+    """Read the registrant name from the TIN | NAME | REGISTRATION DATE header
+    table using word boxes: the name sits in the middle column, below the NAME
+    caption and between the TIN (left) and REGISTRATION DATE (right) columns.
+
+    A plain text scan returns the neighbouring caption because the three columns
+    flatten into one line; reading the column band beneath the NAME caption keeps
+    only the name. Fuzzy caption matching tolerates an OCR typo in the long
+    REGISTRATION caption (e.g. REGISTRAUION). The band stops just above the
+    REGISTERED ADDRESS caption so the name's wrap line is kept but the next
+    section is not, and any TIN/date that bleeds into the band is stripped.
+    """
+    name_cap = _find_phrase(words, "NAME", max_typos=1)
+    date_cap = _find_phrase(words, "REGISTRATION DATE", max_typos=4)
+    if not (name_cap and date_cap):
+        return None
+    if abs(name_cap[1] - date_cap[1]) > 40:  # captions must share the header row
+        return None
+    x0 = name_cap[0] - 40                     # left of NAME caption, past TIN column
+    x1 = date_cap[0] - 30                     # right edge = start of the DATE column
+    header_bottom = max(name_cap[3], date_cap[3])
+    addr_cap = _find_phrase(words, "REGISTERED ADDRESS", max_typos=4)
+    y0 = header_bottom + 6
+    y1 = addr_cap[1] - 5 if addr_cap and addr_cap[1] > header_bottom else header_bottom + 80
+    value = _join_clean(_words_in_box(words, x0, x1, y0, y1))
+    if value:
+        value = _TIN_TOKEN.sub(" ", value)
+        value = _DATE_TOKEN.sub(" ", value)
+        value = re.sub(r"\s+", " ", value).strip(" :|-")
+    return value or None
+
+
 def _positional_fields(words: list[dict]) -> dict:
     """Recover the column-split body fields from word boxes. A key is present
     only when its caption was located."""
@@ -615,6 +647,8 @@ def _positional_fields(words: list[dict]) -> dict:
             _words_in_box(words, officer[0] - 30, officer[2] + 40,
                           officer[1] - 95, officer[1] - 5)
         )
+
+    out["registered_name"] = _positional_registered_name(words)
 
     return {k: v for k, v in out.items() if v}
 
