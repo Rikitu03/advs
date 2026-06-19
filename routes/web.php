@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\UserController;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -58,6 +59,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Notifications — officer alert feed (§7).
         Volt::route('admin/notifications', 'admin.notifications')->name('admin.notifications');
+
+        // User Management — admin-only user CRUD (§3 / §5).
+        // All routes are gated by `role:admin` AND the UserPolicy inside the
+        // controller so an admin cannot delete/demote themselves.
+        Route::middleware('role:admin')->prefix('admin/users')->name('admin.users.')->group(function () {
+            Route::get('/', [UserController::class, 'index'])->name('index');
+            Route::get('create', [UserController::class, 'create'])->name('create');
+            Route::post('/', [UserController::class, 'store'])->name('store');
+            Route::get('{user}/edit', [UserController::class, 'edit'])->name('edit');
+            Route::put('{user}', [UserController::class, 'update'])->name('update');
+            Route::patch('{user}/role', [UserController::class, 'updateRole'])->name('update-role');
+            Route::delete('{user}', [UserController::class, 'destroy'])->name('destroy');
+        });
     });
 });
 
