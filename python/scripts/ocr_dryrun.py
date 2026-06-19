@@ -186,6 +186,12 @@ TEMPLATE_KEYWORDS = [
     "REGISTERED", "TIN", "REVENUE REGION", "REVENUE DISTRICT",
 ]
 
+# Ordered annotation keywords - one per structured field - exposed for external
+# tooling (e.g. annotate_boxes.py, the bounding-box annotator that calibrates the
+# dataset generator's FIELD_BOXES). Derived from FIELD_SPECS so the two never
+# drift: a box drawn for keyword "tin" maps straight to the "tin" field.
+KEYWORD_LIST = [spec["key"] for spec in FIELD_SPECS]
+
 
 # ---------------------------------------------------------------------------
 # Dependency / engine resolution

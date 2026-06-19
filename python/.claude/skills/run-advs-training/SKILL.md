@@ -12,9 +12,10 @@ runs every script in `--dry-run` (validate the data layout, no heavy imports, no
 training) or `--smoke` (tiny 1-epoch CPU run) mode and reports PASS/FAIL.
 
 All paths below are relative to the **repo root** (`advs/`). The venv interpreter
-is written `python/env/bin/python.exe` — that is correct for the MSYS-built venv
-on this machine; a standard python.org Windows venv would be
-`python/env/Scripts/python.exe`, and on Linux/macOS `python/env/bin/python`.
+is `python/env/Scripts/python.exe` — this machine's venv is a **python.org CPython
+3.12** build (Windows `Scripts/` layout). On Linux/macOS it would be
+`python/env/bin/python`. (Earlier this venv was an MSYS2/UCRT64 build with a
+Unix-style `bin/` layout; it was rebuilt on python.org 3.12 so the ML stack installs.)
 
 ## Prerequisites
 
@@ -25,11 +26,14 @@ on this machine; a standard python.org Windows venv would be
 - **For `--smoke` / real training:** the full ML stack:
 
 ```bash
-python/env/bin/python.exe -m pip install -r python/requirements.txt
+python/env/Scripts/python.exe -m pip install -r python/requirements.txt
 ```
 
-> This install does NOT work on this machine — see Gotchas. `requirements.txt`
-> pins `tensorflow==2.16.*`, which needs a wheel-capable CPython 3.10–3.12.
+> This install works on the current python.org 3.12 venv. `requirements.txt` pins
+> `tensorflow==2.16.*`, which needs a wheel-capable CPython 3.10–3.12, and
+> `onnx>=1.16,<1.17` (1.17+ pulls an `ml_dtypes.float4` that conflicts with TF 2.16).
+> If Windows Defender locks a freshly-extracted file mid-install (`WinError 32`),
+> just re-run `pip install` — it resumes from the cached wheels.
 
 ## Build / scaffold the data
 
@@ -38,7 +42,7 @@ The four models read from `python/data/{training,validation}/<model>_data/`
 synthetic dataset for dry-run/smoke (pure stdlib, no deps):
 
 ```bash
-python/env/bin/python.exe python/.claude/skills/run-advs-training/make_fixtures.py
+python/env/Scripts/python.exe python/.claude/skills/run-advs-training/make_fixtures.py
 ```
 
 → `[make-fixtures] wrote synthetic train+val dataset under .../python/data`
@@ -48,7 +52,7 @@ python/env/bin/python.exe python/.claude/skills/run-advs-training/make_fixtures.
 Drive all four scripts. Default is `--dry-run` (safe anywhere, no training):
 
 ```bash
-python/env/bin/python.exe python/.claude/skills/run-advs-training/driver.py
+python/env/Scripts/python.exe python/.claude/skills/run-advs-training/driver.py
 ```
 
 Verified output ends with:
@@ -78,7 +82,7 @@ Each script is standalone and takes `--data-root` / `--models-out` / `--dry-run`
 / `--smoke`:
 
 ```bash
-python/env/bin/python.exe python/scripts/train_classifier.py --dry-run   # exit 0
+python/env/Scripts/python.exe python/scripts/train_classifier.py --dry-run   # exit 0
 ```
 
 | model | script | key outputs (→ `python/models/`) |
@@ -93,11 +97,11 @@ python/env/bin/python.exe python/scripts/train_classifier.py --dry-run   # exit 
 Drop `--dry-run`/`--smoke` and point `--data-root` at real data:
 
 ```bash
-python/env/bin/python.exe python/scripts/train_classifier.py --data-root python/data
+python/env/Scripts/python.exe python/scripts/train_classifier.py --data-root python/data
 ```
 
-Needs the ML stack installed and ideally a GPU (YOLO/Siamese fine-tuning are slow
-on CPU). Not runnable on this machine (see Gotchas).
+Needs the ML stack installed (it is — see Prerequisites) and ideally a GPU
+(YOLO/Siamese fine-tuning are slow on the CPU-only `torch` wheel here).
 
 ## Run (human path — notebooks)
 
@@ -109,30 +113,30 @@ defines the training functions; the last cells dry-run then train. Edit
 ## Test
 
 ```bash
-python/env/bin/python.exe -m py_compile python/scripts/*.py \
+python/env/Scripts/python.exe -m py_compile python/scripts/*.py \
   python/.claude/skills/run-advs-training/driver.py \
   python/.claude/skills/run-advs-training/make_fixtures.py   # → COMPILE OK
-python/env/bin/python.exe python/.claude/skills/run-advs-training/driver.py  # → 4/4 passed
+python/env/Scripts/python.exe python/.claude/skills/run-advs-training/driver.py  # → 4/4 passed
 ```
 
 ## Gotchas
 
-- **The venv is MSYS2/UCRT64 Python → `python/env/bin/`, not `Scripts/`.** `which
-  python` here resolves to `C:\msys64\ucrt64\bin\python`. `python -m venv` from it
-  produces a `bin/` layout (Unix-style) even on Windows. Use
-  `python/env/bin/python.exe`.
-- **`pip install -r requirements.txt` fails on this MSYS venv.** MSYS-native
-  CPython has a platform tag PyPI ships no binary wheels for, so pip tries to
-  build numpy/tensorflow/etc. from source; the source build of `cmake` then dies
-  with `SSL: CERTIFICATE_VERIFY_FAILED`. **To actually train, install a
-  python.org CPython 3.10–3.12** (TensorFlow 2.16 has no 3.13/3.14 wheels) and
-  rebuild the venv there. The only real CPythons on this box are 3.13 (Store) and
-  3.14 — both too new for TF.
+- **The venv is python.org CPython 3.12 → `python/env/Scripts/python.exe`, not
+  `bin/`.** Built with `py -3.12 -m venv python/env` (Python 3.12.10 lives at
+  `%LOCALAPPDATA%\Programs\Python\Python312`). Don't invoke the bare `python` on
+  PATH — `which python` resolves to MSYS2 (`C:\msys64\ucrt64\bin\python`), a
+  different interpreter with no ML stack. Always use `python/env/Scripts/python.exe`.
+- **TensorFlow 2.16 has no wheels for CPython 3.13/3.14.** The box also has 3.13
+  (Store) and 3.14 installed — both too new for TF, so the venv must stay on
+  3.10–3.12. Don't rebuild it on whatever `py` defaults to (3.14).
+- **`onnx` must stay `<1.17`.** onnx 1.17+ imports `ml_dtypes.float4_e2m1fn`, but
+  TF 2.16 pins `ml-dtypes~=0.3.1` (no `float4`) → `AttributeError` on `import onnx`.
+  `requirements.txt` pins `onnx>=1.16,<1.17` (resolves to 1.16.2).
 - **`--dry-run` and `make_fixtures.py` sidestep all of that** — they're stdlib-only
   by design, which is why the harness is verifiable without the ML stack.
 - **`make_fixtures.py` writes valid PNGs with `zlib`+`struct`, not Pillow** — so it
-  runs on the wheel-less venv. The images are random noise; they exercise the
-  pipeline plumbing, not model quality.
+  runs even on a bare/wheel-less venv. The images are random noise; they exercise
+  the pipeline plumbing, not model quality.
 - **This skill is git-tracked because it lives under `python/.claude/`.** The repo
   root `.gitignore` has `/.claude` (root-only), so a skill at the repo-root
   `.claude/skills/` would be ignored — `python/.claude/skills/` is not.
@@ -145,8 +149,12 @@ python/env/bin/python.exe python/.claude/skills/run-advs-training/driver.py  # �
   scaffold isn't populated. Run `make_fixtures.py` (above), or point `--data-root`
   at a real dataset laid out per `python/data/README.md`.
 - **`ModuleNotFoundError: No module named 'tensorflow'` (or `ultralytics`/`cv2`)** on
-  `--smoke`/full run — the ML stack isn't installed in this interpreter. Install
-  `requirements.txt` into a wheel-capable CPython 3.10–3.12 venv (see Gotchas).
-- **`ssl.SSLCertVerificationError` while pip builds a package from source** — you're
-  on the MSYS venv with no binary wheels. Switch interpreters; don't fight the
-  source build.
+  `--smoke`/full run — you're invoking the wrong interpreter (likely bare `python`
+  = MSYS, not the venv). Use `python/env/Scripts/python.exe`; if the stack really
+  is missing, `pip install -r requirements.txt` into it.
+- **`AttributeError: module 'ml_dtypes' has no attribute 'float4_e2m1fn'`** on
+  `import onnx` — onnx drifted to ≥1.17. Reinstall the pin: `pip install
+  "onnx>=1.16,<1.17"`.
+- **`OSError: [WinError 32] ... used by another process`** during `pip install` —
+  Windows Defender is scanning a freshly-extracted file. Re-run `pip install`; it
+  resumes from cached wheels and usually finishes within a couple of retries.

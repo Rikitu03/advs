@@ -19,5 +19,13 @@ opencv-python-headless>=4.9
 
 # --- detection ---
 ultralytics>=8.1             # pulls in torch/torchvision
-onnx>=1.15                   # YOLOv8 ONNX export
+onnx>=1.16,<1.17             # YOLOv8 ONNX export; 1.17+ needs ml_dtypes.float4, which conflicts with TF 2.16's ml-dtypes~=0.3.1
 onnxruntime>=1.17            # ONNX inference sanity checks
+
+# --- synthetic training-data generation (template-fill method; classifier) ---
+# Renderer = Pillow (already listed above). These add field data + scan realism.
+faker>=24.0                  # fake field values (names, TINs, addresses, dates); has an en_PH locale
+augraphy>=8.2                # realistic scan/print/photocopy degradation of rendered documents
+# NOTE: augraphy depends on opencv-python (GUI build); this repo pins
+# opencv-python-headless above. Both can coexist, but if imports clash, keep
+# headless and `pip uninstall opencv-python` after installing augraphy.
