@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
@@ -71,6 +72,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::put('{user}', [UserController::class, 'update'])->name('update');
             Route::patch('{user}/role', [UserController::class, 'updateRole'])->name('update-role');
             Route::delete('{user}', [UserController::class, 'destroy'])->name('destroy');
+        });
+
+        // System Settings — admin-only threshold / parameter tuning UI.
+        // All routes are gated by `role:admin` AND the SystemSettingPolicy
+        // inside the controller/Volt component.
+        Route::middleware('role:admin')->prefix('admin/settings')->name('admin.settings.')->group(function () {
+            Volt::route('/', 'admin.settings.index')->name('index');
+            Route::post('{key}/reset', [SystemSettingsController::class, 'reset'])->name('reset');
         });
     });
 });

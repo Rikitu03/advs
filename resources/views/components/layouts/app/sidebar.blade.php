@@ -34,7 +34,7 @@
                     @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))
                         <flux:navlist.group heading="Administration" class="mt-2 grid">
                             <flux:navlist.item icon="users" :href="route('admin.users.index')" :current="request()->routeIs('admin.users.*')" wire:navigate>User Management</flux:navlist.item>
-                            <x-nav-soon icon="cog-6-tooth" label="System Settings" />
+                            <flux:navlist.item icon="cog-6-tooth" :href="route('admin.settings.index')" :current="request()->routeIs('admin.settings.*')" wire:navigate>System Settings</flux:navlist.item>
                             <x-nav-soon icon="cpu-chip" label="ML Models" />
                             <x-nav-soon icon="shield-check" label="Audit Trail" />
                         </flux:navlist.group>
