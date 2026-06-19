@@ -30,9 +30,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     })->name('dashboard');
 
     // Vendor portal
-    Route::view('vendor/dashboard', 'vendor.dashboard')
-        ->middleware('role:vendor')
-        ->name('vendor.dashboard');
+    Route::middleware('role:vendor')->group(function () {
+        Volt::route('vendor/dashboard', 'vendor.dashboard')->name('vendor.dashboard');
+        Volt::route('vendor/submit', 'vendor.submit')->name('vendor.submit');
+        Volt::route('vendor/submissions', 'vendor.submissions')->name('vendor.submissions');
+        Volt::route('vendor/notifications', 'vendor.notifications')->name('vendor.notifications');
+        Volt::route('vendor/profile', 'vendor.profile')->name('vendor.profile');
+    });
 
     // Compliance officer / admin dashboard + review workflow.
     // All pages are full-page Volt components backed by the session-scoped

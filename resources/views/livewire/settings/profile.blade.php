@@ -69,7 +69,7 @@ new class extends Component {
     }
 }; ?>
 
-<section class="w-full">
+<section class="mx-auto w-full max-w-5xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
     @include('partials.settings-heading')
 
     <x-settings.layout heading="Profile" subheading="Update your name and email address">
