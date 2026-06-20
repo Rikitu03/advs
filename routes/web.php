@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
 use App\Models\User;
@@ -80,6 +81,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::middleware('role:admin')->prefix('admin/settings')->name('admin.settings.')->group(function () {
             Volt::route('/', 'admin.settings.index')->name('index');
             Route::post('{key}/reset', [SystemSettingsController::class, 'reset'])->name('reset');
+        });
+
+        // Audit Trail — admin-only viewer for the append-only audit log.
+        // The Volt page owns the index, filtering, and search; the
+        // controller serves the detail drill-down and CSV export.
+        Route::middleware('role:admin')->prefix('admin/audit')->name('admin.audit.')->group(function () {
+            Volt::route('/', 'admin.audit.index')->name('index');
+            Route::get('export', [AuditLogController::class, 'export'])->name('export');
+            Route::get('{audit}', [AuditLogController::class, 'show'])->name('show');
         });
     });
 });

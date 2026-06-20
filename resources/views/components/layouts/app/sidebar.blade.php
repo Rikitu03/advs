@@ -36,7 +36,7 @@
                             <flux:navlist.item icon="users" :href="route('admin.users.index')" :current="request()->routeIs('admin.users.*')" wire:navigate>User Management</flux:navlist.item>
                             <flux:navlist.item icon="cog-6-tooth" :href="route('admin.settings.index')" :current="request()->routeIs('admin.settings.*')" wire:navigate>System Settings</flux:navlist.item>
                             <x-nav-soon icon="cpu-chip" label="ML Models" />
-                            <x-nav-soon icon="shield-check" label="Audit Trail" />
+                            <flux:navlist.item icon="shield-check" :href="route('admin.audit.index')" :current="request()->routeIs('admin.audit.*')" wire:navigate>Audit Trail</flux:navlist.item>
                         </flux:navlist.group>
                     @endif
                 @endif
