@@ -25,6 +25,7 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+/venv
 
 # ADVS Python ML training
 /python/env
