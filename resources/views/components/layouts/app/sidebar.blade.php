@@ -1,25 +1,38 @@
+@php($user = auth()->user())
+@php($isVendor = $user?->hasRole(\App\Models\User::ROLE_VENDOR) ?? false)
+
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" @class(['dark' => ! $isVendor])>
     <head>
         @include('partials.head')
+
+        @if ($isVendor)
+            <script>
+                window.localStorage.setItem('flux.appearance', 'light')
+                document.documentElement.classList.remove('dark')
+            </script>
+        @endif
     </head>
-    <body class="min-h-screen bg-white dark:bg-cu-bg">
-        <flux:sidebar sticky stashable class="border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
+    <body class="min-h-screen bg-white text-zinc-950 dark:bg-cu-bg dark:text-cu-text">
+        <flux:sidebar sticky stashable @class([
+            'border-r',
+            'border-zinc-200 bg-white text-zinc-950' => $isVendor,
+            'border-white/10 bg-cu-surface text-cu-text' => ! $isVendor,
+        ])>
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
             <a href="{{ route('dashboard') }}" class="mr-5 flex items-center space-x-2" wire:navigate>
                 <x-app-logo class="size-8" href="#"></x-app-logo>
             </a>
 
-            @php($user = auth()->user())
-
             <flux:navlist variant="outline">
                 @if ($user->hasRole(\App\Models\User::ROLE_VENDOR))
                     <flux:navlist.group heading="Vendor" class="grid">
                         <flux:navlist.item icon="home" :href="route('vendor.dashboard')" :current="request()->routeIs('vendor.dashboard')" wire:navigate>Dashboard</flux:navlist.item>
-                        <x-nav-soon icon="arrow-up-tray" label="Submit Documents" />
-                        <x-nav-soon icon="document-text" label="My Submissions" />
-                        <x-nav-soon icon="bell" label="Notifications" />
+                        <flux:navlist.item icon="arrow-up-tray" :href="route('vendor.submit')" :current="request()->routeIs('vendor.submit')" wire:navigate>Submit Documents</flux:navlist.item>
+                        <flux:navlist.item icon="document-text" :href="route('vendor.submissions')" :current="request()->routeIs('vendor.submissions')" wire:navigate>My Submissions</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('vendor.notifications')" :current="request()->routeIs('vendor.notifications')" wire:navigate>Notifications</flux:navlist.item>
+                        <flux:navlist.item icon="user-circle" :href="route('vendor.profile')" :current="request()->routeIs('vendor.profile')" wire:navigate>Profile</flux:navlist.item>
                     </flux:navlist.group>
                 @else
                     <flux:navlist.group heading="Review" class="grid">
