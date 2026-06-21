@@ -4,6 +4,7 @@ namespace Tests\Feature\Auth;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class RegistrationTest extends TestCase
@@ -17,6 +18,8 @@ class RegistrationTest extends TestCase
 
     public function test_new_users_can_register_as_vendors(): void
     {
+        Notification::fake();
+
         $response = $this->post('/register', [
             'name' => 'Test User',
             'email' => 'test@example.com',
@@ -34,6 +37,10 @@ class RegistrationTest extends TestCase
             'role' => User::ROLE_VENDOR,
             'signature_enrolled_at' => null,
         ]);
+
+        // Email verification is the final step: the link must not be sent at
+        // registration, only after signature enrollment succeeds.
+        Notification::assertNothingSent();
     }
 
     public function test_registration_requires_matching_password_confirmation(): void

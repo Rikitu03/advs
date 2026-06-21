@@ -3,11 +3,13 @@
 namespace App\Models;
 
 use Database\Factories\UserFactory;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -57,6 +59,40 @@ class User extends Authenticatable implements MustVerifyEmail
             'password' => 'hashed',
             'signature_enrolled_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Send the email verification notification, degrading gracefully when the
+     * mail transport (SMTP) is unavailable.
+     *
+     * Email verification is the FINAL step of vendor registration: the link must
+     * not be sent until the vendor has enrolled a reference signature. This guard
+     * suppresses the automatic send fired by the Registered event at account
+     * creation — the signature-enrollment step triggers this method explicitly
+     * once it succeeds (see resources/views/livewire/auth/signature-enroll).
+     *
+     * When the mail is sent it goes out synchronously, so a transport failure
+     * (e.g. Gmail rejecting bad credentials with a 535) would otherwise crash the
+     * request with a 500. Instead we log it and flash a toast so the user keeps
+     * their account and can retry via "Resend".
+     */
+    public function sendEmailVerificationNotification(): void
+    {
+        if ($this->hasRole(self::ROLE_VENDOR) && ! $this->hasEnrolledSignature()) {
+            return;
+        }
+
+        try {
+            $this->notify(new VerifyEmail);
+        } catch (TransportExceptionInterface $e) {
+            report($e);
+
+            session()->put('toast', [
+                'variant' => 'danger',
+                'heading' => __('Verification email not sent'),
+                'text' => __('Your account was created, but the verification email could not be sent right now. Please try again shortly using the "Resend verification email" button.'),
+            ]);
+        }
     }
 
     /**

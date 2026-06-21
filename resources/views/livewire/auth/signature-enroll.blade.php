@@ -110,6 +110,12 @@ new #[Layout('components.layouts.auth')] class extends Component {
             return;
         }
 
+        // Signature enrolled → now (and only now) send the email-verification
+        // link. The user carries the freshly set signature_enrolled_at, so
+        // User::sendEmailVerificationNotification() passes its enrollment guard
+        // and sends synchronously (degrading gracefully on SMTP failure).
+        $user->sendEmailVerificationNotification();
+
         session()->flash('status', 'signature-enrolled');
 
         $this->redirectRoute('verification.notice', navigate: true);

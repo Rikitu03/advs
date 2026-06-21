@@ -26,3 +26,17 @@ yarn-error.log
 /.vscode
 /.zed
 /venv
+
+# ADVS Python ML training
+/python/env
+/python/models/*
+!/python/models/.gitkeep
+/python/.smoke_data
+/python/**/__pycache__
+# generated/real training data — keep the .gitkeep scaffold only
+/python/data/training/**
+/python/data/validation/**
+!/python/data/training/
+!/python/data/validation/
+!/python/data/**/
+!/python/data/**/.gitkeep
