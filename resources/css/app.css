@@ -34,11 +34,14 @@
     --color-cu-blue: #49ccf9;
     --color-cu-yellow: #ffc800;
 
-    /* ClickUp dark theme surfaces. */
-    --color-cu-bg: #0d0d0f;
-    --color-cu-surface: #1a1a2e;
-    --color-cu-text: #ffffff;
-    --color-cu-muted: #a0a0b0;
+    /* ClickUp semantic surfaces — light defaults; dark overrides live in
+       `@layer theme { .dark { … } }` below so every `cu-*` utility flips
+       with the `.dark` class set by window.advsTheme. */
+    --color-cu-bg: #f8f8fb;
+    --color-cu-surface: #ffffff;
+    --color-cu-text: #18181b;
+    --color-cu-muted: #6b7280;
+    --color-cu-border: #e5e7eb;
 }
 
 /* ClickUp signature gradient (color_pallete.md) as reusable utilities. */
@@ -58,6 +61,13 @@
         --color-accent: var(--color-white);
         --color-accent-content: var(--color-white);
         --color-accent-foreground: var(--color-neutral-800);
+
+        /* Dark ClickUp surfaces (original values). */
+        --color-cu-bg: #0d0d0f;
+        --color-cu-surface: #1a1a2e;
+        --color-cu-text: #ffffff;
+        --color-cu-muted: #a0a0b0;
+        --color-cu-border: rgb(255 255 255 / 0.08);
     }
 }
 
