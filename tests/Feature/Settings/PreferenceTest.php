@@ -50,4 +50,15 @@ class PreferenceTest extends TestCase
             ->assertSee('advsTheme.set', false)
             ->assertDontSee('$flux.appearance', false);
     }
+
+    public function test_appearance_page_is_wired_to_the_cookie_runtime(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->get(route('settings.appearance'))
+            ->assertOk()
+            ->assertSee('advsTheme.set', false)
+            ->assertDontSee('$flux.appearance', false);
+    }
 }
