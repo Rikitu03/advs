@@ -10,7 +10,6 @@
 <script>
     window.advsTheme = (function () {
         var KEY = 'theme';
-        var MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
         var VALID = ['light', 'dark', 'system'];
 
         function read() {
@@ -32,6 +31,8 @@
 
         function set(value) {
             if (VALID.indexOf(value) === -1) { value = 'system'; }
+            // 7-day expiry (604800 = 60 * 60 * 24 * 7). Literal so the rendered
+            // <head> source carries `max-age=604800` (Blade does not evaluate JS).
             document.cookie = KEY + '=' + encodeURIComponent(value) + ';path=/;max-age=604800;SameSite=Lax';
             apply(value);
         }
