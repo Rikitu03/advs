@@ -47,7 +47,7 @@ new class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-svh bg-zinc-50 p-6 text-zinc-950 lg:-m-8 lg:p-8">
+<x-page>
     <div class="mx-auto flex w-full max-w-4xl flex-col gap-6">
         <div class="cu-animate-in">
             <div class="flex flex-wrap items-center justify-between gap-3">
@@ -118,4 +118,4 @@ new class extends Component {
             </div>
         </div>
     </div>
-</div>
+</x-page>

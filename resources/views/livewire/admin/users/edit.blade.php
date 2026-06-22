@@ -35,7 +35,7 @@ new #[Layout('components.layouts.app')] class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6">
 
         <div class="cu-animate-in flex flex-col gap-2">
@@ -182,4 +182,4 @@ new #[Layout('components.layouts.app')] class extends Component {
             </form>
         </div>
     </div>
-</div>
+</x-page>

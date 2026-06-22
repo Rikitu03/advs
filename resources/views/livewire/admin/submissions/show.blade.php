@@ -72,7 +72,7 @@ new class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     @php
         $s = $record;
         $c = $s['components'];
@@ -372,4 +372,4 @@ new class extends Component {
             </div>
         </div>
     @endif
-</div>
+</x-page>

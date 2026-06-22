@@ -64,7 +64,7 @@ new class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     <div class="mx-auto flex w-full max-w-7xl flex-col gap-6">
 
         {{-- Header --}}
@@ -182,4 +182,4 @@ new class extends Component {
             @endif
         </div>
     </div>
-</div>
+</x-page>

@@ -23,7 +23,7 @@ new class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     @php
         $v = $record;
         $statusColor = DemoData::vendorStatusColor($v['status']);
@@ -199,4 +199,4 @@ new class extends Component {
             @endif
         </div>
     </div>
-</div>
+</x-page>
