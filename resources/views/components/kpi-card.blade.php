@@ -17,11 +17,11 @@
     $a = $accents[$accent] ?? $accents['purple'];
 @endphp
 
-<div {{ $attributes->merge(['class' => 'relative overflow-hidden rounded-2xl border border-white/5 bg-cu-surface p-5 transition hover:border-white/10']) }}>
+<div {{ $attributes->merge(['class' => 'relative overflow-hidden rounded-2xl border border-cu-border bg-cu-surface p-5 transition hover:border-cu-border']) }}>
     <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
             <p class="truncate text-sm font-medium text-cu-muted">{{ $label }}</p>
-            <p class="mt-2 text-3xl font-semibold tracking-tight text-white">{{ $value }}</p>
+            <p class="mt-2 text-3xl font-semibold tracking-tight text-cu-text">{{ $value }}</p>
             @if ($hint)
                 <p class="mt-1 text-xs text-cu-muted">{{ $hint }}</p>
             @endif
