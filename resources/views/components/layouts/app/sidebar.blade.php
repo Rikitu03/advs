@@ -1,24 +1,12 @@
 @php($user = auth()->user())
-@php($isVendor = $user?->hasRole(\App\Models\User::ROLE_VENDOR) ?? false)
 
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" @class(['dark' => ! $isVendor])>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     <head>
         @include('partials.head')
-
-        @if ($isVendor)
-            <script>
-                window.localStorage.setItem('flux.appearance', 'light')
-                document.documentElement.classList.remove('dark')
-            </script>
-        @endif
     </head>
     <body class="min-h-screen bg-white text-zinc-950 dark:bg-cu-bg dark:text-cu-text">
-        <flux:sidebar sticky stashable @class([
-            'border-r',
-            'border-zinc-200 bg-white text-zinc-950' => $isVendor,
-            'border-white/10 bg-cu-surface text-cu-text' => ! $isVendor,
-        ])>
+        <flux:sidebar sticky stashable class="border-r border-zinc-200 bg-white text-zinc-950 dark:border-white/10 dark:bg-cu-surface dark:text-cu-text">
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
             <a href="{{ route('dashboard') }}" class="mr-5 flex items-center space-x-2" wire:navigate>
