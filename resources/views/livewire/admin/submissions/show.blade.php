@@ -119,17 +119,17 @@ new class extends Component {
             <div class="flex flex-wrap items-start justify-between gap-4">
                 <div class="flex flex-col gap-1">
                     <div class="flex items-center gap-3">
-                        <h1 class="text-2xl font-semibold tracking-tight text-white">{{ $s['company'] }}</h1>
+                        <h1 class="text-2xl font-semibold tracking-tight text-cu-text">{{ $s['company'] }}</h1>
                         @if ($decision === 'approved')
-                            <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                            <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                                 <flux:icon icon="check-circle" variant="micro" class="size-3.5" /> Approved
                             </span>
                         @elseif ($decision === 'rejected')
-                            <span class="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-300">
+                            <span class="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300">
                                 <flux:icon icon="x-circle" variant="micro" class="size-3.5" /> Rejected
                             </span>
                         @else
-                            <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                            <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
                                 <span class="size-1.5 rounded-full bg-amber-400"></span> Pending review
                             </span>
                         @endif
@@ -140,7 +140,7 @@ new class extends Component {
                     </p>
                 </div>
                 <a href="{{ route('admin.pending') }}" wire:navigate
-                   class="inline-flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-2 text-sm font-medium text-cu-muted transition hover:border-white/20 hover:text-white">
+                   class="inline-flex items-center gap-1.5 rounded-xl border border-cu-border px-3 py-2 text-sm font-medium text-cu-muted transition hover:border-cu-border hover:text-cu-text">
                     <flux:icon icon="arrow-left" class="size-4" />
                     Back to queue
                 </a>
@@ -149,18 +149,18 @@ new class extends Component {
 
         {{-- Risk summary --}}
         <div class="grid gap-6 lg:grid-cols-3">
-            <div class="cu-animate-in flex items-center gap-6 rounded-2xl border border-white/5 bg-cu-surface p-6" style="animation-delay: 60ms">
+            <div class="cu-animate-in flex items-center gap-6 rounded-2xl border border-cu-border bg-cu-surface p-6" style="animation-delay: 60ms">
                 <x-risk-gauge :score="$s['risk_score']" :level="$s['risk_level']" />
                 <div class="flex flex-col gap-2">
                     <p class="text-sm font-medium text-cu-muted">Composite risk score</p>
                     <x-risk-badge :level="$s['risk_level']" class="w-fit !px-3 !py-1.5 !text-sm" />
-                    <p class="mt-1 max-w-xs text-sm text-zinc-300">{{ $s['risk_driver'] }}</p>
+                    <p class="mt-1 max-w-xs text-sm text-cu-muted">{{ $s['risk_driver'] }}</p>
                 </div>
             </div>
 
             {{-- Decision panel --}}
-            <div class="cu-animate-in rounded-2xl border border-white/5 bg-cu-surface p-6 lg:col-span-2" style="animation-delay: 120ms">
-                <h2 class="text-base font-semibold text-white">Officer decision</h2>
+            <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-6 lg:col-span-2" style="animation-delay: 120ms">
+                <h2 class="text-base font-semibold text-cu-text">Officer decision</h2>
                 <p class="mt-1 text-sm text-cu-muted">
                     The pipeline only raises flags and a risk score — a compliance officer makes the final call.
                 </p>
@@ -177,19 +177,19 @@ new class extends Component {
                         </button>
                     </div>
                 @else
-                    <div class="cu-animate-in mt-4 flex items-start gap-3 rounded-xl border border-white/10 bg-cu-bg px-4 py-3">
+                    <div class="cu-animate-in mt-4 flex items-start gap-3 rounded-xl border border-cu-border bg-cu-bg px-4 py-3">
                         @if ($decision === 'approved')
                             <flux:icon icon="check-circle" class="mt-0.5 size-5 shrink-0 text-emerald-400" />
                         @else
                             <flux:icon icon="x-circle" class="mt-0.5 size-5 shrink-0 text-rose-400" />
                         @endif
-                        <div class="min-w-0 flex-1 text-sm text-zinc-200">
+                        <div class="min-w-0 flex-1 text-sm text-cu-text">
                             <p>
-                                <span class="font-semibold text-white">{{ $decision === 'approved' ? 'Approved' : 'Rejected' }}</span>
+                                <span class="font-semibold text-cu-text">{{ $decision === 'approved' ? 'Approved' : 'Rejected' }}</span>
                                 by {{ $s['reviewed_by'] }} · {{ $s['reviewed_at']->diffForHumans() }}
                             </p>
                             @if ($s['review_comments'])
-                                <p class="mt-1 text-cu-muted">“{{ $s['review_comments'] }}”</p>
+                                <p class="mt-1 text-cu-muted">"{{ $s['review_comments'] }}"</p>
                             @endif
                         </div>
                         <button type="button" wire:click="undoDecision" wire:loading.attr="disabled" wire:target="undoDecision"
@@ -203,16 +203,16 @@ new class extends Component {
         </div>
 
         {{-- Component breakdown --}}
-        <div class="cu-animate-in overflow-hidden rounded-2xl border border-white/5 bg-cu-surface" style="animation-delay: 180ms">
-            <div class="border-b border-white/5 px-5 py-4">
-                <h2 class="text-base font-semibold text-white">Risk score breakdown</h2>
+        <div class="cu-animate-in overflow-hidden rounded-2xl border border-cu-border bg-cu-surface" style="animation-delay: 180ms">
+            <div class="border-b border-cu-border px-5 py-4">
+                <h2 class="text-base font-semibold text-cu-text">Risk score breakdown</h2>
                 <p class="text-xs text-cu-muted">Each component's contribution. Expand a forensic check to compare reference vs. query.</p>
             </div>
 
             <div class="overflow-x-auto">
                 <table class="min-w-full text-left text-sm">
                     <thead>
-                        <tr class="border-b border-white/5 text-xs uppercase tracking-wide text-cu-muted">
+                        <tr class="border-b border-cu-border text-xs uppercase tracking-wide text-cu-muted">
                             <th class="px-5 py-3 font-medium">Component</th>
                             <th class="px-5 py-3 font-medium">Score</th>
                             <th class="px-5 py-3 font-medium">Threshold</th>
@@ -220,17 +220,17 @@ new class extends Component {
                             <th class="px-5 py-3 font-medium">Detail</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-white/5">
+                    <tbody class="divide-y divide-cu-border">
                         @foreach ($breakdown as $row)
                             <tr
-                                @if ($row['expandable']) x-on:click="expanded.{{ $row['key'] }} = !expanded.{{ $row['key'] }}" class="cursor-pointer transition hover:bg-white/[0.03]" @endif
+                                @if ($row['expandable']) x-on:click="expanded.{{ $row['key'] }} = !expanded.{{ $row['key'] }}" class="cursor-pointer transition hover:bg-black/[0.03] dark:hover:bg-white/[0.03]" @endif
                             >
                                 <td class="px-5 py-4">
                                     <div class="flex items-center gap-3">
-                                        <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/5 text-cu-muted">
+                                        <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-black/5 text-cu-muted dark:bg-white/5">
                                             <flux:icon :icon="$row['icon']" class="size-4" />
                                         </span>
-                                        <span class="font-medium text-white">{{ $row['label'] }}</span>
+                                        <span class="font-medium text-cu-text">{{ $row['label'] }}</span>
                                         @if ($row['expandable'])
                                             <span class="text-cu-muted transition" :class="expanded.{{ $row['key'] }} && 'rotate-180'">
                                                 <flux:icon icon="chevron-down" class="size-4" />
@@ -238,7 +238,7 @@ new class extends Component {
                                         @endif
                                     </div>
                                 </td>
-                                <td class="px-5 py-4 font-semibold text-white">{{ $row['score'] }}</td>
+                                <td class="px-5 py-4 font-semibold text-cu-text">{{ $row['score'] }}</td>
                                 <td class="px-5 py-4 text-cu-muted">{{ $row['threshold'] }}</td>
                                 <td class="px-5 py-4">
                                     <x-pass-fail :pass="$row['pass']" :neutral-label="$row['expandable'] && ! $row['pass'] ? 'Fail' : null" />
@@ -263,11 +263,11 @@ new class extends Component {
                         @endforeach
 
                         {{-- Composite total --}}
-                        <tr class="bg-white/[0.02]">
+                        <tr class="bg-black/[0.02] dark:bg-white/[0.02]">
                             <td class="px-5 py-4">
-                                <span class="font-semibold text-white">Composite Risk Score</span>
+                                <span class="font-semibold text-cu-text">Composite Risk Score</span>
                             </td>
-                            <td class="px-5 py-4 font-bold text-white">{{ $s['risk_score'] }} / 100</td>
+                            <td class="px-5 py-4 font-bold text-cu-text">{{ $s['risk_score'] }} / 100</td>
                             <td class="px-5 py-4 text-cu-muted">—</td>
                             <td class="px-5 py-4"><x-risk-badge :level="$s['risk_level']" /></td>
                             <td class="px-5 py-4 text-cu-muted">{{ $s['risk_driver'] }}</td>
@@ -280,34 +280,34 @@ new class extends Component {
         {{-- Flags + documents + OCR --}}
         <div class="grid gap-6 lg:grid-cols-3">
             {{-- Flags --}}
-            <div class="cu-animate-in rounded-2xl border border-white/5 bg-cu-surface p-5" style="animation-delay: 240ms">
-                <h2 class="text-base font-semibold text-white">Flags raised</h2>
+            <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 240ms">
+                <h2 class="text-base font-semibold text-cu-text">Flags raised</h2>
                 @if (count($s['flags']) > 0)
                     <ul class="mt-3 flex flex-col gap-2">
                         @foreach ($s['flags'] as $flag)
                             <li class="flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 py-2.5">
                                 <flux:icon icon="flag" class="mt-0.5 size-4 shrink-0 text-rose-400" />
-                                <span class="text-sm text-zinc-200">{{ $flag }}</span>
+                                <span class="text-sm text-cu-text">{{ $flag }}</span>
                             </li>
                         @endforeach
                     </ul>
                 @else
                     <div class="mt-3 flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
                         <flux:icon icon="check-circle" class="size-4 shrink-0 text-emerald-400" />
-                        <span class="text-sm text-zinc-200">No flags raised — all components passed.</span>
+                        <span class="text-sm text-cu-text">No flags raised — all components passed.</span>
                     </div>
                 @endif
             </div>
 
             {{-- Documents --}}
-            <div class="cu-animate-in rounded-2xl border border-white/5 bg-cu-surface p-5" style="animation-delay: 300ms">
-                <h2 class="text-base font-semibold text-white">Documents ({{ count($s['documents']) }})</h2>
+            <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 300ms">
+                <h2 class="text-base font-semibold text-cu-text">Documents ({{ count($s['documents']) }})</h2>
                 <ul class="mt-3 flex flex-col gap-2">
                     @foreach ($s['documents'] as $doc)
-                        <li class="flex items-center gap-3 rounded-xl border border-white/5 bg-cu-bg px-3 py-2.5">
+                        <li class="flex items-center gap-3 rounded-xl border border-cu-border bg-cu-bg px-3 py-2.5">
                             <flux:icon icon="document-text" class="size-5 shrink-0 text-cu-blue" />
                             <div class="min-w-0 flex-1">
-                                <p class="truncate text-sm font-medium text-white">{{ $doc['name'] }}</p>
+                                <p class="truncate text-sm font-medium text-cu-text">{{ $doc['name'] }}</p>
                                 <p class="text-xs text-cu-muted">{{ $doc['type'] }} · {{ $doc['pages'] }} {{ \Illuminate\Support\Str::plural('page', $doc['pages']) }} · {{ $doc['size'] }}</p>
                             </div>
                             <flux:icon icon="document-arrow-down" class="size-4 shrink-0 text-cu-muted" />
@@ -317,12 +317,12 @@ new class extends Component {
             </div>
 
             {{-- OCR text --}}
-            <div class="cu-animate-in rounded-2xl border border-white/5 bg-cu-surface p-5" style="animation-delay: 360ms">
+            <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 360ms">
                 <div class="flex items-center justify-between">
-                    <h2 class="text-base font-semibold text-white">OCR extracted text</h2>
+                    <h2 class="text-base font-semibold text-cu-text">OCR extracted text</h2>
                     <flux:badge size="sm" color="zinc">PyTesseract</flux:badge>
                 </div>
-                <pre class="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl border border-white/5 bg-cu-bg p-3 font-mono text-xs leading-relaxed text-zinc-300">{{ $s['ocr_excerpt'] }}</pre>
+                <pre class="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl border border-cu-border bg-cu-bg p-3 font-mono text-xs leading-relaxed text-cu-muted">{{ $s['ocr_excerpt'] }}</pre>
             </div>
         </div>
 
@@ -336,30 +336,30 @@ new class extends Component {
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4" x-data x-on:keydown.escape.window="$wire.cancelDecision()">
             <div wire:click="cancelDecision" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
 
-            <div class="cu-animate-in relative w-full max-w-md rounded-2xl border border-white/10 bg-cu-surface p-6 text-cu-text shadow-2xl" role="dialog" aria-modal="true">
+            <div class="cu-animate-in relative w-full max-w-md rounded-2xl border border-cu-border bg-cu-surface p-6 text-cu-text shadow-2xl" role="dialog" aria-modal="true">
                 <div class="flex items-start gap-3">
-                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl {{ $confirming === 'approve' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300' }}">
+                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl {{ $confirming === 'approve' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-rose-500/15 text-rose-700 dark:text-rose-300' }}">
                         <flux:icon :icon="$confirming === 'approve' ? 'check-circle' : 'x-circle'" class="size-5" />
                     </span>
                     <div>
-                        <h3 class="text-lg font-semibold text-white">{{ $confirming === 'approve' ? 'Approve accreditation' : 'Reject submission' }}</h3>
+                        <h3 class="text-lg font-semibold text-cu-text">{{ $confirming === 'approve' ? 'Approve accreditation' : 'Reject submission' }}</h3>
                         <p class="mt-1 text-sm text-cu-muted">{{ $s['company'] }} · {{ $s['ref'] }}</p>
                     </div>
                 </div>
 
-                <label class="mt-4 block text-sm font-medium text-zinc-200">
+                <label class="mt-4 block text-sm font-medium text-cu-text">
                     Comments <span class="text-cu-muted">(optional)</span>
                     <textarea
                         wire:model="comments"
                         rows="3"
                         placeholder="Add a note for the audit trail…"
-                        class="mt-1.5 w-full rounded-xl border border-white/10 bg-cu-bg p-3 text-sm text-white placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                        class="mt-1.5 w-full rounded-xl border border-cu-border bg-cu-bg p-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
                     ></textarea>
                 </label>
 
                 <div class="mt-5 flex justify-end gap-3">
                     <button type="button" wire:click="cancelDecision"
-                            class="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-medium text-cu-muted transition hover:text-white">
+                            class="rounded-xl border border-cu-border px-4 py-2.5 text-sm font-medium text-cu-muted transition hover:text-cu-text">
                         Cancel
                     </button>
                     <button type="button" wire:click="submitDecision" wire:loading.attr="disabled" wire:target="submitDecision"
