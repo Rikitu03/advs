@@ -203,14 +203,14 @@ class extends Component
             </flux:breadcrumbs>
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-semibold tracking-tight text-white">System Settings</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight text-cu-text">System Settings</h1>
                     <p class="text-sm text-cu-muted">
                         Tune validation thresholds, file constraints, and risk-score weights. Changes apply immediately to new submissions.
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button type="button" wire:click="reload" wire:loading.attr="disabled" wire:target="reload"
-                            class="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-cu-surface px-3 py-2 text-sm font-medium text-cu-muted transition hover:border-white/20 hover:text-white">
+                            class="inline-flex items-center gap-1.5 rounded-xl border border-cu-border bg-cu-surface px-3 py-2 text-sm font-medium text-cu-muted transition hover:border-cu-border hover:text-cu-text">
                         <flux:icon.loading wire:loading wire:target="reload" variant="micro" class="size-4" />
                         <flux:icon icon="arrow-path" wire:loading.remove wire:target="reload" class="size-4" />
                         Reload
@@ -228,14 +228,14 @@ class extends Component
         {{-- Flash messages --}}
         @if (session('status'))
             <div x-data="{ show: true }" x-show="show" x-transition
-                 class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200"
+                 class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-200"
                  role="status">
                 {{ session('status') }}
             </div>
         @endif
 
         @error('general')
-            <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200" role="alert">
+            <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200" role="alert">
                 {{ $message }}
             </div>
         @enderror
@@ -246,21 +246,21 @@ class extends Component
             @php($groupIndex = 0)
             @foreach ($this->grouped as $category => $fields)
                 @php($groupIndex++)
-                <section class="cu-animate-in overflow-hidden rounded-2xl border border-white/5 bg-cu-surface"
+                <section class="cu-animate-in overflow-hidden rounded-2xl border border-cu-border bg-cu-surface"
                          style="animation-delay: {{ $groupIndex * 60 }}ms">
-                    <header class="flex items-center justify-between gap-3 border-b border-white/5 px-5 py-4">
+                    <header class="flex items-center justify-between gap-3 border-b border-cu-border px-5 py-4">
                         <div class="flex items-center gap-3">
                             <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-cu-purple/15 text-cu-purple">
                                 <flux:icon icon="adjustments-horizontal" class="size-5" />
                             </span>
                             <div>
-                                <h2 class="text-base font-semibold text-white">{{ $category }}</h2>
+                                <h2 class="text-base font-semibold text-cu-text">{{ $category }}</h2>
                                 <p class="text-xs text-cu-muted">{{ count($fields) }} setting{{ count($fields) === 1 ? '' : 's' }}</p>
                             </div>
                         </div>
                     </header>
 
-                    <div class="divide-y divide-white/5">
+                    <div class="divide-y divide-cu-border">
                         @foreach ($fields as $field)
                             @php($key = $field['key'])
                             @php($audit = $this->audit[$key] ?? null)
@@ -268,7 +268,7 @@ class extends Component
                             @php($errorMessage = $errors->first($key) ?: $errors->first("values.$key"))
                             <div class="grid gap-4 px-5 py-4 lg:grid-cols-[1fr_minmax(0,420px)] lg:items-start">
                                 <div class="min-w-0">
-                                    <label for="setting-{{ $key }}" class="flex flex-wrap items-center gap-2 text-sm font-medium text-white">
+                                    <label for="setting-{{ $key }}" class="flex flex-wrap items-center gap-2 text-sm font-medium text-cu-text">
                                         <span>{{ $field['label'] }}</span>
                                         @if (! empty($field['default']) && (string) $this->values[$key] !== SystemSetting::stringify($field['default']))
                                             <flux:badge size="sm" color="amber">Modified</flux:badge>
@@ -299,8 +299,8 @@ class extends Component
                                             id="setting-{{ $key }}"
                                             wire:model.live.defer="values.{{ $key }}"
                                             @class([
-                                                'w-full rounded-xl border bg-cu-bg px-3 py-2 text-sm text-white placeholder:text-cu-muted focus:outline-none focus:ring-2',
-                                                'border-white/10 focus:border-cu-purple focus:ring-cu-purple/40' => ! $hasError,
+                                                'w-full rounded-xl border bg-cu-bg px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:outline-none focus:ring-2',
+                                                'border-cu-border focus:border-cu-purple focus:ring-cu-purple/40' => ! $hasError,
                                                 'border-rose-500/40 focus:border-rose-500 focus:ring-rose-500/30' => $hasError,
                                             ])
                                             autocomplete="off"
@@ -313,8 +313,8 @@ class extends Component
                                                 id="setting-{{ $key }}"
                                                 wire:model.live.defer="values.{{ $key }}"
                                                 @class([
-                                                    'w-full rounded-xl border bg-cu-bg px-3 py-2 text-sm text-white placeholder:text-cu-muted focus:outline-none focus:ring-2',
-                                                    'border-white/10 focus:border-cu-purple focus:ring-cu-purple/40' => ! $hasError,
+                                                    'w-full rounded-xl border bg-cu-bg px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:outline-none focus:ring-2',
+                                                    'border-cu-border focus:border-cu-purple focus:ring-cu-purple/40' => ! $hasError,
                                                     'border-rose-500/40 focus:border-rose-500 focus:ring-rose-500/30' => $hasError,
                                                 ])
                                                 step="{{ $field['step'] ?? ($field['type'] === 'float' ? '0.01' : '1') }}"
@@ -327,7 +327,7 @@ class extends Component
                                                 aria-describedby="setting-{{ $key }}-hint"
                                             />
                                             @if (in_array($key, ['risk_weight_text','risk_weight_classification','risk_weight_signature','risk_weight_stamp'], true))
-                                                <span class="shrink-0 rounded-md bg-white/5 px-2 py-1 text-xs text-cu-muted">× weight</span>
+                                                <span class="shrink-0 rounded-md bg-black/5 dark:bg-white/5 px-2 py-1 text-xs text-cu-muted">× weight</span>
                                             @endif
                                         </div>
                                     @endif
@@ -335,19 +335,19 @@ class extends Component
                                     <div class="flex items-center justify-between gap-2">
                                         <p id="setting-{{ $key }}-hint" class="text-xs">
                                             @if ($hasError)
-                                                <span class="text-rose-300">{{ $errorMessage }}</span>
+                                                <span class="text-rose-700 dark:text-rose-300">{{ $errorMessage }}</span>
                                             @else
                                                 <span class="text-cu-muted">
-                                                    Default: <span class="text-white">{{ $field['default'] }}</span>
+                                                    Default: <span class="text-cu-text">{{ $field['default'] }}</span>
                                                     @if (isset($field['min']) || isset($field['max']))
-                                                        · Range: <span class="text-white">{{ $field['min'] ?? '−∞' }} – {{ $field['max'] ?? '∞' }}</span>
+                                                        · Range: <span class="text-cu-text">{{ $field['min'] ?? '−∞' }} – {{ $field['max'] ?? '∞' }}</span>
                                                     @endif
                                                 </span>
                                             @endif
                                         </p>
                                         <button type="button" wire:click="resetKey('{{ $key }}')"
                                                 wire:loading.attr="disabled" wire:target="resetKey('{{ $key }}')"
-                                                class="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs font-medium text-cu-muted transition hover:border-white/20 hover:text-white">
+                                                class="inline-flex items-center gap-1 rounded-md border border-cu-border px-2 py-1 text-xs font-medium text-cu-muted transition hover:border-cu-border hover:text-cu-text">
                                             <flux:icon.loading wire:loading wire:target="resetKey('{{ $key }}')" variant="micro" class="size-3" />
                                             <flux:icon icon="arrow-uturn-left" wire:loading.remove wire:target="resetKey('{{ $key }}')" class="size-3" />
                                             Reset
@@ -362,7 +362,7 @@ class extends Component
 
             <div class="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
                 <button type="button" wire:click="reload" wire:loading.attr="disabled" wire:target="reload"
-                        class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-cu-surface px-4 py-2.5 text-sm font-medium text-cu-muted transition hover:border-white/20 hover:text-white">
+                        class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-medium text-cu-muted transition hover:border-cu-border hover:text-cu-text">
                     Discard changes
                 </button>
                 <button type="submit" wire:loading.attr="disabled" wire:target="save"

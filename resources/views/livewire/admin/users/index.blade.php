@@ -155,7 +155,7 @@ new #[Layout('components.layouts.app')] class extends Component {
             </flux:breadcrumbs>
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-semibold tracking-tight text-white">User Management</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight text-cu-text">User Management</h1>
                     <p class="text-sm text-cu-muted">
                         {{ $this->totalCount }} total · {{ $this->activeCount }} active
                     </p>
@@ -170,17 +170,17 @@ new #[Layout('components.layouts.app')] class extends Component {
 
         {{-- KPI chips --}}
         <div class="cu-animate-in grid grid-cols-1 gap-3 sm:grid-cols-3" style="animation-delay: 60ms">
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Vendors</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ $roleCounts[User::ROLE_VENDOR] ?? 0 }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ $roleCounts[User::ROLE_VENDOR] ?? 0 }}</p>
             </div>
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Compliance Officers</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ $roleCounts[User::ROLE_COMPLIANCE_OFFICER] ?? 0 }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ $roleCounts[User::ROLE_COMPLIANCE_OFFICER] ?? 0 }}</p>
             </div>
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Admins</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ $roleCounts[User::ROLE_ADMIN] ?? 0 }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ $roleCounts[User::ROLE_ADMIN] ?? 0 }}</p>
             </div>
         </div>
 
@@ -199,19 +199,19 @@ new #[Layout('components.layouts.app')] class extends Component {
         @endif
 
         {{-- Filters --}}
-        <div class="cu-animate-in flex flex-col gap-3 rounded-2xl border border-white/5 bg-cu-surface p-4 sm:flex-row sm:items-center" style="animation-delay: 120ms">
+        <div class="cu-animate-in flex flex-col gap-3 rounded-2xl border border-cu-border bg-cu-surface p-4 sm:flex-row sm:items-center" style="animation-delay: 120ms">
             <label class="relative flex-1">
                 <flux:icon icon="magnifying-glass" class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-cu-muted" />
                 <input
                     type="search"
                     wire:model.live.debounce.300ms="search"
                     placeholder="Search name or email…"
-                    class="w-full rounded-xl border border-white/10 bg-cu-bg py-2.5 pl-9 pr-3 text-sm text-white placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                    class="w-full rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 py-2.5 pl-9 pr-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
                 />
             </label>
 
             <select wire:model.live="role"
-                    class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                    class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                 <option value="all">All roles</option>
                 <option value="{{ User::ROLE_VENDOR }}">Vendor</option>
                 <option value="{{ User::ROLE_COMPLIANCE_OFFICER }}">Compliance officer</option>
@@ -219,7 +219,7 @@ new #[Layout('components.layouts.app')] class extends Component {
             </select>
 
             <select wire:model.live="status"
-                    class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                    class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                 <option value="all">All status</option>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -227,7 +227,7 @@ new #[Layout('components.layouts.app')] class extends Component {
 
             @if ($search !== '' || $role !== 'all' || $status !== 'all')
                 <button wire:click="clearFilters" type="button"
-                        class="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-cu-muted hover:text-white">
+                        class="inline-flex items-center gap-1.5 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-muted hover:text-cu-text">
                     <flux:icon icon="x-mark" class="size-4" />
                     Clear
                 </button>
@@ -235,10 +235,10 @@ new #[Layout('components.layouts.app')] class extends Component {
         </div>
 
         {{-- Table --}}
-        <div class="cu-animate-in overflow-hidden rounded-2xl border border-white/5 bg-cu-surface" style="animation-delay: 180ms">
+        <div class="cu-animate-in overflow-hidden rounded-2xl border border-cu-border bg-cu-surface" style="animation-delay: 180ms">
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-white/5">
-                    <thead class="bg-white/5 text-left text-xs uppercase tracking-wider text-cu-muted">
+                <table class="min-w-full divide-y divide-cu-border">
+                    <thead class="bg-black/5 dark:bg-white/5 text-left text-xs uppercase tracking-wider text-cu-muted">
                         <tr>
                             <th class="px-4 py-3 font-medium">User</th>
                             <th class="px-4 py-3 font-medium">Role</th>
@@ -247,7 +247,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                             <th class="px-4 py-3 text-right font-medium">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-white/5">
+                    <tbody class="divide-y divide-cu-border">
                         @forelse ($users as $user)
                             @php
                                 $isSelf = $user->id === auth()->id();
@@ -261,7 +261,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                                             {{ $user->initials() }}
                                         </div>
                                         <div>
-                                            <p class="text-sm font-medium text-white">
+                                            <p class="text-sm font-medium text-cu-text">
                                                 {{ $user->name }}
                                                 @if ($isSelf)
                                                     <span class="ml-1 rounded-full bg-cu-purple/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-cu-purple">You</span>
@@ -287,7 +287,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                                             Active
                                         </span>
                                     @else
-                                        <span class="inline-flex items-center gap-1 rounded-full bg-zinc-500/20 px-2 py-0.5 text-xs font-semibold text-zinc-300">
+                                        <span class="inline-flex items-center gap-1 rounded-full bg-black/5 dark:bg-white/5 px-2 py-0.5 text-xs font-semibold text-cu-muted">
                                             <span class="size-1.5 rounded-full bg-zinc-400"></span>
                                             Inactive
                                         </span>
@@ -300,12 +300,12 @@ new #[Layout('components.layouts.app')] class extends Component {
                                     <div class="flex items-center justify-end gap-2">
                                         @if ($canEdit)
                                             <a href="{{ route('admin.users.edit', $user) }}" wire:navigate
-                                               class="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-cu-bg px-2.5 py-1.5 text-xs font-medium text-white hover:border-cu-purple/40">
+                                               class="inline-flex items-center gap-1 rounded-lg border border-cu-border bg-cu-surface px-2.5 py-1.5 text-xs font-medium text-cu-text hover:border-cu-purple/40">
                                                 <flux:icon icon="pencil-square" class="size-3.5" />
                                                 Edit
                                             </a>
                                             <button wire:click="toggleActive({{ $user->id }})" type="button"
-                                                    class="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-cu-bg px-2.5 py-1.5 text-xs font-medium text-white hover:border-cu-purple/40">
+                                                    class="inline-flex items-center gap-1 rounded-lg border border-cu-border bg-cu-surface px-2.5 py-1.5 text-xs font-medium text-cu-text hover:border-cu-purple/40">
                                                 @if ($user->is_active)
                                                     Deactivate
                                                 @else
@@ -342,7 +342,7 @@ new #[Layout('components.layouts.app')] class extends Component {
             </div>
 
             @if ($users->hasPages())
-                <div class="border-t border-white/5 bg-white/2 px-4 py-3">
+                <div class="border-t border-cu-border bg-black/[0.02] dark:bg-white/[0.02] px-4 py-3">
                     {{ $users->links() }}
                 </div>
             @endif

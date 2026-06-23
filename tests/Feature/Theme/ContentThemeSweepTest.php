@@ -51,4 +51,14 @@ class ContentThemeSweepTest extends TestCase
         $this->assertViewConverted('livewire/admin/notifications.blade.php');
         $this->assertViewConverted('livewire/admin/submissions/show.blade.php');
     }
+
+    public function test_settings_users_audit_converted(): void
+    {
+        $this->assertViewConverted('livewire/admin/settings/index.blade.php');
+        $this->assertViewConverted('livewire/admin/users/index.blade.php');
+        $this->assertViewConverted('livewire/admin/users/create.blade.php');
+        $this->assertViewConverted('livewire/admin/users/edit.blade.php');
+        $this->assertViewConverted('livewire/admin/audit/index.blade.php');
+        $this->assertViewConverted('admin/audit/show.blade.php');
+    }
 }

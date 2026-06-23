@@ -312,7 +312,7 @@ class extends Component
             </flux:breadcrumbs>
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-semibold tracking-tight text-white">Audit Trail</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight text-cu-text">Audit Trail</h1>
                     <p class="text-sm text-cu-muted">
                         {{ $this->totalMatching }} event{{ $this->totalMatching === 1 ? '' : 's' }} match the current filters
                         · {{ $this->distinctActors }} distinct actor{{ $this->distinctActors === 1 ? '' : 's' }}
@@ -328,21 +328,21 @@ class extends Component
 
         {{-- KPI chips --}}
         <div class="cu-animate-in grid grid-cols-2 gap-3 sm:grid-cols-4" style="animation-delay: 60ms">
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Total events</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ number_format($this->totalMatching) }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ number_format($this->totalMatching) }}</p>
             </div>
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Distinct actors</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ number_format($this->distinctActors) }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ number_format($this->distinctActors) }}</p>
             </div>
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Page size</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ $perPage }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ $perPage }}</p>
             </div>
-            <div class="rounded-2xl border border-white/5 bg-cu-surface p-4">
+            <div class="rounded-2xl border border-cu-border bg-cu-surface p-4">
                 <p class="text-xs uppercase tracking-wider text-cu-muted">Page</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ $this->logs->currentPage() }} / {{ max(1, $this->logs->lastPage()) }}</p>
+                <p class="mt-1 text-2xl font-semibold text-cu-text">{{ $this->logs->currentPage() }} / {{ max(1, $this->logs->lastPage()) }}</p>
             </div>
         </div>
 
@@ -361,7 +361,7 @@ class extends Component
         @endif
 
         {{-- Filters --}}
-        <div class="cu-animate-in flex flex-col gap-3 rounded-2xl border border-white/5 bg-cu-surface p-4" style="animation-delay: 120ms">
+        <div class="cu-animate-in flex flex-col gap-3 rounded-2xl border border-cu-border bg-cu-surface p-4" style="animation-delay: 120ms">
 
             {{-- Row 1: search + per-page --}}
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -371,12 +371,12 @@ class extends Component
                         type="search"
                         wire:model.live.debounce.300ms="search"
                         placeholder="Search action, entity, IP, or JSON details…"
-                        class="w-full rounded-xl border border-white/10 bg-cu-bg py-2.5 pl-9 pr-3 text-sm text-white placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                        class="w-full rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 py-2.5 pl-9 pr-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
                     />
                 </label>
 
                 <select wire:model.live="perPage"
-                        class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                        class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                     <option value="25">25 / page</option>
                     <option value="50">50 / page</option>
                     <option value="100">100 / page</option>
@@ -386,7 +386,7 @@ class extends Component
             {{-- Row 2: structured filters --}}
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <select wire:model.live="userId"
-                        class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                        class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                     <option value="">All actors</option>
                     @foreach ($this->actors as $actor)
                         <option value="{{ $actor->id }}">{{ $actor->name }} — {{ ucfirst(str_replace('_', ' ', $actor->role)) }}</option>
@@ -394,7 +394,7 @@ class extends Component
                 </select>
 
                 <select wire:model.live="module"
-                        class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                        class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                     <option value="">All modules</option>
                     @foreach ($modules as $label => $prefix)
                         <option value="{{ $prefix }}">{{ $label }}</option>
@@ -402,7 +402,7 @@ class extends Component
                 </select>
 
                 <select wire:model.live="action"
-                        class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                        class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                     <option value="">All actions</option>
                     @foreach ($knownActions as $known)
                         <option value="{{ $known }}">{{ $known }}</option>
@@ -410,7 +410,7 @@ class extends Component
                 </select>
 
                 <select wire:model.live="entityType"
-                        class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
+                        class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40">
                     <option value="">All entities</option>
                     <option value="{{ \App\Models\User::class }}">User</option>
                     <option value="{{ \App\Models\SystemSetting::class }}">System Setting</option>
@@ -424,19 +424,19 @@ class extends Component
                     wire:model.live.debounce.400ms="entityId"
                     placeholder="Affected record ID (optional)"
                     min="1"
-                    class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                    class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
                 />
                 <input
                     type="datetime-local"
                     wire:model.live="from"
                     aria-label="From"
-                    class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                    class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
                 />
                 <input
                     type="datetime-local"
                     wire:model.live="to"
                     aria-label="To"
-                    class="rounded-xl border border-white/10 bg-cu-bg px-3 py-2.5 text-sm text-white focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                    class="rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2.5 text-sm text-cu-text focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
                 />
             </div>
 
@@ -444,15 +444,15 @@ class extends Component
             <div class="flex flex-wrap items-center gap-2">
                 <span class="text-xs uppercase tracking-wider text-cu-muted">Quick range:</span>
                 <button type="button" wire:click="applyPreset('24h')"
-                        class="rounded-full border border-white/10 bg-cu-bg px-3 py-1 text-xs text-cu-muted hover:text-white">24h</button>
+                        class="rounded-full border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-1 text-xs text-cu-muted hover:text-cu-text">24h</button>
                 <button type="button" wire:click="applyPreset('7d')"
-                        class="rounded-full border border-white/10 bg-cu-bg px-3 py-1 text-xs text-cu-muted hover:text-white">7 days</button>
+                        class="rounded-full border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-1 text-xs text-cu-muted hover:text-cu-text">7 days</button>
                 <button type="button" wire:click="applyPreset('30d')"
-                        class="rounded-full border border-white/10 bg-cu-bg px-3 py-1 text-xs text-cu-muted hover:text-white">30 days</button>
+                        class="rounded-full border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-1 text-xs text-cu-muted hover:text-cu-text">30 days</button>
 
                 @if ($search !== '' || $userId !== '' || $action !== '' || $module !== '' || $entityType !== '' || $entityId !== '' || $from !== '' || $to !== '')
                     <button wire:click="clearFilters" type="button"
-                            class="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-cu-bg px-3 py-2 text-sm text-cu-muted hover:text-white">
+                            class="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 px-3 py-2 text-sm text-cu-muted hover:text-cu-text">
                         <flux:icon icon="x-mark" class="size-4" />
                         Clear filters
                     </button>
@@ -461,10 +461,10 @@ class extends Component
         </div>
 
         {{-- Table --}}
-        <div class="cu-animate-in overflow-hidden rounded-2xl border border-white/5 bg-cu-surface" style="animation-delay: 180ms">
+        <div class="cu-animate-in overflow-hidden rounded-2xl border border-cu-border bg-cu-surface" style="animation-delay: 180ms">
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-white/5">
-                    <thead class="bg-white/5 text-left text-xs uppercase tracking-wider text-cu-muted">
+                <table class="min-w-full divide-y divide-cu-border">
+                    <thead class="bg-black/5 dark:bg-white/5 text-left text-xs uppercase tracking-wider text-cu-muted">
                         <tr>
                             <th class="px-4 py-3 font-medium">Timestamp</th>
                             <th class="px-4 py-3 font-medium">Actor</th>
@@ -475,10 +475,10 @@ class extends Component
                             <th class="px-4 py-3 text-right font-medium">View</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-white/5">
+                    <tbody class="divide-y divide-cu-border">
                         @forelse ($logs as $log)
                             <tr wire:key="audit-{{ $log->id }}" class="hover:bg-white/2">
-                                <td class="px-4 py-3 text-sm text-white">
+                                <td class="px-4 py-3 text-sm text-cu-text">
                                     <div>{{ $log->created_at?->format('M d, Y') }}</div>
                                     <div class="text-xs text-cu-muted">{{ $log->created_at?->format('H:i:s') }}</div>
                                 </td>
@@ -489,7 +489,7 @@ class extends Component
                                                 {{ $log->user->initials() }}
                                             </div>
                                             <div>
-                                                <p class="text-sm font-medium text-white">{{ $log->user->name }}</p>
+                                                <p class="text-sm font-medium text-cu-text">{{ $log->user->name }}</p>
                                                 <p class="text-[10px] uppercase tracking-wider text-cu-muted">{{ ucfirst(str_replace('_', ' ', $log->user->role)) }}</p>
                                             </div>
                                         </div>
@@ -502,7 +502,7 @@ class extends Component
                                 </td>
                                 <td class="px-4 py-3 text-sm text-cu-muted">
                                     @if ($log->entity_type)
-                                        {{ class_basename($log->entity_type) }}<span class="text-white"> #{{ $log->entity_id }}</span>
+                                        {{ class_basename($log->entity_type) }}<span class="text-cu-text"> #{{ $log->entity_id }}</span>
                                     @else
                                         <span class="text-cu-muted">—</span>
                                     @endif
@@ -523,7 +523,7 @@ class extends Component
                                 </td>
                                 <td class="px-4 py-3 text-right">
                                     <a href="{{ route('admin.audit.show', $log) }}" wire:navigate
-                                       class="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-cu-bg px-2.5 py-1.5 text-xs font-medium text-cu-muted hover:text-white">
+                                       class="inline-flex items-center gap-1 rounded-lg border border-cu-border bg-cu-surface px-2.5 py-1.5 text-xs font-medium text-cu-muted hover:text-cu-text">
                                         <flux:icon icon="eye" class="size-3.5" />
                                         View
                                     </a>
@@ -542,7 +542,7 @@ class extends Component
 
             {{-- Pagination --}}
             @if ($logs->hasPages())
-                <div class="border-t border-white/5 px-4 py-3">
+                <div class="border-t border-cu-border px-4 py-3">
                     {{ $logs->onEachSide(1)->links() }}
                 </div>
             @endif
