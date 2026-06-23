@@ -1018,7 +1018,7 @@ git commit -m "feat(theme): make vendor portal pages theme-responsive"
 **Files:**
 - Create: `tests/Feature/Theme/ViewThemeGuardTest.php`
 
-**Interfaces:** A catch-all guard asserting no content view (admin + vendor livewire, shared components, controller-rendered admin views) retains a no-survivor neutral literal. Goes green only after Tasks 5–9.
+**Interfaces:** A catch-all guard asserting no content view (admin + vendor livewire, controller-rendered admin views, shared display components) retains a no-survivor neutral literal. Goes green only after Tasks 5–9.
 
 - [ ] **Step 1: Write the repo-wide guard test**
 
@@ -1036,14 +1036,18 @@ class ViewThemeGuardTest extends TestCase
      * surviving form after the mapping (zinc shades, solid white borders/
      * dividers). The `dark:…white/x` overlays are intentionally retained and
      * are NOT scanned. Source scan — no JS/visual runner (Global Constraints).
+     *
+     * Excluded: the `<x-page>` wrapper and the app/auth layout shells, which
+     * deliberately pair a light literal (e.g. `text-zinc-900`/`bg-white`) with
+     * a `dark:` token — that IS theme-responsive and must not be flagged.
      */
     public function test_no_content_view_keeps_theme_locked_neutral_literals(): void
     {
         $roots = [
             resource_path('views/livewire/admin'),
             resource_path('views/livewire/vendor'),
-            resource_path('views/components'),
             resource_path('views/admin'),
+            resource_path('views/components'),
         ];
 
         $banned = [
@@ -1052,6 +1056,12 @@ class ViewThemeGuardTest extends TestCase
             'text-zinc-500', 'text-zinc-400', 'text-zinc-300', 'text-zinc-200',
             'border-zinc-200', 'border-zinc-100', 'bg-zinc-50',
         ];
+
+        // The deliberate light/dark-pair shells carry light literals on purpose.
+        $isExcluded = static fn (string $path): bool => str_contains(
+            str_replace('\\', '/', $path),
+            '/views/components/layouts/',
+        ) || str_ends_with(str_replace('\\', '/', $path), '/views/components/page.blade.php');
 
         $offenders = [];
 
@@ -1063,12 +1073,14 @@ class ViewThemeGuardTest extends TestCase
                 new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
             );
             foreach ($files as $file) {
-                if ($file->getExtension() !== 'php') {
+                if ($file->getExtension() !== 'php' || $isExcluded($file->getPathname())) {
                     continue;
                 }
                 $contents = (string) file_get_contents($file->getPathname());
                 foreach ($banned as $literal) {
-                    if (str_contains($contents, $literal)) {
+                    // Precise token match: `(?![0-9])` stops `bg-zinc-50` from
+                    // matching `bg-zinc-500`, `border-white/5` from `border-white/50`, etc.
+                    if (preg_match('/'.preg_quote($literal, '/').'(?![0-9])/', $contents) === 1) {
                         $offenders[] = $file->getPathname().' :: '.$literal;
                     }
                 }
@@ -1083,7 +1095,7 @@ class ViewThemeGuardTest extends TestCase
 - [ ] **Step 2: Run the guard**
 
 Run: `php artisan test --compact --filter=ViewThemeGuardTest`
-Expected: PASS. If it lists offenders, convert each named file:literal per the mapping, then re-run.
+Expected: PASS. If it lists offenders, convert each named `file :: literal` per the mapping (or, if it's a deliberate light/dark pair in a shell, confirm the exclusion covers it), then re-run.
 
 - [ ] **Step 3: Run the whole theme suite**
 
