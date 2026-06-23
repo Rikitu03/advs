@@ -73,10 +73,10 @@ new class extends Component {
 
         <div class="grid gap-6 lg:grid-cols-3">
             {{-- Most urgent flagged submissions --}}
-            <div class="cu-animate-in lg:col-span-2 rounded-2xl border border-white/5 bg-cu-surface" style="animation-delay: 200ms">
-                <div class="flex items-center justify-between gap-3 border-b border-white/5 px-5 py-4">
+            <div class="cu-animate-in lg:col-span-2 rounded-2xl border border-cu-border bg-cu-surface" style="animation-delay: 200ms">
+                <div class="flex items-center justify-between gap-3 border-b border-cu-border px-5 py-4">
                     <div>
-                        <h2 class="text-base font-semibold text-white">Most urgent submissions</h2>
+                        <h2 class="text-base font-semibold text-cu-text">Most urgent submissions</h2>
                         <p class="text-xs text-cu-muted">Highest composite risk, awaiting review</p>
                     </div>
                     <a href="{{ route('admin.pending') }}" wire:navigate
@@ -86,16 +86,16 @@ new class extends Component {
                     </a>
                 </div>
 
-                <ul class="divide-y divide-white/5" wire:loading.class="opacity-50" wire:target="resetDemo">
+                <ul class="divide-y divide-cu-border" wire:loading.class="opacity-50" wire:target="resetDemo">
                     @forelse ($urgent as $s)
                         <li>
                             <a href="{{ route('admin.submissions.show', $s['id']) }}" wire:navigate
-                               class="group flex items-center gap-4 px-5 py-4 transition hover:bg-white/[0.03]">
-                                <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/5 text-cu-muted">
+                               class="group flex items-center gap-4 px-5 py-4 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.03]">
+                                <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-black/5 dark:bg-white/5 text-cu-muted">
                                     <flux:icon icon="document-text" class="size-5" />
                                 </span>
                                 <div class="min-w-0 flex-1">
-                                    <p class="truncate text-sm font-medium text-white">{{ $s['company'] }}</p>
+                                    <p class="truncate text-sm font-medium text-cu-text">{{ $s['company'] }}</p>
                                     <p class="truncate text-xs text-cu-muted">
                                         {{ $s['ref'] }} · {{ $s['document_type'] }} · {{ $s['submitted_at']->diffForHumans() }}
                                     </p>
@@ -113,7 +113,7 @@ new class extends Component {
                     @empty
                         <li class="flex flex-col items-center gap-2 px-5 py-12 text-center">
                             <flux:icon icon="check-badge" class="size-8 text-emerald-400" />
-                            <p class="text-sm font-medium text-white">Queue cleared</p>
+                            <p class="text-sm font-medium text-cu-text">Queue cleared</p>
                             <p class="text-xs text-cu-muted">Every submission has a recorded decision.</p>
                         </li>
                     @endforelse
@@ -121,9 +121,9 @@ new class extends Component {
             </div>
 
             {{-- Activity feed --}}
-            <div class="cu-animate-in rounded-2xl border border-white/5 bg-cu-surface" style="animation-delay: 260ms">
-                <div class="border-b border-white/5 px-5 py-4">
-                    <h2 class="text-base font-semibold text-white">Recent activity</h2>
+            <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface" style="animation-delay: 260ms">
+                <div class="border-b border-cu-border px-5 py-4">
+                    <h2 class="text-base font-semibold text-cu-text">Recent activity</h2>
                     <p class="text-xs text-cu-muted">Alerts from the validation pipeline</p>
                 </div>
                 <ul class="flex flex-col px-5 py-2" wire:loading.class="opacity-50" wire:target="resetDemo">
@@ -131,7 +131,7 @@ new class extends Component {
                         <li class="flex gap-3 py-3">
                             <x-activity-icon :icon="$event['icon']" :color="$event['color']" />
                             <div class="min-w-0 flex-1">
-                                <p class="text-sm leading-snug text-zinc-200">{{ $event['text'] }}</p>
+                                <p class="text-sm leading-snug text-cu-text">{{ $event['text'] }}</p>
                                 <p class="mt-0.5 text-xs text-cu-muted">{{ $event['at']->diffForHumans() }}</p>
                             </div>
                         </li>
