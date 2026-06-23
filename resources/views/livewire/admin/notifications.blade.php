@@ -62,7 +62,7 @@ new class extends Component {
 
         {{-- Toolbar --}}
         <div class="cu-animate-in flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cu-border bg-cu-surface p-4" style="animation-delay: 60ms">
-            <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-cu-bg p-1">
+            <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 p-1 dark:bg-white/5">
                 @foreach (['all' => 'All', 'unread' => 'Unread'] as $value => $text)
                     <button type="button" wire:click="setFilter('{{ $value }}')"
                             class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $filter === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>

@@ -95,17 +95,17 @@ new class extends Component {
                         type="search"
                         wire:model.live.debounce.300ms="search"
                         placeholder="Search vendor, company, reference, or flag…"
-                        class="w-full rounded-xl border border-cu-border bg-cu-bg py-2.5 pl-9 pr-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                        class="w-full rounded-xl border border-cu-border bg-black/5 py-2.5 pl-9 pr-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40 dark:bg-white/5"
                     />
                 </label>
                 <div class="flex flex-wrap items-center gap-3">
-                    <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-cu-bg p-1">
+                    <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 p-1 dark:bg-white/5">
                         @foreach (['all' => 'All severity', 'high' => 'High', 'medium' => 'Medium'] as $value => $text)
                             <button type="button" wire:click="setSeverity('{{ $value }}')"
                                     class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $severity === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
                         @endforeach
                     </div>
-                    <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-cu-bg p-1">
+                    <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 p-1 dark:bg-white/5">
                         @foreach (['all' => 'All time', '24' => '24h', '168' => '7 days', '720' => '30 days'] as $value => $text)
                             <button type="button" wire:click="setRange('{{ $value }}')"
                                     class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $range === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
@@ -114,7 +114,7 @@ new class extends Component {
                 </div>
             </div>
             {{-- Flag-type filter (§4: text mismatch, low classification confidence, signature mismatch, stamp mismatch) --}}
-            <div class="flex flex-wrap items-center gap-1 self-start rounded-xl border border-cu-border bg-cu-bg p-1">
+            <div class="flex flex-wrap items-center gap-1 self-start rounded-xl border border-cu-border bg-black/5 p-1 dark:bg-white/5">
                 <button type="button" wire:click="setType('all')"
                         class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $type === 'all' ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">All flags</button>
                 @foreach ($types as $key => $meta)

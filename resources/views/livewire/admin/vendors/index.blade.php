@@ -74,10 +74,10 @@ new class extends Component {
                     type="search"
                     wire:model.live.debounce.300ms="search"
                     placeholder="Search company, contact, or registration no.…"
-                    class="w-full rounded-xl border border-cu-border bg-cu-bg py-2.5 pl-9 pr-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40"
+                    class="w-full rounded-xl border border-cu-border bg-black/5 py-2.5 pl-9 pr-3 text-sm text-cu-text placeholder:text-cu-muted focus:border-cu-purple focus:outline-none focus:ring-2 focus:ring-cu-purple/40 dark:bg-white/5"
                 />
             </label>
-            <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-cu-bg p-1">
+            <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-black/5 p-1 dark:bg-white/5">
                 @foreach (['all' => 'All', 'approved' => 'Approved', 'under_review' => 'Under review', 'pending' => 'Pending', 'rejected' => 'Rejected'] as $value => $text)
                     <button type="button" wire:click="setStatus('{{ $value }}')"
                             class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $status === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
