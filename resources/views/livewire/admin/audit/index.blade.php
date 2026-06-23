@@ -349,13 +349,13 @@ class extends Component
         {{-- Flash messages --}}
         @if (session('status'))
             <div x-data="{ show: true }" x-show="show" x-transition
-                 class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                 class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-200">
                 {{ session('status') }}
             </div>
         @endif
 
         @if ($errors->any())
-            <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">
                 {{ $errors->first() }}
             </div>
         @endif
@@ -477,7 +477,7 @@ class extends Component
                     </thead>
                     <tbody class="divide-y divide-cu-border">
                         @forelse ($logs as $log)
-                            <tr wire:key="audit-{{ $log->id }}" class="hover:bg-white/2">
+                            <tr wire:key="audit-{{ $log->id }}" class="hover:bg-black/[0.02] dark:hover:bg-white/[0.02]">
                                 <td class="px-4 py-3 text-sm text-cu-text">
                                     <div>{{ $log->created_at?->format('M d, Y') }}</div>
                                     <div class="text-xs text-cu-muted">{{ $log->created_at?->format('H:i:s') }}</div>

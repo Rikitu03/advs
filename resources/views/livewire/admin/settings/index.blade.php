@@ -299,7 +299,7 @@ class extends Component
                                             id="setting-{{ $key }}"
                                             wire:model.live.defer="values.{{ $key }}"
                                             @class([
-                                                'w-full rounded-xl border bg-cu-bg px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:outline-none focus:ring-2',
+                                                'w-full rounded-xl border bg-black/5 dark:bg-white/5 px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:outline-none focus:ring-2',
                                                 'border-cu-border focus:border-cu-purple focus:ring-cu-purple/40' => ! $hasError,
                                                 'border-rose-500/40 focus:border-rose-500 focus:ring-rose-500/30' => $hasError,
                                             ])
@@ -313,7 +313,7 @@ class extends Component
                                                 id="setting-{{ $key }}"
                                                 wire:model.live.defer="values.{{ $key }}"
                                                 @class([
-                                                    'w-full rounded-xl border bg-cu-bg px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:outline-none focus:ring-2',
+                                                    'w-full rounded-xl border bg-black/5 dark:bg-white/5 px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:outline-none focus:ring-2',
                                                     'border-cu-border focus:border-cu-purple focus:ring-cu-purple/40' => ! $hasError,
                                                     'border-rose-500/40 focus:border-rose-500 focus:ring-rose-500/30' => $hasError,
                                                 ])

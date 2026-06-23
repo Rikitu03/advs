@@ -187,13 +187,13 @@ new #[Layout('components.layouts.app')] class extends Component {
         {{-- Flash messages --}}
         @if (session('status'))
             <div x-data="{ show: true }" x-show="show" x-transition
-                 class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                 class="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-200">
                 {{ session('status') }}
             </div>
         @endif
 
         @if ($errors->any())
-            <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">
                 {{ $errors->first() }}
             </div>
         @endif
@@ -254,7 +254,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                                 $canEdit = auth()->user()?->can('update', $user) ?? false;
                                 $canDelete = auth()->user()?->can('delete', $user) ?? false;
                             @endphp
-                            <tr wire:key="user-{{ $user->id }}" class="hover:bg-white/2">
+                            <tr wire:key="user-{{ $user->id }}" class="hover:bg-black/[0.02] dark:hover:bg-white/[0.02]">
                                 <td class="px-4 py-3">
                                     <div class="flex items-center gap-3">
                                         <div class="flex size-9 items-center justify-center rounded-full cu-gradient text-sm font-semibold text-white">
@@ -277,7 +277,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                                     @elseif ($user->role === User::ROLE_COMPLIANCE_OFFICER)
                                         <span class="inline-flex items-center rounded-full bg-cu-purple/20 px-2 py-0.5 text-xs font-semibold text-cu-purple">Compliance</span>
                                     @else
-                                        <span class="inline-flex items-center rounded-full bg-white/10 px-2 py-0.5 text-xs font-semibold text-cu-muted">Vendor</span>
+                                        <span class="inline-flex items-center rounded-full bg-black/10 dark:bg-white/10 px-2 py-0.5 text-xs font-semibold text-cu-muted">Vendor</span>
                                     @endif
                                 </td>
                                 <td class="px-4 py-3">
