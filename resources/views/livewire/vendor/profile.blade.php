@@ -7,7 +7,7 @@ new class extends Component {
 }; ?>
 
 <x-page>
-    <div class="mx-auto w-full max-w-5xl">
+    <div class="mx-auto w-full max-w-5xl text-cu-text">
         <livewire:settings.profile />
     </div>
 </x-page>

@@ -61,12 +61,12 @@ new class extends Component {
                 ['Approved', $kpis['approved'], 'check-badge', 'bg-cu-yellow/20 text-yellow-700', 'Accepted documents'],
                 ['Rejected', $kpis['rejected'], 'x-circle', 'bg-cu-pink/10 text-rose-600', 'Needs resubmission'],
             ] as [$label, $value, $icon, $accent, $hint])
-                <div class="cu-animate-in rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5 shadow-sm">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <p class="text-sm font-medium text-zinc-500">{{ $label }}</p>
-                            <p class="mt-2 text-3xl font-semibold tracking-tight text-zinc-950">{{ $value }}</p>
-                            <p class="mt-1 text-xs text-zinc-500">{{ $hint }}</p>
+                            <p class="text-sm font-medium text-cu-muted">{{ $label }}</p>
+                            <p class="mt-2 text-3xl font-semibold tracking-tight text-cu-text">{{ $value }}</p>
+                            <p class="mt-1 text-xs text-cu-muted">{{ $hint }}</p>
                         </div>
                         <span class="flex size-10 shrink-0 items-center justify-center rounded-xl {{ $accent }}">
                             <flux:icon :icon="$icon" class="size-5" />
@@ -76,11 +76,11 @@ new class extends Component {
             @endforeach
         </div>
 
-        <div class="cu-animate-in rounded-2xl border border-zinc-200 bg-white shadow-sm" style="animation-delay: 180ms">
-            <div class="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4">
+        <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface shadow-sm" style="animation-delay: 180ms">
+            <div class="flex items-center justify-between gap-3 border-b border-cu-border px-5 py-4">
                 <div>
-                    <h2 class="text-base font-semibold text-zinc-950">Recent submissions</h2>
-                    <p class="text-xs text-zinc-500">Latest documents and their review status</p>
+                    <h2 class="text-base font-semibold text-cu-text">Recent submissions</h2>
+                    <p class="text-xs text-cu-muted">Latest documents and their review status</p>
                 </div>
                 <a href="{{ route('vendor.submissions') }}" wire:navigate class="inline-flex items-center gap-1 text-sm font-medium text-cu-purple hover:text-cu-pink">
                     View all
@@ -88,22 +88,22 @@ new class extends Component {
                 </a>
             </div>
 
-            <div class="divide-y divide-zinc-100">
+            <div class="divide-y divide-cu-border">
                 @foreach ($submissions as $submission)
-                    <a href="{{ route('vendor.submissions') }}" wire:navigate class="group grid gap-4 px-5 py-4 transition hover:bg-zinc-50 md:grid-cols-[1fr_auto] md:items-center">
+                    <a href="{{ route('vendor.submissions') }}" wire:navigate class="group grid gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 md:grid-cols-[1fr_auto] md:items-center">
                         <div class="flex min-w-0 gap-3">
                             <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-purple/10 text-cu-purple">
                                 <flux:icon icon="document-text" class="size-5" />
                             </span>
                             <div class="min-w-0">
-                                <p class="truncate text-sm font-medium text-zinc-950">{{ $submission['document_type'] }}</p>
-                                <p class="truncate text-xs text-zinc-500">{{ $submission['ref'] }} - {{ $submission['file_name'] }}</p>
+                                <p class="truncate text-sm font-medium text-cu-text">{{ $submission['document_type'] }}</p>
+                                <p class="truncate text-xs text-cu-muted">{{ $submission['ref'] }} - {{ $submission['file_name'] }}</p>
                             </div>
                         </div>
                         <div class="flex items-center justify-between gap-3 md:justify-end">
-                            <span class="text-xs text-zinc-500">{{ $submission['submitted_at']->diffForHumans() }}</span>
+                            <span class="text-xs text-cu-muted">{{ $submission['submitted_at']->diffForHumans() }}</span>
                             <x-vendor-status-badge :status="$submission['status']" />
-                            <flux:icon icon="chevron-right" class="hidden size-4 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-cu-purple md:block" />
+                            <flux:icon icon="chevron-right" class="hidden size-4 text-cu-muted transition group-hover:translate-x-0.5 group-hover:text-cu-purple md:block" />
                         </div>
                     </a>
                 @endforeach
