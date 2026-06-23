@@ -50,6 +50,9 @@
 | `bg-white/[0.03]` | `bg-black/[0.03] dark:bg-white/[0.03]` |
 | `hover:bg-white/[0.03]` | `hover:bg-black/[0.03] dark:hover:bg-white/[0.03]` |
 | `text-white/10` (e.g. gauge track) | `text-black/10 dark:text-white/10` |
+| `hover:text-white` / `group-hover:text-white` on a **neutral** surface (a `cu-surface`/`cu-bg`/black-or-white-opacity element, e.g. an inactive segmented/filter button or a table-row link) | `hover:text-cu-text` / `group-hover:text-cu-text` |
+
+> Why: on a light surface, `hover:text-white` turns the label invisible (white-on-white) on hover. Convert it only when the hovered element's own background is neutral. **Keep** `hover:text-white` when the hovered element sits on an accent — e.g. the active filter button is `bg-cu-purple text-white`; a `text-cu-muted hover:text-white` segmented control whose hover background is an accent stays. In the existing pages the inactive segmented/filter buttons hover on a neutral container, so they convert.
 
 **C. Status-color tints — keep the hue, fix light-mode contrast**
 
