@@ -89,13 +89,13 @@ new class extends Component {
                 <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1">
                     @foreach (['all' => 'All', 'approved' => 'Approved', 'rejected' => 'Rejected'] as $value => $text)
                         <button type="button" wire:click="setDecision('{{ $value }}')"
-                                class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $decision === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-white' }}">{{ $text }}</button>
+                                class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $decision === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
                     @endforeach
                 </div>
                 <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1">
                     @foreach (['all' => 'All risk', 'high' => 'High', 'medium' => 'Medium', 'low' => 'Low'] as $value => $text)
                         <button type="button" wire:click="setRisk('{{ $value }}')"
-                                class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $risk === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-white' }}">{{ $text }}</button>
+                                class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $risk === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
                     @endforeach
                 </div>
             </div>

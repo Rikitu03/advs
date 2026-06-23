@@ -82,7 +82,7 @@ new class extends Component {
                     <button
                         type="button"
                         wire:click="setRisk('{{ $value }}')"
-                        class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $risk === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-white' }}"
+                        class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $risk === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}"
                     >{{ $text }}</button>
                 @endforeach
             </div>

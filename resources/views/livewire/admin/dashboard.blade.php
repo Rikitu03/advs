@@ -107,7 +107,7 @@ new class extends Component {
                                     </span>
                                 @endif
                                 <x-risk-badge :level="$s['risk_level']" :score="$s['risk_score']" />
-                                <flux:icon icon="chevron-right" class="size-4 text-cu-muted transition group-hover:translate-x-0.5 group-hover:text-white" />
+                                <flux:icon icon="chevron-right" class="size-4 text-cu-muted transition group-hover:translate-x-0.5 group-hover:text-cu-text" />
                             </a>
                         </li>
                     @empty
