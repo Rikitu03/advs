@@ -1,7 +1,11 @@
 @php($user = auth()->user())
 
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+{{-- Server-side theme guard: render `class="dark"` from the 7-day `theme`
+     cookie so the choice holds on the first paint AND on every wire:navigate
+     response (the <head> runtime only runs once). `system` is resolved
+     client-side. See partials/head.blade.php + bootstrap/app.php (cookie). --}}
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" @class(['dark' => request()->cookie('theme') === 'dark'])>
     <head>
         @include('partials.head')
     </head>
@@ -66,8 +70,8 @@
                                 </span>
 
                                 <div class="grid flex-1 text-left text-sm leading-tight">
-                                    <span class="truncate font-semibold">{{ auth()->user()->name }}</span>
-                                    <span class="truncate text-xs">{{ auth()->user()->email }}</span>
+                                    <span class="truncate font-semibold text-cu-text">{{ auth()->user()->name }}</span>
+                                    <span class="truncate text-xs text-cu-muted">{{ auth()->user()->email }}</span>
                                 </div>
                             </div>
                         </div>
@@ -116,8 +120,8 @@
                                 </span>
 
                                 <div class="grid flex-1 text-left text-sm leading-tight">
-                                    <span class="truncate font-semibold">{{ auth()->user()->name }}</span>
-                                    <span class="truncate text-xs">{{ auth()->user()->email }}</span>
+                                    <span class="truncate font-semibold text-cu-text">{{ auth()->user()->name }}</span>
+                                    <span class="truncate text-xs text-cu-muted">{{ auth()->user()->email }}</span>
                                 </div>
                             </div>
                         </div>

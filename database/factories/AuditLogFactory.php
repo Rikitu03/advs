@@ -50,7 +50,7 @@ class AuditLogFactory extends Factory
     /**
      * Attach the row to a specific target entity (polymorphic).
      */
-    public function forEntity(string $type, int|string $id, ?array $details = null): static
+    public function forEntity(string $type, int|string|null $id = null, ?array $details = null): static
     {
         return $this->state(fn (): array => array_filter([
             'entity_type' => $type,

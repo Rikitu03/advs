@@ -43,6 +43,14 @@
             if (read() === 'system') { apply('system'); }
         });
 
+        // Re-assert the saved theme after Livewire SPA navigations: wire:navigate
+        // swaps in a fresh <html> and this <head> script does not re-run, so
+        // without this the .dark class is lost in `system` mode and the page
+        // reverts to light. (Explicit light/dark are already guarded server-side.)
+        document.addEventListener('livewire:navigated', function () {
+            apply(read());
+        });
+
         return { read: read, set: set, apply: apply };
     })();
 </script>

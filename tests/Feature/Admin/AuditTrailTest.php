@@ -3,6 +3,7 @@
 namespace Tests\Feature\Admin;
 
 use App\Models\AuditLog;
+use App\Models\SystemSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -251,5 +252,23 @@ class AuditTrailTest extends TestCase
 
         $admin = User::factory()->role(User::ROLE_ADMIN)->create();
         $this->assertFalse($admin->can('create', $log));
+    }
+
+    public function test_for_entity_allows_a_null_entity_id_for_system_wide_events(): void
+    {
+        // System-wide events (e.g. system_setting.updated) target a class with
+        // no specific row id. The factory must accept a null id and leave the
+        // nullable entity_id column unset — mirrors AuditLogSeeder's usage.
+        $log = AuditLog::factory()
+            ->forEntity(SystemSetting::class, null, [
+                'key' => 'risk_threshold_high',
+                'before' => '70',
+                'after' => '75',
+            ])
+            ->create();
+
+        $this->assertNull($log->entity_id);
+        $this->assertSame(SystemSetting::class, $log->entity_type);
+        $this->assertSame('risk_threshold_high', $log->details['key']);
     }
 }
