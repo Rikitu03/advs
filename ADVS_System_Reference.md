@@ -247,14 +247,21 @@ This section walks through exactly what happens from the moment a file enters th
 
 ### Stage 4b: Stamp Authentication (EfficientNet)
 
-**Input**: Cropped stamp region from YOLOv8.
+**Input**: Cropped stamp / logo / seal region from YOLOv8.
 
-**Enrollment (first submission)**:
+> **Stamp enrollment is human-confirmed, not automatic.** Stamps, logos, and seals are ambiguous: a first-time stamp is *unverified* — there is nothing genuine to compare it against — so trusting it automatically would let a forged stamp become the "genuine" reference. Therefore the system never silently enrolls a stamp on first sight. A first-time stamp is **flagged as `Unknown / unreferenced stamp`** and the tamper check still runs; the stamp only becomes the vendor's trusted reference after a compliance officer/admin **approves the document and explicitly confirms enrollment**. (This differs from signature handling in §4a, where the first submission auto-enrolls the reference embedding.)
+
+**Tamper check (always runs, reference or not)**:
 1. The cropped stamp is preprocessed (resized, normalized).
-2. It is passed through an **EfficientNet model** (pre-trained, classification head removed, used as a fixed feature extractor) to produce a **compact feature vector**.
-3. This vector is stored as the vendor's **reference stamp embedding**.
+2. It is passed through an **EfficientNet model** (pre-trained, classification head removed, used as a fixed feature extractor) to produce a **compact feature vector** and analyze texture.
+3. EfficientNet's MBConv blocks distinguish genuine **wet-ink impressions** from **photocopied, scanned, or digitally edited reproductions** regardless of whether a reference exists. A detected reproduction/edit raises a `Stamp tampered` flag.
 
-**Verification (subsequent submissions)**:
+**First submission (no reference yet)**:
+1. The tamper check above runs and its result is recorded.
+2. Because no reference embedding exists for this vendor, the stamp is **flagged `Unknown / unreferenced stamp`** rather than validated or auto-trusted.
+3. The feature vector is held pending. **Only if** the document is later approved does the system **prompt the officer/admin** — *"Add this stamp/logo/seal as the trusted reference for this vendor?"* On confirmation, the vector is stored as the vendor's **reference stamp embedding**. If declined, nothing is enrolled and the next submission is treated as first-time again.
+
+**Verification (subsequent submissions, reference exists)**:
 1. The new cropped stamp is preprocessed and passed through the same EfficientNet model to produce a **query feature vector**.
 2. The query vector is compared to the stored reference vector using a **distance metric** (cosine similarity or Euclidean distance).
 3. The distance is converted to a **similarity percentage** (e.g., "95.2% match").
@@ -263,9 +270,14 @@ This section walks through exactly what happens from the moment a file enters th
 
 **What the model distinguishes**: EfficientNet's MBConv blocks capture texture-level features that differentiate **wet-ink impressions** from **photocopied or scanned reproductions**. Halftone dot patterns in photocopies, for example, produce different texture signatures than genuine wet ink.
 
-**Output**: Similarity percentage + pass/fail indicator.
+**Output**: Tamper result + (when a reference exists) similarity percentage and pass/fail indicator; otherwise an `Unknown / unreferenced stamp` flag.
 
-**Failure path**: Below-threshold similarity triggers a flag: "Stamp mismatch — suspect reproduction." This feeds into the composite risk score.
+**Failure paths**:
+- **No reference yet** → `Unknown / unreferenced stamp` flag; contributes to the composite risk score and triggers the post-approval enrollment prompt described above.
+- **Tampering detected** → `Stamp tampered — suspect reproduction/edit` flag (raised even on a first submission).
+- **Below-threshold similarity** (reference exists) → `Stamp mismatch — suspect reproduction` flag.
+
+All feed into the composite risk score.
 
 ---
 
@@ -403,7 +415,7 @@ All file paths are stored as references in the database, not the files themselve
 | Signature reference embedding | Database (vendor profile record) | 128-dimensional float vector, serialized as JSON or binary blob |
 | Stamp reference feature vector | Database (vendor profile record) | Float vector (dimension depends on EfficientNet variant), serialized similarly |
 
-These embeddings are created during the vendor's **first submission** (enrollment) and persist for the lifetime of the vendor's account. They are updated only if the vendor explicitly re-enrolls with new reference documents.
+The **signature** reference embedding is created automatically during the vendor's **first submission**. The **stamp / logo / seal** reference embedding is *not* created automatically — it is stored only after an officer/admin approves a document and confirms enrollment (see §4b). Once stored, both persist for the lifetime of the vendor's account and are updated only if the vendor explicitly re-enrolls with new reference documents.
 
 ### Model Files
 
@@ -499,9 +511,9 @@ VENDOR                          SYSTEM                              OFFICER / AD
                                     Euclidean distance → Score
 
                                 8b. Stamp (EfficientNet)
-                                    Extract features → Compare
-                                    to reference → Cosine sim →
-                                    Score
+                                    Tamper check (always) → if no
+                                    reference: flag "Unknown stamp";
+                                    else compare → Cosine sim → Score
 
                                 9. Aggregate all scores →
                                    Compute composite risk →
@@ -518,6 +530,9 @@ VENDOR                          SYSTEM                              OFFICER / AD
                                                                     13. Decide: Approve / Reject
                                                                         Record decision + comments
                                                                         Status: APPROVED / REJECTED
+                                                                        If approved doc had an unknown
+                                                                        stamp → prompt: enroll as
+                                                                        trusted reference?
 
 14. Receive decision            ◄────────────────────────────────── Decision recorded
     notification                                                    Audit trail updated
