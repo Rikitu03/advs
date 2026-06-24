@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1180" viewBox="0 0 1680 1180" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <linearGradient id="gProcess" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7B68EE"/>
+      <stop offset="100%" stop-color="#FD71AF"/>
+    </linearGradient>
+    <linearGradient id="gTitle" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7B68EE"/>
+      <stop offset="100%" stop-color="#FD71AF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0D0D0F" flood-opacity="0.18"/>
+    </filter>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L11,5 L0,10 z" fill="#5b5b6b"/>
+    </marker>
+    <marker id="arrowFb" markerWidth="16" markerHeight="16" refX="10" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,5 L0,10 z" fill="#D9A400"/>
+    </marker>
+  </defs>
+
+  <!-- background -->
+  <rect width="1680" height="1180" fill="#F6F6FB"/>
+
+  <!-- Title -->
+  <text x="840" y="58" text-anchor="middle" font-size="34" font-weight="700" fill="#1A1A2E">Conceptual Framework of the Automated Document Validation System (ADVS)</text>
+  <text x="840" y="92" text-anchor="middle" font-size="20" font-weight="500" fill="#7B68EE">for Vendor Accreditation &#8212; Input&#8211;Process&#8211;Output (IPO) Model</text>
+
+  <!-- ============ INPUT ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="140" width="440" height="780" rx="18" fill="#FFFFFF" stroke="#E3E1F2" stroke-width="1.5"/>
+    <rect x="60" y="140" width="440" height="64" rx="18" fill="#7B68EE"/>
+    <rect x="60" y="172" width="440" height="32" fill="#7B68EE"/>
+  </g>
+  <text x="280" y="182" text-anchor="middle" font-size="26" font-weight="700" fill="#FFFFFF" letter-spacing="2">INPUT</text>
+
+  <g font-size="18" fill="#2A2A3A">
+    <text x="92" y="252" font-weight="600" fill="#7B68EE">Documents &amp; Data</text>
+    <text x="92" y="288">&#8226;  Vendor accreditation documents</text>
+    <text x="112" y="312" fill="#5b5b6b" font-size="16">(PDF / PNG / JPG)</text>
+    <text x="92" y="346">&#8226;  Vendor account credentials</text>
+    <text x="92" y="380">&#8226;  Reference signature</text>
+    <text x="112" y="404" fill="#5b5b6b" font-size="16">(captured on 1st submission)</text>
+
+    <text x="92" y="456" font-weight="600" fill="#7B68EE">Human Inputs</text>
+    <text x="92" y="492">&#8226;  Compliance officer review</text>
+    <text x="112" y="516" fill="#5b5b6b" font-size="16">actions (approve / reject)</text>
+    <text x="92" y="550">&#8226;  Officer-confirmed stamp</text>
+    <text x="112" y="574" fill="#5b5b6b" font-size="16">enrollment decisions</text>
+
+    <text x="92" y="626" font-weight="600" fill="#7B68EE">Configuration</text>
+    <text x="92" y="662">&#8226;  Risk-score weights</text>
+    <text x="92" y="696">&#8226;  Confidence &amp; similarity</text>
+    <text x="112" y="720" fill="#5b5b6b" font-size="16">thresholds</text>
+    <text x="92" y="754">&#8226;  Accepted formats &amp; size limits</text>
+  </g>
+
+  <!-- ============ PROCESS ============ -->
+  <g filter="url(#shadow)">
+    <rect x="620" y="140" width="440" height="780" rx="18" fill="#FFFFFF" stroke="#E3E1F2" stroke-width="1.5"/>
+    <rect x="620" y="140" width="440" height="64" rx="18" fill="url(#gProcess)"/>
+    <rect x="620" y="172" width="440" height="32" fill="#FD71AF"/>
+  </g>
+  <text x="840" y="182" text-anchor="middle" font-size="26" font-weight="700" fill="#FFFFFF" letter-spacing="2">PROCESS</text>
+
+  <g font-size="17.5" fill="#2A2A3A">
+    <text x="652" y="248" font-weight="700">1.  Image Preprocessing</text>
+    <text x="672" y="270" fill="#5b5b6b" font-size="15">OpenCV: grayscale &#8594; binarize &#8594; denoise</text>
+
+    <text x="652" y="312" font-weight="700">2.  Text Extraction &amp; Validation</text>
+    <text x="672" y="334" fill="#5b5b6b" font-size="15">PyTesseract OCR + template matching</text>
+
+    <text x="652" y="376" font-weight="700">3.  Document Classification</text>
+    <text x="672" y="398" fill="#5b5b6b" font-size="15">ResNet-50 &#8594; type + confidence</text>
+
+    <text x="652" y="440" font-weight="700">4.  Signature &amp; Stamp Detection</text>
+    <text x="672" y="462" fill="#5b5b6b" font-size="15">YOLOv8 &#8594; locate &amp; crop regions</text>
+
+    <text x="652" y="504" font-weight="700">5a. Signature Verification</text>
+    <text x="672" y="526" fill="#5b5b6b" font-size="15">Siamese CNN (auto-enroll if 1st time)</text>
+
+    <text x="652" y="568" font-weight="700">5b. Stamp / Logo / Seal Verification</text>
+    <text x="672" y="590" fill="#5b5b6b" font-size="15">EfficientNet tamper check (always runs)</text>
+    <text x="672" y="610" fill="#FD71AF" font-size="15">if no reference &#8594; flag &#8220;Unknown stamp&#8221;</text>
+
+    <text x="652" y="652" font-weight="700">6.  Risk Score Computation</text>
+    <text x="672" y="674" fill="#5b5b6b" font-size="15">weighted aggregation of all signals</text>
+
+    <text x="652" y="716" font-weight="700">7.  Officer Review &amp; Decision</text>
+    <text x="672" y="738" fill="#5b5b6b" font-size="15">human-in-the-loop final call</text>
+  </g>
+  <rect x="652" y="772" width="376" height="118" rx="12" fill="#FBF1F7" stroke="#FAD2E6" stroke-width="1.5"/>
+  <text x="672" y="804" font-size="15" font-weight="700" fill="#C03A7A">Stamp enrollment is human-confirmed:</text>
+  <text x="672" y="828" font-size="14.5" fill="#7a3a57">a first-time stamp is flagged as unreferenced,</text>
+  <text x="672" y="850" font-size="14.5" fill="#7a3a57">never auto-trusted. On approval the system</text>
+  <text x="672" y="872" font-size="14.5" fill="#7a3a57">prompts the officer to enroll it as a reference.</text>
+
+  <!-- ============ OUTPUT ============ -->
+  <g filter="url(#shadow)">
+    <rect x="1180" y="140" width="440" height="780" rx="18" fill="#FFFFFF" stroke="#E3E1F2" stroke-width="1.5"/>
+    <rect x="1180" y="140" width="440" height="64" rx="18" fill="#1FB6E8"/>
+    <rect x="1180" y="172" width="440" height="32" fill="#1FB6E8"/>
+  </g>
+  <text x="1400" y="182" text-anchor="middle" font-size="26" font-weight="700" fill="#FFFFFF" letter-spacing="2">OUTPUT</text>
+
+  <g font-size="18" fill="#2A2A3A">
+    <text x="1212" y="252" font-weight="600" fill="#1095C4">Validation Results</text>
+    <text x="1212" y="288">&#8226;  Document type + confidence</text>
+    <text x="1212" y="322">&#8226;  Signature authenticity result</text>
+    <text x="1212" y="356">&#8226;  Stamp authenticity &amp; tamper result</text>
+
+    <text x="1212" y="408" font-weight="600" fill="#1095C4">Flags</text>
+    <text x="1212" y="442" font-size="16">&#8226;  Unknown / unreferenced stamp</text>
+    <text x="1212" y="470" font-size="16">&#8226;  Stamp tampered / reproduction</text>
+    <text x="1212" y="498" font-size="16">&#8226;  Signature mismatch</text>
+    <text x="1212" y="526" font-size="16">&#8226;  Missing required fields</text>
+    <text x="1212" y="554" font-size="16">&#8226;  Low classification confidence</text>
+
+    <text x="1212" y="606" font-weight="600" fill="#1095C4">Decision &amp; Records</text>
+    <text x="1212" y="640">&#8226;  Composite Risk Score 0&#8211;100</text>
+    <text x="1232" y="664" fill="#5b5b6b" font-size="16">(Low / Medium / High)</text>
+    <text x="1212" y="698">&#8226;  Validation Report</text>
+    <text x="1212" y="732">&#8226;  Approve / Reject decision</text>
+    <text x="1212" y="766">&#8226;  Vendor notifications</text>
+  </g>
+  <rect x="1212" y="788" width="376" height="102" rx="12" fill="#FFF8E0" stroke="#FFE38A" stroke-width="1.5"/>
+  <text x="1232" y="820" font-size="15" font-weight="700" fill="#A07800">Stamp Enrollment Prompt</text>
+  <text x="1232" y="844" font-size="14.5" fill="#7a6420">Shown when an approved document carried an</text>
+  <text x="1232" y="866" font-size="14.5" fill="#7a6420">unreferenced stamp / logo / seal.</text>
+
+  <!-- arrows between columns -->
+  <line x1="502" y1="530" x2="616" y2="530" stroke="#5b5b6b" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="1062" y1="530" x2="1176" y2="530" stroke="#5b5b6b" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <!-- ============ FEEDBACK ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="970" width="1560" height="120" rx="16" fill="#FFFDF5" stroke="#FFE38A" stroke-width="2"/>
+  </g>
+  <rect x="60" y="970" width="220" height="120" rx="16" fill="#FFC800"/>
+  <rect x="244" y="970" width="36" height="120" fill="#FFC800"/>
+  <text x="170" y="1022" text-anchor="middle" font-size="22" font-weight="700" fill="#3a3000">FEEDBACK</text>
+  <text x="170" y="1052" text-anchor="middle" font-size="14" fill="#5a4a00">loop</text>
+
+  <text x="312" y="1012" font-size="18" fill="#2A2A3A" font-weight="600">Officer-confirmed stamp enrollment populates the reference library used to validate future submissions.</text>
+  <text x="312" y="1044" font-size="17" fill="#5b5b6b">Approve / reject decisions and vendor resubmissions continuously refine the accuracy of subsequent validations.</text>
+
+  <!-- feedback loop arrows: output -> down -> across -> up to input -->
+  <path d="M1400 922 L1400 948 L 290 948" fill="none" stroke="#D9A400" stroke-width="3.5" stroke-dasharray="2 0"/>
+  <path d="M280 1030 L 40 1030 L 40 530 L 56 530" fill="none" stroke="#D9A400" stroke-width="3.5" marker-end="url(#arrowFb)"/>
+
+  <!-- footer -->
+  <text x="840" y="1140" text-anchor="middle" font-size="14" fill="#9a9aac">Lopez, M. S. &#183; Inocencio, R. A. A. &#183; Recto, J. J. M. &#8212; Pamantasan ng Lungsod ng Pasig, College of Computer Studies</text>
+</svg>
