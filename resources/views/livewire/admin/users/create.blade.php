@@ -46,7 +46,7 @@ new #[Layout('components.layouts.app')] class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6">
 
         <div class="cu-animate-in flex flex-col gap-2">
@@ -55,7 +55,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                 <flux:breadcrumbs.item href="{{ route('admin.users.index') }}" wire:navigate>User Management</flux:breadcrumbs.item>
                 <flux:breadcrumbs.item>Create User</flux:breadcrumbs.item>
             </flux:breadcrumbs>
-            <h1 class="text-2xl font-semibold tracking-tight text-white">Create User</h1>
+            <h1 class="text-2xl font-semibold tracking-tight text-cu-text">Create User</h1>
             <p class="text-sm text-cu-muted">
                 Create a new account and assign a role. New users are pre-verified.
             </p>
@@ -64,13 +64,13 @@ new #[Layout('components.layouts.app')] class extends Component {
         <form
             action="{{ route('admin.users.store') }}"
             method="POST"
-            class="cu-animate-in flex flex-col gap-5 rounded-2xl border border-white/5 bg-cu-surface p-6"
+            class="cu-animate-in flex flex-col gap-5 rounded-2xl border border-cu-border bg-cu-surface p-6"
             style="animation-delay: 60ms"
         >
             @csrf
 
             @if ($errors->any())
-                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">
                     <ul class="list-disc space-y-1 pl-5">
                         @foreach ($errors->all() as $error)
                             <li>{{ $error }}</li>
@@ -112,13 +112,13 @@ new #[Layout('components.layouts.app')] class extends Component {
             <label class="inline-flex items-center gap-2">
                 <input type="hidden" name="is_active" value="0">
                 <input type="checkbox" name="is_active" value="1" checked
-                       class="size-4 rounded border-white/20 bg-cu-bg text-cu-purple focus:ring-cu-purple">
-                <span class="text-sm text-white">Active</span>
+                       class="size-4 rounded border-cu-border bg-cu-surface text-cu-purple focus:ring-cu-purple">
+                <span class="text-sm text-cu-text">Active</span>
             </label>
 
             <div class="flex items-center justify-end gap-3 pt-2">
                 <a href="{{ route('admin.users.index') }}" wire:navigate
-                   class="inline-flex items-center rounded-xl border border-white/10 bg-cu-bg px-4 py-2.5 text-sm font-medium text-cu-muted hover:text-white">
+                   class="inline-flex items-center rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-medium text-cu-muted hover:text-cu-text">
                     Cancel
                 </a>
                 <button type="submit"
@@ -129,4 +129,4 @@ new #[Layout('components.layouts.app')] class extends Component {
             </div>
         </form>
     </div>
-</div>
+</x-page>

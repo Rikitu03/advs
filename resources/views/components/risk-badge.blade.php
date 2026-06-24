@@ -6,9 +6,9 @@
 @php
     // Literal class strings per band so Tailwind's JIT compiler picks them up.
     $map = [
-        'high' => 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
-        'medium' => 'bg-amber-400/15 text-amber-300 ring-amber-400/30',
-        'low' => 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
+        'high' => 'bg-rose-500/15 text-rose-700 ring-rose-500/30 dark:text-rose-300',
+        'medium' => 'bg-amber-400/15 text-amber-700 ring-amber-400/30 dark:text-amber-300',
+        'low' => 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300',
     ];
     $dot = [
         'high' => 'bg-rose-400',

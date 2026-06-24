@@ -2,11 +2,11 @@
 
 @php
     $classes = match ($status) {
-        'Processing' => 'border-cu-blue/30 bg-cu-blue/10 text-sky-700',
-        'Pending Review' => 'border-cu-yellow/60 bg-cu-yellow/20 text-yellow-700',
-        'Approved' => 'border-emerald-300 bg-emerald-50 text-emerald-700',
-        'Rejected' => 'border-rose-300 bg-rose-50 text-rose-700',
-        default => 'border-zinc-200 bg-zinc-50 text-zinc-700',
+        'Processing' => 'border-cu-blue/30 bg-cu-blue/10 text-sky-700 dark:text-sky-300',
+        'Pending Review' => 'border-cu-yellow/60 bg-cu-yellow/20 text-yellow-700 dark:text-yellow-300',
+        'Approved' => 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+        'Rejected' => 'border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300',
+        default => 'border-cu-border bg-black/5 text-cu-text dark:bg-white/5',
     };
 @endphp
 

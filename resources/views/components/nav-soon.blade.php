@@ -4,7 +4,7 @@
      ADVS_System_Reference.md §4) but not yet built. Keeps the full information
      architecture visible without dead links. --}}
 <div
-    {{ $attributes->merge(['class' => 'flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-sm text-zinc-500 dark:text-zinc-400/70']) }}
+    {{ $attributes->merge(['class' => 'flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-sm text-cu-muted']) }}
     aria-disabled="true"
     title="Coming soon"
 >

@@ -39,4 +39,26 @@ class PreferenceTest extends TestCase
         $this->get(route('settings.preference'))
             ->assertRedirect(route('login'));
     }
+
+    public function test_preference_toggle_is_wired_to_the_cookie_runtime(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->get(route('settings.preference'))
+            ->assertOk()
+            ->assertSee('advsTheme.set', false)
+            ->assertDontSee('$flux.appearance', false);
+    }
+
+    public function test_appearance_page_is_wired_to_the_cookie_runtime(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->get(route('settings.appearance'))
+            ->assertOk()
+            ->assertSee('advsTheme.set', false)
+            ->assertDontSee('$flux.appearance', false);
+    }
 }

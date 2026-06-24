@@ -35,7 +35,7 @@ new #[Layout('components.layouts.app')] class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6">
 
         <div class="cu-animate-in flex flex-col gap-2">
@@ -46,11 +46,11 @@ new #[Layout('components.layouts.app')] class extends Component {
             </flux:breadcrumbs>
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-semibold tracking-tight text-white">Edit User</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight text-cu-text">Edit User</h1>
                     <p class="text-sm text-cu-muted">{{ $user->email }}</p>
                 </div>
                 <a href="{{ route('admin.users.index') }}" wire:navigate
-                   class="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-cu-surface px-3 py-2 text-sm font-medium text-cu-muted hover:text-white">
+                   class="inline-flex items-center gap-1.5 rounded-xl border border-cu-border bg-cu-surface px-3 py-2 text-sm font-medium text-cu-muted hover:text-cu-text">
                     <flux:icon icon="arrow-left" class="size-4" />
                     Back
                 </a>
@@ -61,14 +61,14 @@ new #[Layout('components.layouts.app')] class extends Component {
         <form
             action="{{ route('admin.users.update', $user) }}"
             method="POST"
-            class="cu-animate-in flex flex-col gap-5 rounded-2xl border border-white/5 bg-cu-surface p-6"
+            class="cu-animate-in flex flex-col gap-5 rounded-2xl border border-cu-border bg-cu-surface p-6"
             style="animation-delay: 60ms"
         >
             @csrf
             @method('PUT')
 
             @if ($errors->any())
-                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                <div class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">
                     <ul class="list-disc space-y-1 pl-5">
                         @foreach ($errors->all() as $error)
                             <li>{{ $error }}</li>
@@ -95,7 +95,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                     <option value="{{ User::ROLE_ADMIN }}" @selected(old('role', $user->role) === User::ROLE_ADMIN)>Admin</option>
                 </flux:select>
                 @if ($user->id === auth()->id())
-                    <p class="mt-1 text-xs text-amber-300">You cannot change your own role here.</p>
+                    <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">You cannot change your own role here.</p>
                 @endif
             </div>
 
@@ -114,13 +114,13 @@ new #[Layout('components.layouts.app')] class extends Component {
                 <input type="hidden" name="is_active" value="0">
                 <input type="checkbox" name="is_active" value="1"
                        @checked(old('is_active', $user->is_active))
-                       class="size-4 rounded border-white/20 bg-cu-bg text-cu-purple focus:ring-cu-purple">
-                <span class="text-sm text-white">Active</span>
+                       class="size-4 rounded border-cu-border bg-cu-surface text-cu-purple focus:ring-cu-purple">
+                <span class="text-sm text-cu-text">Active</span>
             </label>
 
             <div class="flex items-center justify-end gap-3 pt-2">
                 <a href="{{ route('admin.users.index') }}" wire:navigate
-                   class="inline-flex items-center rounded-xl border border-white/10 bg-cu-bg px-4 py-2.5 text-sm font-medium text-cu-muted hover:text-white">
+                   class="inline-flex items-center rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-medium text-cu-muted hover:text-cu-text">
                     Cancel
                 </a>
                 <button type="submit"
@@ -133,7 +133,7 @@ new #[Layout('components.layouts.app')] class extends Component {
 
         {{-- Delete (separate form, with confirmation prompt) --}}
         <div class="cu-animate-in rounded-2xl border border-rose-500/20 bg-rose-500/5 p-6" style="animation-delay: 120ms">
-            <h2 class="text-base font-semibold text-white">Danger zone</h2>
+            <h2 class="text-base font-semibold text-cu-text">Danger zone</h2>
             <p class="mt-1 text-sm text-cu-muted">
                 Deleting a user is permanent. You will be asked to type their email address to confirm.
             </p>
@@ -152,23 +152,23 @@ new #[Layout('components.layouts.app')] class extends Component {
                     x-show="!open"
                     x-on:click.prevent="open = true"
                     type="button"
-                    class="self-start inline-flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20">
+                    class="self-start inline-flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-700 dark:text-rose-200 hover:bg-rose-500/20">
                     <flux:icon icon="trash" class="size-4" />
                     Delete this user
                 </button>
 
                 <div x-show="open" x-transition class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4">
-                    <p class="text-sm text-rose-200">
-                        Type <span class="font-mono font-semibold text-white">{{ $user->email }}</span> to confirm:
+                    <p class="text-sm text-rose-700 dark:text-rose-200">
+                        Type <span class="font-mono font-semibold text-cu-text">{{ $user->email }}</span> to confirm:
                     </p>
                     <input
                         x-model="typed"
                         type="email"
-                        class="mt-3 w-full rounded-xl border border-rose-500/30 bg-cu-bg px-3 py-2 text-sm text-white placeholder:text-cu-muted focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                        class="mt-3 w-full rounded-xl border border-rose-500/30 bg-black/5 dark:bg-white/5 px-3 py-2 text-sm text-cu-text placeholder:text-cu-muted focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
                         placeholder="{{ $user->email }}">
                     <div class="mt-3 flex items-center justify-end gap-2">
                         <button x-on:click.prevent="open = false; typed = ''" type="button"
-                                class="rounded-lg border border-white/10 bg-cu-bg px-3 py-1.5 text-sm text-cu-muted hover:text-white">
+                                class="rounded-lg border border-cu-border bg-cu-surface px-3 py-1.5 text-sm text-cu-muted hover:text-cu-text">
                             Cancel
                         </button>
                         <button
@@ -182,4 +182,4 @@ new #[Layout('components.layouts.app')] class extends Component {
             </form>
         </div>
     </div>
-</div>
+</x-page>

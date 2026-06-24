@@ -38,7 +38,7 @@ new class extends Component {
     }
 }; ?>
 
-<div class="-m-6 min-h-full bg-cu-bg p-6 text-cu-text lg:-m-8 lg:p-8">
+<x-page>
     <div class="mx-auto flex w-full max-w-4xl flex-col gap-6">
 
         {{-- Header --}}
@@ -49,10 +49,10 @@ new class extends Component {
             </flux:breadcrumbs>
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl font-semibold tracking-tight text-white">Notifications</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight text-cu-text">Notifications</h1>
                     <p class="text-sm text-cu-muted">Review alerts, high-risk flags, and decision activity.</p>
                 </div>
-                <span class="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1.5 text-sm text-cu-muted">
+                <span class="inline-flex items-center gap-2 rounded-full bg-black/5 px-3 py-1.5 text-sm text-cu-muted dark:bg-white/5">
                     <flux:icon.loading wire:loading variant="micro" class="size-3.5 text-cu-purple" />
                     <span wire:loading.remove class="size-2 rounded-full bg-cu-purple"></span>
                     {{ $unreadCount }} unread
@@ -61,15 +61,15 @@ new class extends Component {
         </div>
 
         {{-- Toolbar --}}
-        <div class="cu-animate-in flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/5 bg-cu-surface p-4" style="animation-delay: 60ms">
-            <div class="flex items-center gap-1 rounded-xl border border-white/10 bg-cu-bg p-1">
+        <div class="cu-animate-in flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cu-border bg-cu-surface p-4" style="animation-delay: 60ms">
+            <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 p-1 dark:bg-white/5">
                 @foreach (['all' => 'All', 'unread' => 'Unread'] as $value => $text)
                     <button type="button" wire:click="setFilter('{{ $value }}')"
-                            class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $filter === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-white' }}">{{ $text }}</button>
+                            class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $filter === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
                 @endforeach
             </div>
             <button type="button" wire:click="markAllRead" wire:loading.attr="disabled" wire:target="markAllRead" @disabled($unreadCount === 0)
-                    class="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white transition hover:border-cu-purple hover:bg-cu-purple/10 disabled:cursor-not-allowed disabled:opacity-40">
+                    class="inline-flex items-center gap-1.5 rounded-lg border border-cu-border px-3 py-1.5 text-sm font-medium text-cu-text transition hover:border-cu-purple hover:bg-cu-purple/10 disabled:cursor-not-allowed disabled:opacity-40">
                 <flux:icon.loading wire:loading wire:target="markAllRead" variant="micro" class="size-4" />
                 <flux:icon icon="check" wire:loading.remove wire:target="markAllRead" class="size-4" />
                 Mark all as read
@@ -77,16 +77,16 @@ new class extends Component {
         </div>
 
         {{-- Feed --}}
-        <div class="cu-animate-in overflow-hidden rounded-2xl border border-white/5 bg-cu-surface" style="animation-delay: 120ms">
-            <div class="divide-y divide-white/5" wire:loading.class="opacity-40" wire:target="setFilter, markAllRead">
+        <div class="cu-animate-in overflow-hidden rounded-2xl border border-cu-border bg-cu-surface" style="animation-delay: 120ms">
+            <div class="divide-y divide-cu-border" wire:loading.class="opacity-40" wire:target="setFilter, markAllRead">
                 @foreach ($rows as $n)
                     <div wire:key="notification-{{ $n['id'] }}"
-                         class="cu-animate-in flex gap-4 px-5 py-4 transition hover:bg-white/[0.03] {{ $n['read'] ? '' : 'bg-cu-purple/5' }}"
+                         class="cu-animate-in flex gap-4 px-5 py-4 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.03] {{ $n['read'] ? '' : 'bg-cu-purple/5' }}"
                          style="animation-delay: {{ min($loop->index * 40, 320) }}ms">
                         <x-activity-icon :icon="$n['icon']" :color="$n['color']" />
                         <div class="min-w-0 flex-1">
                             <div class="flex items-start justify-between gap-3">
-                                <p class="text-sm font-medium {{ $n['read'] ? 'text-cu-muted' : 'text-white' }}">
+                                <p class="text-sm font-medium {{ $n['read'] ? 'text-cu-muted' : 'text-cu-text' }}">
                                     {{ $n['title'] }}
                                 </p>
                                 <span class="flex shrink-0 items-center gap-2">
@@ -101,14 +101,14 @@ new class extends Component {
                                 @if ($n['submission_id'] !== null)
                                     <a href="{{ route('admin.submissions.show', $n['submission_id']) }}" wire:navigate
                                        wire:click="markRead({{ $n['id'] }})"
-                                       class="inline-flex items-center gap-1 text-xs font-medium text-cu-blue transition hover:text-white">
+                                       class="inline-flex items-center gap-1 text-xs font-medium text-cu-blue transition hover:text-cu-text">
                                         View submission
                                         <flux:icon icon="arrow-up-right" class="size-3" />
                                     </a>
                                 @endif
                                 @unless ($n['read'])
                                     <button type="button" wire:click="markRead({{ $n['id'] }})"
-                                            class="text-xs font-medium text-cu-muted transition hover:text-white">
+                                            class="text-xs font-medium text-cu-muted transition hover:text-cu-text">
                                         Mark as read
                                     </button>
                                 @endunless
@@ -121,10 +121,10 @@ new class extends Component {
             @if ($rows->isEmpty())
                 <div class="flex flex-col items-center gap-2 px-5 py-16 text-center">
                     <flux:icon icon="bell-slash" class="size-8 text-cu-muted" />
-                    <p class="text-sm font-medium text-white">You're all caught up</p>
+                    <p class="text-sm font-medium text-cu-text">You're all caught up</p>
                     <p class="text-xs text-cu-muted">No unread notifications right now.</p>
                 </div>
             @endif
         </div>
     </div>
-</div>
+</x-page>
