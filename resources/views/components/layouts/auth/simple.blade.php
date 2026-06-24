@@ -18,6 +18,15 @@
             </div>
         </div>
         <flux:toast />
+
+        @if ($toast = session()->pull('toast'))
+            <x-flux-toast
+                :heading="$toast['heading'] ?? ''"
+                :text="$toast['text'] ?? ''"
+                :variant="$toast['variant'] ?? 'info'"
+            />
+        @endif
+
         @fluxScripts
     </body>
 </html>

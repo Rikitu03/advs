@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\SystemSettingsController;
+use App\Http\Controllers\Admin\UserController;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -30,9 +33,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     })->name('dashboard');
 
     // Vendor portal
-    Route::view('vendor/dashboard', 'vendor.dashboard')
-        ->middleware('role:vendor')
-        ->name('vendor.dashboard');
+    Route::middleware('role:vendor')->group(function () {
+        Volt::route('vendor/dashboard', 'vendor.dashboard')->name('vendor.dashboard');
+        Volt::route('vendor/submit', 'vendor.submit')->name('vendor.submit');
+        Volt::route('vendor/submissions', 'vendor.submissions')->name('vendor.submissions');
+        Volt::route('vendor/notifications', 'vendor.notifications')->name('vendor.notifications');
+        Volt::route('vendor/profile', 'vendor.profile')->name('vendor.profile');
+    });
 
     // Compliance officer / admin dashboard + review workflow.
     // All pages are full-page Volt components backed by the session-scoped
@@ -58,6 +65,36 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Notifications — officer alert feed (§7).
         Volt::route('admin/notifications', 'admin.notifications')->name('admin.notifications');
+
+        // User Management — admin-only user CRUD (§3 / §5).
+        // All routes are gated by `role:admin` AND the UserPolicy inside the
+        // controller so an admin cannot delete/demote themselves.
+        Route::middleware('role:admin')->prefix('admin/users')->name('admin.users.')->group(function () {
+            Route::get('/', [UserController::class, 'index'])->name('index');
+            Route::get('create', [UserController::class, 'create'])->name('create');
+            Route::post('/', [UserController::class, 'store'])->name('store');
+            Route::get('{user}/edit', [UserController::class, 'edit'])->name('edit');
+            Route::put('{user}', [UserController::class, 'update'])->name('update');
+            Route::patch('{user}/role', [UserController::class, 'updateRole'])->name('update-role');
+            Route::delete('{user}', [UserController::class, 'destroy'])->name('destroy');
+        });
+
+        // System Settings — admin-only threshold / parameter tuning UI.
+        // All routes are gated by `role:admin` AND the SystemSettingPolicy
+        // inside the controller/Volt component.
+        Route::middleware('role:admin')->prefix('admin/settings')->name('admin.settings.')->group(function () {
+            Volt::route('/', 'admin.settings.index')->name('index');
+            Route::post('{key}/reset', [SystemSettingsController::class, 'reset'])->name('reset');
+        });
+
+        // Audit Trail — admin-only viewer for the append-only audit log.
+        // The Volt page owns the index, filtering, and search; the
+        // controller serves the detail drill-down and CSV export.
+        Route::middleware('role:admin')->prefix('admin/audit')->name('admin.audit.')->group(function () {
+            Volt::route('/', 'admin.audit.index')->name('index');
+            Route::get('export', [AuditLogController::class, 'export'])->name('export');
+            Route::get('{audit}', [AuditLogController::class, 'show'])->name('show');
+        });
     });
 });
 
@@ -76,5 +113,6 @@ Route::middleware(['auth'])->group(function () {
 
     Volt::route('settings/profile', 'settings.profile')->name('settings.profile');
     Volt::route('settings/password', 'settings.password')->name('settings.password');
+    Volt::route('settings/preference', 'settings.preference')->name('settings.preference');
     Volt::route('settings/appearance', 'settings.appearance')->name('settings.appearance');
 });

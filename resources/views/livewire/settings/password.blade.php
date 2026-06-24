@@ -37,7 +37,7 @@ new class extends Component {
     }
 }; ?>
 
-<section class="w-full">
+<section class="mx-auto w-full max-w-5xl rounded-2xl border border-cu-border bg-cu-surface p-6 shadow-sm">
     @include('partials.settings-heading')
 
     <x-settings.layout heading="Update password" subheading="Ensure your account is using a long, random password to stay secure">

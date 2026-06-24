@@ -3,8 +3,10 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -85,6 +87,7 @@ class SignatureEnrollmentTest extends TestCase
     public function test_vendor_can_enroll_an_authentic_signature_photo(): void
     {
         Storage::fake('local');
+        Notification::fake();
 
         $user = User::factory()->unenrolled()->unverified()->create();
 
@@ -103,6 +106,10 @@ class SignatureEnrollmentTest extends TestCase
         $this->assertNotNull($user->signature_path);
         Storage::disk('local')->assertExists($user->signature_path);
         $this->assertStringStartsWith("signatures/{$user->id}/", $user->signature_path);
+
+        // Email verification is the final step: enrolling the signature is what
+        // triggers the verification link (it is not sent at registration).
+        Notification::assertSentTo($user, VerifyEmail::class);
     }
 
     public function test_software_edited_photo_is_rejected_and_not_enrolled(): void

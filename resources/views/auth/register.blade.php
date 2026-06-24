@@ -4,6 +4,14 @@
 
         <x-auth-session-status class="text-center" :status="session('status')" />
 
+        @if ($errors->any())
+            <x-flux-toast
+                variant="danger"
+                :heading="__('Registration failed')"
+                :text="__('Please review the highlighted fields and try again.')"
+            />
+        @endif
+
         {{-- Step indicator: account → signature enrollment → email verification --}}
         <ol class="flex items-center gap-2 text-xs font-medium">
             <li class="flex items-center gap-1.5 text-cu-purple">
