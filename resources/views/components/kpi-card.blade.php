@@ -17,7 +17,7 @@
     $a = $accents[$accent] ?? $accents['purple'];
 @endphp
 
-<div {{ $attributes->merge(['class' => 'relative overflow-hidden rounded-2xl border border-cu-border bg-cu-surface p-5 transition hover:border-cu-border']) }}>
+<div {{ $attributes->merge(['class' => 'relative overflow-hidden rounded-2xl border border-cu-border bg-cu-surface p-5 transition hover:border-cu-text/20']) }}>
     <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
             <p class="truncate text-sm font-medium text-cu-muted">{{ $label }}</p>

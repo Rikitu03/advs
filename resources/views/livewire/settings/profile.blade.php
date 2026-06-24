@@ -69,7 +69,7 @@ new class extends Component {
     }
 }; ?>
 
-<section class="mx-auto w-full max-w-5xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+<section class="mx-auto w-full max-w-5xl rounded-2xl border border-cu-border bg-cu-surface p-6 shadow-sm">
     @include('partials.settings-heading')
 
     <x-settings.layout heading="Profile" subheading="Update your name and email address">
@@ -81,19 +81,19 @@ new class extends Component {
 
                 @if (auth()->user() instanceof \Illuminate\Contracts\Auth\MustVerifyEmail &&! auth()->user()->hasVerifiedEmail())
                     <div>
-                        <p class="mt-2 text-sm text-gray-800">
+                        <p class="mt-2 text-sm text-cu-text">
                             {{ __('Your email address is unverified.') }}
 
                             <button
                                 wire:click.prevent="resendVerificationNotification"
-                                class="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                class="rounded-md text-sm text-cu-muted underline hover:text-cu-text focus:outline-hidden focus:ring-2 focus:ring-cu-purple focus:ring-offset-2"
                             >
                                 {{ __('Click here to re-send the verification email.') }}
                             </button>
                         </p>
 
                         @if (session('status') === 'verification-link-sent')
-                            <p class="mt-2 text-sm font-medium text-green-600">
+                            <p class="mt-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
                                 {{ __('A new verification link has been sent to your email address.') }}
                             </p>
                         @endif
