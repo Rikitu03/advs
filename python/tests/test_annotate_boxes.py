@@ -10,10 +10,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# annotate_boxes.py lives at the project root (two levels up from python/tests/).
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# annotate_boxes.py lives in python/scripts/ (sibling dir to python/tests/).
+SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 import annotate_boxes as ab  # noqa: E402
 

@@ -54,7 +54,7 @@ Before writing code, confirm you know, for each table in scope:
 ## ADVS context
 
 > The ADVS data model is specified in two places — read them before creating the document-pipeline tables/models:
-> - `CLAUDE.md` **Phase 4** lists the planned tables (`vendors`, `documents`, `validation_reports`, `signature_embeddings`, `stamp_feature_vectors`) with their exact columns, enums, and relationships.
+> - `CLAUDE.md` **Phase 4** lists the planned tables (`vendors`, `documents`, `validation_reports`, `signature_embeddings`, `logo_references`) with their exact columns, enums, and relationships. Note: signature references are **per-vendor** (enrolled at registration); logo/stamp references are **per-issuer** — `logo_references` unique(`document_type_id`, `city`), with `document_types.issuer_scope` (`lgu`/`national`/null) deciding whether the key includes a city — seeded on first approval, not per-vendor.
 > - [`ADVS_System_Reference.md`](../../../ADVS_System_Reference.md) **`§8`** (Database and Storage) governs *what* is stored and how — embeddings as **JSON** float vectors (cast to `array`), `risk_score` as float, append-only audit logs, and the configurable retention model. Cross-check `§9` for value ranges (risk bands, thresholds).
 >
 > When building those models, pair this skill with `laravel-best-practices` (for query/security patterns) and `advs-system-reference` (for domain meaning). Activate the `advs-system-reference` skill for the domain rules behind these columns.

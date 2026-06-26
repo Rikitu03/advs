@@ -28,8 +28,8 @@ The authoritative specification of **what the Automated Document Validation Syst
 | PyTesseract OCR, NLP cleanup, template/field validation | `§5` Stage 2 |
 | ResNet-50 classification (512×512 input, confidence threshold) | `§5` Stage 3 |
 | YOLOv8 signature/stamp detection, crop routing, no-detection handling | `§5` Stage 4 |
-| Siamese CNN signature enroll/verify (128-D embedding, Euclidean distance) | `§5` Stage 4a |
-| EfficientNet stamp enroll/verify (feature vector, cosine similarity, 85%) | `§5` Stage 4b |
+| Siamese CNN signature verify — reference enrolled at **registration** (128-D embedding, Euclidean distance) | `§5` Stage 4a |
+| EfficientNet logo verify vs the **issuer's** reference — `document_types.issuer_scope` (national by doc type; lgu by doc type+city) (feature vector, cosine similarity, 85%) | `§5` Stage 4b |
 | Composite risk-score formula, weights, missing-component penalty, report fields, risk levels | `§5` Stage 5 |
 | Officer review, approve/reject, human-in-the-loop, audit | `§5` Stage 6 |
 | Risk-score drill-down UI (component breakdown, expandable rows) | `§6` Risk Score Drill-Down |
@@ -42,7 +42,8 @@ The authoritative specification of **what the Automated Document Validation Syst
 
 - **Never invent thresholds or weights.** Pull defaults from `§9` (e.g. `BINARIZATION_THRESHOLD=150`, `CLASSIFICATION_CONFIDENCE_THRESHOLD=0.70`, `STAMP_SIMILARITY_THRESHOLD=0.85`, `RISK_WEIGHT_*=0.25`, `MISSING_COMPONENT_PENALTY=15`, risk bands Low 0–30 / Medium 31–60 / High 61–100). Treat them as configurable, not hard-coded magic numbers.
 - **The pipeline is fail-forward.** Stages do not abort on poor input — they record a *flag* that feeds the composite risk score (blank scan, low OCR, low classification confidence, no signature/stamp detected). Preserve this behavior; don't add early `throw`/abort branches that the spec does not call for.
-- **Enrollment vs verification is a branch on first submission.** A vendor with no stored reference embedding gets enrolled (`§5` 4a/4b enrollment path) instead of compared — mirror this in `ProcessDocumentAction` / `EnrollReferenceJob`.
+- **Signatures are verified, never enrolled in the pipeline.** The per-vendor 128-D reference is captured at **registration** (`§5` 4a), so it always exists by submission time — `ProcessDocumentAction` only computes Euclidean distance vs it. Do not add a "first submission auto-enrolls signature" branch.
+- **Logo/stamp references are keyed by issuer, seeded on approval.** There is **no per-vendor stamp embedding** (`§5` 4b). Stage 3 gives the document type → `document_types.issuer_scope` decides the key: `national` (BIR/SEC) → by document type; `lgu` → by (document type, OCR city from `§5` Stage 2); `null` → no logo check. The pipeline verifies against the **issuer's** reference logo in `logo_references`; an issuer with no reference yet → `Unknown / unreferenced logo` flag, seeded only when an officer approves the first document carrying that issuer's logo (`EnrollReferenceJob`). The tamper check runs regardless.
 - **Human-in-the-loop is mandatory.** The ML pipeline only produces flags and a risk score; a compliance officer makes the final approve/reject call (`§5` Stage 6). Do not auto-approve/reject.
 - **Roles are enforced in middleware**, and nav is role-scoped (`§3`, `§4`) — vendors never see officer/admin items.
 

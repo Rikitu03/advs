@@ -115,7 +115,8 @@ advs/
 │   #   Services/{Document,Verification}/...     Process-facade wrappers around python/
 │   #   Actions/ProcessDocumentAction.php        orchestrates the full validation pipeline
 │   #   Jobs/{ProcessDocumentJob,EnrollReferenceJob,RetrainModelJob}.php
-│   #   Models/{Vendor,Document,ValidationReport,SignatureEmbedding,StampFeatureVector}.php
+│   #   Models/{Vendor,Document,ValidationReport,SignatureEmbedding,LogoReference}.php
+│   #     (SignatureEmbedding = per-vendor, enrolled at registration; LogoReference = per-issuer logo keyed by document_type [+city for LGU] via document_types.issuer_scope, seeded on first approval — NOT per-vendor)
 │   #   Notifications/DocumentValidationComplete.php
 │
 ├── python/                                     # ALL Python scripts live here
@@ -123,9 +124,9 @@ advs/
 │   ├── preprocess.py                           # OpenCV: grayscale, binarize, morph open
 │   ├── ocr_runner.py                           # pytesseract OCR + NLP cleanup
 │   ├── classify_document.py                    # ResNet-50 document classification
-│   ├── signature_verify.py                     # YOLOv8 detect + Siamese CNN verify
-│   ├── stamp_verify.py                         # YOLOv8 detect + EfficientNet match
-│   ├── enroll_reference.py                     # stores initial embedding/vector for vendor
+│   ├── signature_verify.py                     # YOLOv8 detect + Siamese CNN verify (vs per-vendor registration reference)
+│   ├── stamp_verify.py                         # YOLOv8 detect + EfficientNet match vs the issuer's reference logo (by document_type, +city for LGU)
+│   ├── enroll_reference.py                     # seeds an issuer's reference logo on officer approval (signature ref is enrolled at registration, not here)
 │   ├── utils/
 │   │   ├── image_utils.py
 │   │   ├── model_loader.py                     # loads .h5 / .pt model files once
@@ -383,8 +384,8 @@ Every Python script follows this contract:
 | `ocr_runner.py` | `--input <preprocessed_image_path>` `--output <json_path>` | `{"text": "...", "confidence": 0.94}` |
 | `classify_document.py` | `--input <json_payload_path>` `--output <json_result_path>` | `{"label": "BIR Permit", "confidence": 0.96}` |
 | `signature_verify.py` | `--input <json_payload_path>` `--output <json_result_path>` | `{"match": true, "similarity": 0.91, "embedding": [...]}` |
-| `stamp_verify.py` | `--input <json_payload_path>` `--output <json_result_path>` | `{"match": true, "similarity_score": 0.952}` |
-| `enroll_reference.py` | `--input <json_payload_path>` `--output <json_result_path>` | `{"embedding_path": "...", "vector_path": "..."}` |
+| `stamp_verify.py` | `--input <json_payload_path>` (includes `document_type` + `city` from OCR) `--output <json_result_path>` | `{"match": true, "similarity_score": 0.952}` — or `{"match": false, "reason": "unreferenced_logo"}` / `{"reason": "no_issuer_logo"}` |
+| `enroll_reference.py` | `--input <json_payload_path>` (document_type + city + logo crop) `--output <json_result_path>` | `{"vector_path": "..."}` — seeds the issuer's reference logo |
 
 All scripts exit with code `0` on success, non-zero on failure, and write errors to stderr.
 
@@ -434,7 +435,7 @@ def main():
 | `ProcessDocumentJob` | Document upload | `preprocess.py` → `ocr_runner.py` → `classify_document.py` → `signature_verify.py` / `stamp_verify.py` | `document-processing` |
 | `SendOtpEmailJob` | Login (after password verified) | None (pure mail) | `mail` |
 | `RetrainModelJob` | Admin trigger via dashboard | Artisan command → Python training script | `ml-training` |
-| `EnrollReferenceJob` | First document approval for a vendor | `enroll_reference.py` | `document-processing` |
+| `EnrollReferenceJob` | First officer-approved document carrying a logo for an issuer with no reference yet → seeds that issuer's reference logo (signature ref is enrolled at registration, not here) | `enroll_reference.py` | `document-processing` |
 
 **`ProcessDocumentJob` outline:**
 ```php
@@ -795,8 +796,10 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 - `vendors`: `id`, `user_id` (FK), `company_name`, `status` (enum: `pending`, `approved`, `rejected`), `risk_score` (float, nullable), timestamps.
 - `documents`: `id`, `vendor_id` (FK), `file_path`, `original_filename`, `mime_type`, `file_size_kb`, `status` (enum: `pending`, `processing`, `validated`, `flagged`, `failed`), `document_type` (nullable string), timestamps.
 - `validation_reports`: `id`, `document_id` (FK), `ocr_text` (longText), `ml_results` (JSON), `risk_score` (float), `signature_match` (boolean, nullable), `stamp_match` (boolean, nullable), `officer_decision` (enum: `pending`, `approved`, `rejected`, nullable), `decided_at` (nullable timestamp), timestamps.
-- `signature_embeddings`: `id`, `vendor_id` (FK), `embedding` (JSON — 128-dim float array), `enrolled_at` (timestamp).
-- `stamp_feature_vectors`: `id`, `vendor_id` (FK), `feature_vector` (JSON), `enrolled_at` (timestamp).
+- `signature_embeddings`: `id`, `vendor_id` (FK), `embedding` (JSON — 128-dim float array), `enrolled_at` (timestamp). Populated at **vendor registration**, not on first document submission.
+- `document_types` (+ `issuer_scope`, migration `2026_06_26_160502`): adds `issuer_scope` enum(`lgu`,`national`) **nullable** — who issues the type, driving Stage 4b logo verification (`national` = agency logo e.g. BIR/SEC; `lgu` = per-city seal; `null` = no issuer logo). Seeded per type in `DocumentTypeSeeder`.
+- `logo_references` (migration `2026_06_26_160503`): `id`, `document_type_id` (FK), `city` (**NOT NULL, default `''`** — `''` sentinel for national issuers, the city name for LGU), `label`, `feature_vector` (JSON), `reference_image_path`, `seeded_from_document_id` (FK→documents, nullable), `enrolled_by` (FK→users, nullable), `enrolled_at`. **Unique on (`document_type_id`, `city`)** — the `''` sentinel (not NULL) makes this enforce one logo per national document type, since MySQL treats NULL as distinct. Logo/stamp/seal references are keyed by **issuer**, not by vendor; seeded on the first officer-approved document for that issuer. (Replaces the planned per-vendor `stamp_feature_vectors`; the legacy `vendor_embeddings.stamp_*` columns are now dropped.)
+- `validation_results` (+ logo fields, migration `2026_06_26_160504`): adds `detected_city`, `stamp_tampered`, `logo_reference_id` (FK→`logo_references`).
 
 **Eloquent setup:**
 - `User hasOne Vendor`, `Vendor hasMany Documents`, `Document hasOne ValidationReport`.
@@ -831,13 +834,12 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 - Implement `python/signature_verify.py`:
   - Load `yolov8_document.pt` → run inference on full document image → extract bounding box for class `signature`.
   - Crop region → resize to Siamese input size → normalize → pass through `siamese_signature.h5` → generate 128-dim embedding.
-  - If `mode == enroll`: save embedding JSON, return it.
-  - If `mode == verify`: load stored embedding → compute Euclidean distance → convert to similarity score → apply threshold (default 0.85) → return `{match, similarity, embedding}`.
+  - **Verify-only** in the pipeline (the reference is enrolled at registration): load the vendor's stored reference embedding → compute Euclidean distance → convert to similarity score → apply threshold → return `{match, similarity}`. (A separate `mode == enroll` path is used by the registration flow, not the document pipeline.)
 - Implement `python/stamp_verify.py`:
-  - YOLOv8 detect `stamp` class → crop region.
-  - EfficientNet feature extraction → cosine similarity against stored vector.
-  - Return `{match, similarity_score}`. Threshold: 0.85.
-- Implement `python/enroll_reference.py`: called once per vendor on first approved document → runs both signature and stamp enrollment → stores output paths.
+  - YOLOv8 detect `stamp`/`logo` class → crop region.
+  - EfficientNet feature extraction → tamper check (always) → resolve the issuer from the document type's `issuer_scope` → look up the reference logo (by `document_type`, or `document_type` + OCR `city` for LGU) → cosine similarity against the issuer reference vector.
+  - Return `{match, similarity_score}`; if the issuer has no reference yet, return `{match: false, reason: "unreferenced_logo"}` (or `no_issuer_logo` when `issuer_scope` is null). Threshold: 0.85.
+- Implement `python/enroll_reference.py`: seeds a **city's** reference logo, invoked when an officer approves the first document carrying that city's logo → stores the city feature vector + reference image path. (Signature enrollment happens at registration and does not use this script.)
 - Write pytest tests (see Section 8) using fixture images stored in `python/tests/fixtures/`.
 
 **Definition of Done:** `pytest python/tests/test_signature_verify.py python/tests/test_stamp_verify.py -v` — all pass. Manual invocation on a genuine pair returns similarity ≥ 0.85; a forged/mismatched pair returns < 0.85.
@@ -852,7 +854,7 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 - Implement `DocumentPreprocessingService`, `OcrService`, `ClassificationService`, `SignatureVerificationService`, `StampVerificationService` (each using `Process` facade as shown in Section 6).
 - Implement `ProcessDocumentAction`: orchestrates `preprocess → OCR → classify → signature_verify → stamp_verify → build ValidationReport → update risk score`.
 - Implement `ProcessDocumentJob` (queued, $tries=3, $backoff, $timeout=300).
-- Implement `EnrollReferenceJob`: triggered when compliance officer approves a vendor's first submission.
+- Implement `EnrollReferenceJob`: triggered when a compliance officer approves the first document carrying a logo for an issuer that has no reference yet → seeds that issuer's reference logo (keyed by `document_type`, or `document_type` + city for LGU). (The signature reference is captured at registration, so it needs no pipeline enrollment job.)
 - Implement `DocumentSubmissionController`: handle file upload, validate MIME/size, store to `storage/app/documents/{vendor_id}/`, create `Document` record, dispatch `ProcessDocumentJob`.
 - Write `DocumentSubmissionTest` (Section 8).
 - Add JSON payload temp file cleanup: always delete `python_payloads/*.json` after use (in `finally` blocks).
@@ -871,7 +873,7 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 - **Admin views:**
   - `admin/dashboard.blade.php`: stats cards (pending count, flagged count, approval rate).
   - `admin/reports/index.blade.php`: paginated table of validation reports, risk score badges, filter by status.
-  - `admin/reports/show.blade.php`: full report detail — OCR text preview, ML result breakdown, signature similarity score, stamp similarity score, approve/reject action buttons.
+  - `admin/reports/show.blade.php`: full report detail — OCR text preview, ML result breakdown, signature similarity score, logo similarity score (vs the issuer's reference), approve/reject action buttons.
   - `admin/vendors/index.blade.php` and `show.blade.php`.
 - Wire all admin action buttons to named routes; gate visibility with `@can`/Gates or `auth()->user()->hasRole(...)`.
 - If a 2FA challenge UI is added (Phase 3), build its countdown/resend with a small Volt component or inline Alpine.
@@ -921,7 +923,9 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 #### 9d — Known Edge Cases to Handle
 - PDF with more than 2 pages: `pdf2image` should only convert first 2 pages (already in design; verify code enforces this).
 - Document with no detectable signature region: YOLOv8 returns empty detections → `signature_verify.py` should return `{"match": false, "reason": "no_signature_detected"}` — handle this in `SignatureVerificationService`.
-- First vendor submission (no reference embedding stored yet): `ProcessDocumentAction` should skip similarity comparison and instead dispatch `EnrollReferenceJob` — confirm this branching logic.
+- Signature reference always exists (enrolled at registration), so `ProcessDocumentAction` always *verifies* the signature — there is no first-submission enrollment branch for signatures.
+- Logo for an issuer with no reference yet: `ProcessDocumentAction` should skip the similarity comparison, raise the `unreferenced_logo` flag, and (only on officer approval) dispatch `EnrollReferenceJob` to seed that issuer's reference — confirm this branching logic.
+- `lgu` document type where OCR cannot identify a city: `stamp_verify.py` cannot scope the lookup → raise a `city_not_identified` flag and skip logo verification. For `issuer_scope = null` types (e.g. financial statements), logo verification is skipped entirely (`no_issuer_logo`).
 - Verification/reset email delivery failure (SMTP down): the queued mail retries; the user can re-request via Fortify's resend (`verification.send`) / forgot-password, which are rate-limited. If a custom email-OTP 2FA is added (Phase 3, Option B), give it the same rate-limited resend.
 
 ---

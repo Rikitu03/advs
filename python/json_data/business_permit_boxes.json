@@ -1,0 +1,62 @@
+{
+  "name_of_proprietor": {
+    "x": 126,
+    "y": 356,
+    "w": 1351,
+    "h": 48
+  },
+  "trade_name": {
+    "x": 130,
+    "y": 447,
+    "w": 1348,
+    "h": 33
+  },
+  "business_location": {
+    "x": 137,
+    "y": 527,
+    "w": 1339,
+    "h": 40
+  },
+  "kind_of_business": {
+    "x": 137,
+    "y": 606,
+    "w": 1341,
+    "h": 41
+  },
+  "day_issued": {
+    "x": 419,
+    "y": 730,
+    "w": 174,
+    "h": 33
+  },
+  "month_issued": {
+    "x": 667,
+    "y": 726,
+    "w": 177,
+    "h": 36
+  },
+  "city_treasurer_name": {
+    "x": 197,
+    "y": 922,
+    "w": 298,
+    "h": 34
+  },
+  "city_treasurer_signature": {
+    "x": 209,
+    "y": 862,
+    "w": 275,
+    "h": 108
+  },
+  "city_administrator_name": {
+    "x": 735,
+    "y": 916,
+    "w": 318,
+    "h": 41
+  },
+  "city_administrator_signature": {
+    "x": 761,
+    "y": 855,
+    "w": 270,
+    "h": 119
+  }
+}
