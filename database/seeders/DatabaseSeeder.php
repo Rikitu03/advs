@@ -48,6 +48,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             DocumentTypeSeeder::class,
             SystemSettingSeeder::class,
+            MlModelSeeder::class,
             AuditLogSeeder::class,
         ]);
     }

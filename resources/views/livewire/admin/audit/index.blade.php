@@ -414,6 +414,7 @@ class extends Component
                     <option value="">All entities</option>
                     <option value="{{ \App\Models\User::class }}">User</option>
                     <option value="{{ \App\Models\SystemSetting::class }}">System Setting</option>
+                    <option value="{{ \App\Models\MlModel::class }}">ML Model</option>
                 </select>
             </div>
 

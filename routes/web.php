@@ -95,6 +95,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::get('export', [AuditLogController::class, 'export'])->name('export');
             Route::get('{audit}', [AuditLogController::class, 'show'])->name('show');
         });
+
+        // ML Model Management — admin-only catalogue of the four ML weight
+        // files the pipeline consumes (ResNet-50, YOLOv8, Siamese, EfficientNet).
+        // The Volt page handles filtering, sync, and per-row edits. Authorization
+        // is also enforced inside the component via the MlModelPolicy.
+        Route::middleware('role:admin')->prefix('admin/models')->name('admin.models.')->group(function () {
+            Volt::route('/', 'admin.models.index')->name('index');
+        });
     });
 });
 
