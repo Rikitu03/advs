@@ -58,6 +58,13 @@ new class extends Component {
                         <flux:icon icon="inbox-stack" class="size-4" />
                         Review queue
                     </a>
+                    @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))
+                        <a href="{{ route('admin.retention.index') }}" wire:navigate
+                           class="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                            <flux:icon icon="clock" class="size-4" />
+                            Retention settings
+                        </a>
+                    @endif
                 </div>
             </div>
             <div class="pointer-events-none absolute -right-10 -top-10 size-48 rounded-full bg-white/10 blur-2xl"></div>

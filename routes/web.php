@@ -87,6 +87,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::post('{key}/reset', [SystemSettingsController::class, 'reset'])->name('reset');
         });
 
+        // Data Retention Configuration — admin-only policy management UI.
+        // The Volt page owns the live editing experience; the model/policy
+        // pair keeps the records secure and future-proof for more rules.
+        Route::middleware('role:admin')->prefix('admin/retention')->name('admin.retention.')->group(function () {
+            Volt::route('/', 'admin.retention.index')->name('index');
+        });
+
         // Audit Trail — admin-only viewer for the append-only audit log.
         // The Volt page owns the index, filtering, and search; the
         // controller serves the detail drill-down and CSV export.

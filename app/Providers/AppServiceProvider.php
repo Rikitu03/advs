@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Models\RetentionPolicy;
 use App\Models\SystemSetting;
 use App\Models\User;
+use App\Policies\RetentionPolicyPolicy;
 use App\Policies\SystemSettingPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Support\Facades\Gate;
@@ -31,5 +33,8 @@ class AppServiceProvider extends ServiceProvider
         // System settings (admin-only thresholds/parameters) — see
         // ADVS_System_Reference.md §9 and SystemSettingsService.
         Gate::policy(SystemSetting::class, SystemSettingPolicy::class);
+
+        // Data retention policies are admin-only configuration records.
+        Gate::policy(RetentionPolicy::class, RetentionPolicyPolicy::class);
     }
 }
