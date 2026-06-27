@@ -6,7 +6,7 @@
 
 ## 1. System Purpose and Core Logic
 
-The ADVS is a web-based system built on a **Laravel 11 backend with Python inference scripts** that automates the verification of vendor accreditation documents. Its core problem statement is direct: manual document review is slow, error-prone, and vulnerable to fraud. The system replaces that process with a multi-stage machine learning pipeline that examines every document from four independent angles — text content, document classification, signature authenticity, and stamp authenticity — then fuses those signals into a single composite risk score for a human officer to act on.
+The ADVS is a web-based system built on a **Laravel 11 backend with Python inference scripts** that automates the verification of vendor accreditation documents. Its core problem statement is direct: manual document review is slow, error-prone, and vulnerable to fraud. The system replaces that process with a multi-stage machine learning pipeline that examines every document from four independent angles — text content, document classification, signature authenticity (vs a per-vendor reference enrolled at registration), and stamp/logo authenticity (vs a per-issuer reference library — per-agency for national logos like BIR/SEC, per-city for LGU seals) — then fuses those signals into a single composite risk score for a human officer to act on.
 
 The system is **on-demand, not calendar-driven**. It activates whenever a vendor submits documents — whether that's an initial application, a renewal, or an update triggered by an expiring credential or new regulation. The implementing organization decides the cadence; ADVS simply processes whatever arrives.
 
@@ -89,9 +89,9 @@ The system features a **sidebar navigation layout** with role-scoped visibility.
 |---|---|
 | **Dashboard (Home)** | KPI cards: submissions pending review, flagged documents today, approval rate this period. Quick-access list of the five most urgent flagged submissions. |
 | **Pending Submissions** | Queue of submissions awaiting officer review, sorted by risk score (highest first). Each row shows: vendor name, submission date, composite risk score (color-coded: green/yellow/red), number of flags. Clicking opens the full validation report. |
-| **Validation Results** | Detailed per-document breakdown for a selected submission. Shows each stage's output: OCR extracted text, classification result and confidence %, signature similarity score, stamp similarity score, individual pass/fail indicators, and the composite risk score. This is the **drill-down view** (see Section 6). |
+| **Validation Results** | Detailed per-document breakdown for a selected submission. Shows each stage's output: OCR extracted text, classification result and confidence %, signature similarity score, logo similarity score (vs the detected city's reference), individual pass/fail indicators, and the composite risk score. This is the **drill-down view** (see Section 6). |
 | **Archived Reports** | Searchable, filterable archive of all past validation reports. Filters include: date range, vendor name, decision (approved/rejected), risk score range. Each archived report is viewable in full. |
-| **Vendor Profiles** | Directory of all registered vendors. Each profile shows: company name, registration date, submission history, accreditation status, stored reference signature embedding info, stored reference stamp info. |
+| **Vendor Profiles** | Directory of all registered vendors. Each profile shows: company name, registration date, submission history, accreditation status, stored reference signature embedding info (enrolled at registration). Logo/stamp/seal references are **not** stored per vendor — they live in a per-issuer reference library (per-agency for national logos, per-city for LGU seals; see §4b / §8). |
 | **Risk Logs** | Chronological audit log of every flag the system has raised. Filterable by flag type (text mismatch, low classification confidence, signature mismatch, stamp mismatch), severity, date range, and vendor. |
 | **Notifications** | Officer-specific alerts: "New submission from [Vendor] requires review," "High-risk submission flagged," "Submission #1042 has been pending for 48+ hours." |
 
@@ -102,7 +102,7 @@ The admin sees **everything the officer sees**, plus additional tabs:
 | Tab / Section | What It Shows |
 |---|---|
 | **User Management** | CRUD interface for all user accounts. Assign/change roles, activate/deactivate accounts, reset passwords. |
-| **System Settings** | Configurable parameters panel (see Section 8 for the full list of tunable thresholds). Includes: file size limits, accepted formats, OCR confidence floor, ResNet-50 classification threshold, signature distance threshold, stamp similarity threshold, risk score weights. |
+| **System Settings** | Configurable parameters panel (see Section 8 for the full list of tunable thresholds). Includes: file size limits, accepted formats, OCR confidence floor, ResNet-50 classification threshold, signature distance threshold, stamp/logo similarity threshold (vs city reference), risk score weights. |
 | **ML Model Management** | Status of each ML model (ResNet-50, YOLOv8, Siamese CNN, EfficientNet). Last training date, validation accuracy, model file paths. Interface to trigger retraining or swap model versions. |
 | **Audit Trail** | Immutable log of every significant system event: logins, submissions, validation runs, officer decisions, configuration changes, user account modifications. Each entry is timestamped and attributed to a user. |
 | **Data Retention** | Configuration for archival and purging policies. Set retention periods for uploaded documents, processed images, validation reports, and embedding vectors. |
@@ -162,8 +162,9 @@ This section walks through exactly what happens from the moment a file enters th
 - **Required fields present**: Does the extracted text contain the expected sections/keywords for this document type?
 - **Format compliance**: Do registration numbers, dates, and amounts match expected patterns (regex-based)?
 - **Completeness**: Are all mandatory fields populated, or are critical sections missing?
+- **Issuing city / LGU**: The text is scanned for the issuing **city name** (e.g., "Pasig"). This city key is passed to **Stage 4b**, which uses it to look up the correct reference logo(s) for stamp/logo verification. If no city can be identified, Stage 4b cannot scope its lookup and raises a `City not identified` flag.
 
-**Output**: A structured text validation result containing: extracted text blob, list of matched fields, list of missing/inconsistent fields, and an overall text validation score.
+**Output**: A structured text validation result containing: extracted text blob, list of matched fields, list of missing/inconsistent fields, the detected issuing city (for the §4b logo lookup), and an overall text validation score.
 
 **Failure path**: If OCR produces little or no recognizable text (due to a blank page, an image without text, or extremely poor scan quality), the text validation score will be very low. The system does **not** abort processing — it records the poor OCR result as a flag ("Insufficient text extracted" or "Required fields missing") and continues to the next stages. This flag contributes to the composite risk score. There is no automatic retry mechanism; the document is flagged for manual review, and the vendor may be asked to resubmit.
 
@@ -204,13 +205,13 @@ This section walks through exactly what happens from the moment a file enters th
 3. The model outputs **bounding box coordinates** with associated **confidence scores** for each detected region.
 4. Detected regions are **cropped** from the original image using the bounding box coordinates.
 5. **Signature crops** are forwarded to Stage 4a (Siamese CNN).
-6. **Stamp crops** are forwarded to Stage 4b (EfficientNet).
+6. **Stamp / logo / seal crops** are forwarded to Stage 4b (EfficientNet), together with the issuing city OCR extracted in Stage 2.
 
 **Document misalignment handling**: YOLOv8's multi-scale feature extraction inherently handles variations in position, scale, and rotation. There is no need for predefined ROI zones or homography-based alignment — the model locates signatures and stamps wherever they appear in the document.
 
 **Failure path — no signature detected**: If YOLOv8 finds no signature region (confidence below its detection threshold), the system records a flag: "No signature detected." The signature verification stage is skipped for this document, and the absence is recorded as a risk factor in the composite score.
 
-**Failure path — no stamp detected**: Same logic. "No stamp detected" is recorded as a flag. The stamp authentication stage is skipped.
+**Failure path — no stamp/logo detected**: Same logic. "No stamp/logo detected" is recorded as a flag. The stamp/logo authentication stage is skipped.
 
 **Failure path — multiple detections**: If YOLOv8 detects multiple signature or stamp regions, the system uses the detection with the highest confidence score as the primary region. Additional detections may be logged for officer review.
 
@@ -220,18 +221,12 @@ This section walks through exactly what happens from the moment a file enters th
 
 **Input**: Cropped signature region from YOLOv8.
 
-**Two operational modes**:
+> **The signature reference is enrolled at vendor registration — not during the pipeline.** Every vendor captures a reference signature during sign-up (registration **step 2**, before email verification): they photograph three signatures on white bond paper, an authenticity check rejects software-edited/filtered images, and the accepted capture is embedded once into the vendor's **128-dimensional reference embedding** and stored on the vendor record (`users.signature_path` / `vendor_embeddings.signature_embedding`). Because the reference exists **before any document is ever submitted**, the pipeline **always runs in verification mode** — there is no "first submission auto-enrolls" branch here. (This is the opposite of the logo handling in §4b, where references are keyed by city and seeded on first approval.)
 
-**Enrollment (first submission by a vendor)**:
-1. The cropped signature is preprocessed (resized to fixed input size, pixel values normalized).
-2. It is passed through one branch of the Siamese CNN, producing a **128-dimensional embedding vector**.
-3. This vector is stored in the database as the vendor's **reference signature embedding**.
-4. Since there is no prior reference to compare against, the signature is marked as "Reference enrolled" with no match score.
-
-**Verification (subsequent submissions)**:
-1. The new cropped signature is preprocessed identically.
+**Verification (every submission)**:
+1. The new cropped signature is preprocessed (resized to fixed input size, pixel values normalized).
 2. It is passed through the Siamese CNN to produce a **query embedding vector** (128 dimensions).
-3. The system retrieves the stored reference embedding for this vendor.
+3. The system retrieves the vendor's stored reference embedding (captured at registration).
 4. **Euclidean distance** is computed between the query and reference vectors.
 5. The distance is converted to a **similarity score** (smaller distance = higher similarity).
 
@@ -239,43 +234,47 @@ This section walks through exactly what happens from the moment a file enters th
 
 **Output**: Similarity score + pass/fail indicator.
 
-**Failure path**: If the similarity score falls below the threshold, the system flags: "Signature mismatch — possible forgery." The document is not rejected outright at this point; the flag feeds into the composite risk score. The officer will see the specific similarity percentage and can make a judgment call.
+**Failure paths**:
+- **Signature mismatch** (distance above threshold) → "Signature mismatch — possible forgery" flag. The document is not rejected outright; the flag feeds the composite risk score, and the officer sees the specific similarity percentage and makes the judgment call.
+- **No signature detected** by YOLOv8 (Stage 4) → this verification stage is skipped and "No signature detected" is recorded as a risk factor.
 
-**Cross-document verification**: Because each vendor's reference embedding is stored persistently, the system can detect inconsistencies across multiple submissions over time. If a vendor's signature changes dramatically between submissions, every subsequent document will trigger a mismatch flag.
+**Cross-document consistency**: Because the reference embedding is fixed at registration and stored persistently, every later submission is checked against the same baseline. If a vendor's signature drifts dramatically from the enrolled reference, every subsequent document triggers a mismatch flag.
 
 ---
 
-### Stage 4b: Stamp Authentication (EfficientNet)
+### Stage 4b: Stamp / Logo / Seal Authentication (EfficientNet)
 
-**Input**: Cropped stamp / logo / seal region from YOLOv8.
+**Input**: Cropped stamp / logo / seal region from YOLOv8, **plus the city name extracted by OCR in Stage 2**.
 
-> **Stamp enrollment is human-confirmed, not automatic.** Stamps, logos, and seals are ambiguous: a first-time stamp is *unverified* — there is nothing genuine to compare it against — so trusting it automatically would let a forged stamp become the "genuine" reference. Therefore the system never silently enrolls a stamp on first sight. A first-time stamp is **flagged as `Unknown / unreferenced stamp`** and the tamper check still runs; the stamp only becomes the vendor's trusted reference after a compliance officer/admin **approves the document and explicitly confirms enrollment**. (This differs from signature handling in §4a, where the first submission auto-enrolls the reference embedding.)
+> **Logo references are keyed by the document's issuer, not by the vendor.** Official stamps, logos, and seals belong to whoever **issues** the document. `document_types.issuer_scope` records which kind, and that drives how the reference is keyed:
+> - **`national`** (e.g. BIR Permit, SEC GIS) — one logo agency-wide; the reference is keyed by **document type alone** (the BIR logo is identical on every BIR document, in any city).
+> - **`lgu`** (e.g. Business Permit) — one seal per city; the reference is keyed by **(document type, city)** (Pasig's business-permit seal differs from Quezon City's).
+> - **`null`** (e.g. audited Financial Statement, Signed Contract) — no official issuer logo; the reference lookup is skipped (only the tamper check runs).
+>
+> References live in the **`logo_references`** table. There is **no per-vendor stamp embedding** and no per-vendor enrollment step. (This is the opposite of the signature handling in §4a, which uses one per-vendor reference enrolled at registration.)
 
 **Tamper check (always runs, reference or not)**:
-1. The cropped stamp is preprocessed (resized, normalized).
+1. The cropped region is preprocessed (resized, normalized).
 2. It is passed through an **EfficientNet model** (pre-trained, classification head removed, used as a fixed feature extractor) to produce a **compact feature vector** and analyze texture.
-3. EfficientNet's MBConv blocks distinguish genuine **wet-ink impressions** from **photocopied, scanned, or digitally edited reproductions** regardless of whether a reference exists. A detected reproduction/edit raises a `Stamp tampered` flag.
+3. EfficientNet's MBConv blocks distinguish genuine **wet-ink impressions** from **photocopied, scanned, or digitally edited reproductions** regardless of whether an issuer reference exists. A detected reproduction/edit raises a `Stamp/logo tampered` flag. (Halftone dot patterns in photocopies, for example, produce a different texture signature than genuine wet ink.)
 
-**First submission (no reference yet)**:
-1. The tamper check above runs and its result is recorded.
-2. Because no reference embedding exists for this vendor, the stamp is **flagged `Unknown / unreferenced stamp`** rather than validated or auto-trusted.
-3. The feature vector is held pending. **Only if** the document is later approved does the system **prompt the officer/admin** — *"Add this stamp/logo/seal as the trusted reference for this vendor?"* On confirmation, the vector is stored as the vendor's **reference stamp embedding**. If declined, nothing is enrolled and the next submission is treated as first-time again.
+**Issuer lookup & verification**:
+1. Classification (Stage 3) gives the **document type**; the pipeline reads its `issuer_scope`.
+2. It retrieves the reference logo for that issuer — by **document type** (`national`) or by **(document type, detected city)** (`lgu`, where the city comes from OCR in Stage 2; for `national` the detected city is ignored).
+3. The query feature vector is compared to the issuer reference vector using a **distance metric** (cosine similarity or Euclidean distance), yielding a **similarity percentage** (e.g., "95.2% match").
 
-**Verification (subsequent submissions, reference exists)**:
-1. The new cropped stamp is preprocessed and passed through the same EfficientNet model to produce a **query feature vector**.
-2. The query vector is compared to the stored reference vector using a **distance metric** (cosine similarity or Euclidean distance).
-3. The distance is converted to a **similarity percentage** (e.g., "95.2% match").
+**Configurable parameter**: `STAMP_SIMILARITY_THRESHOLD` (default: **85%**). If the similarity to the issuer reference meets or exceeds this threshold, the logo is validated; below it, it is flagged for manual review.
 
-**Configurable parameter**: `STAMP_SIMILARITY_THRESHOLD` (default: **85%**). If the similarity score meets or exceeds this threshold, the stamp is validated. Below this threshold, it is flagged for manual review.
+**Reference seeding (per issuer, on first approval)**: An issuer's reference logo is **not** created automatically on first sight — trusting an unverified logo would let a forgery become the standard. Instead, when a logo is detected for an issuer that has **no reference yet**, the document is flagged `Unknown / unreferenced logo` and the feature vector is held pending. The **first time a compliance officer approves a document carrying that issuer's logo**, that logo is enrolled as the reference — stored against the **document type** (`national`) or **(document type, city)** (`lgu`); the officer's approval decision is the trust gate. Every subsequent submission for that issuer is then verified against it.
 
-**What the model distinguishes**: EfficientNet's MBConv blocks capture texture-level features that differentiate **wet-ink impressions** from **photocopied or scanned reproductions**. Halftone dot patterns in photocopies, for example, produce different texture signatures than genuine wet ink.
-
-**Output**: Tamper result + (when a reference exists) similarity percentage and pass/fail indicator; otherwise an `Unknown / unreferenced stamp` flag.
+**Output**: Tamper result + (when an issuer reference exists) similarity percentage and pass/fail indicator; otherwise an `Unknown / unreferenced logo` flag — or, when `issuer_scope` is `null`, only the tamper result.
 
 **Failure paths**:
-- **No reference yet** → `Unknown / unreferenced stamp` flag; contributes to the composite risk score and triggers the post-approval enrollment prompt described above.
-- **Tampering detected** → `Stamp tampered — suspect reproduction/edit` flag (raised even on a first submission).
-- **Below-threshold similarity** (reference exists) → `Stamp mismatch — suspect reproduction` flag.
+- **No issuer logo expected** (`issuer_scope = null`) → the reference lookup is skipped; only the tamper-check result is recorded.
+- **City not identified** (an `lgu` document type where OCR found no recognizable city) → `City not identified` flag; the lookup cannot be scoped, so verification is skipped and the absence feeds the risk score.
+- **No reference for that issuer yet** → `Unknown / unreferenced logo` flag; contributes to the composite risk score and becomes the reference only if an officer later approves the document.
+- **Tampering detected** → `Stamp/logo tampered — suspect reproduction/edit` flag (raised even before any reference exists).
+- **Below-threshold similarity** (issuer reference exists) → `Logo mismatch — suspect reproduction` flag.
 
 All feed into the composite risk score.
 
@@ -290,7 +289,7 @@ All feed into the composite risk score.
    - Text validation score (from OCR template matching)
    - Document classification confidence (from ResNet-50)
    - Signature similarity score (from Siamese CNN) — or "not detected" flag
-   - Stamp similarity score (from EfficientNet) — or "not detected" flag
+   - Logo similarity score (from EfficientNet, vs the issuer's reference) — or "not detected / unreferenced / city not identified / no issuer logo" flag
 2. Each component contributes to a **composite risk score** using configurable weights.
 
 **Risk score formula** (conceptual):
@@ -303,7 +302,7 @@ Composite Risk = w1 × (1 - text_validation_score)
                + penalty_flags
 ```
 
-Where `w1 + w2 + w3 + w4 = 1.0` and `penalty_flags` adds additional risk for missing components (no signature detected, no stamp detected, insufficient OCR text).
+Where `w1 + w2 + w3 + w4 = 1.0` and `penalty_flags` adds additional risk for missing/unverifiable components (no signature detected, no logo detected, unreferenced/unidentified city logo, insufficient OCR text).
 
 **Configurable parameters**:
 - `RISK_WEIGHT_TEXT` (w1) — e.g., 0.25
@@ -356,11 +355,11 @@ The composite risk score is not a black box. When an officer clicks on a submiss
 | Text Validation (OCR) | 82% | 70% | ✓ Pass | 2 of 14 expected fields could not be matched |
 | Document Classification (ResNet-50) | 96% confidence | 70% | ✓ Pass | Classified as "BIR Permit" |
 | Signature Match (Siamese CNN) | 43% similarity | 75% | ✗ Fail | Distance: 1.87 (threshold: 1.20) |
-| Stamp Match (EfficientNet) | 91% similarity | 85% | ✓ Pass | Cosine similarity: 0.91 |
+| Logo Match (EfficientNet, Pasig city ref) | 91% similarity | 85% | ✓ Pass | Cosine similarity: 0.91 vs Pasig reference logo |
 | **Composite Risk Score** | **62 / 100** | — | ⚠ Medium | Signature mismatch is primary driver |
 
 Each row is expandable. Clicking **Signature Match**, for example, shows:
-- The reference signature image (enrolled during onboarding)
+- The reference signature image (enrolled at vendor registration)
 - The query signature image (from this submission)
 - The 128-D embedding distance value
 - A visual overlay or side-by-side comparison
@@ -412,10 +411,10 @@ All file paths are stored as references in the database, not the files themselve
 
 | Data Type | Storage | Format |
 |---|---|---|
-| Signature reference embedding | Database (vendor profile record) | 128-dimensional float vector, serialized as JSON or binary blob |
-| Stamp reference feature vector | Database (vendor profile record) | Float vector (dimension depends on EfficientNet variant), serialized similarly |
+| Signature reference embedding | Database, **per vendor** (`users.signature_path` + `vendor_embeddings.signature_embedding`) | 128-dimensional float vector, serialized as JSON or binary blob |
+| Logo / stamp / seal reference vector | Database, **per issuer** (the `logo_references` table, keyed by `document_type` for national issuers and `(document_type, city)` for LGU issuers) | Float vector per issuer (dimension depends on EfficientNet variant), serialized similarly |
 
-The **signature** reference embedding is created automatically during the vendor's **first submission**. The **stamp / logo / seal** reference embedding is *not* created automatically — it is stored only after an officer/admin approves a document and confirms enrollment (see §4b). Once stored, both persist for the lifetime of the vendor's account and are updated only if the vendor explicitly re-enrolls with new reference documents.
+The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. financial statements, signed contracts) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
 
 ### Model Files
 
@@ -461,7 +460,7 @@ All configurable parameters that the implementing organization would set:
 | `CLASSIFICATION_CONFIDENCE_THRESHOLD` | 0.70 | Minimum ResNet-50 confidence to pass |
 | `YOLO_DETECTION_CONFIDENCE` | 0.50 | Minimum YOLOv8 detection confidence |
 | `SIGNATURE_DISTANCE_THRESHOLD` | Empirical | Maximum Euclidean distance for signature match |
-| `STAMP_SIMILARITY_THRESHOLD` | 0.85 | Minimum cosine similarity for stamp match (85%) |
+| `STAMP_SIMILARITY_THRESHOLD` | 0.85 | Minimum cosine similarity for a logo match against the detected city's reference (85%) |
 | `RISK_WEIGHT_TEXT` | 0.25 | Weight of text validation in composite risk |
 | `RISK_WEIGHT_CLASSIFICATION` | 0.25 | Weight of classification confidence in composite risk |
 | `RISK_WEIGHT_SIGNATURE` | 0.25 | Weight of signature score in composite risk |
@@ -507,12 +506,14 @@ VENDOR                          SYSTEM                              OFFICER / AD
                                    Crop regions
 
                                 8a. Signature (Siamese CNN)
-                                    Embed → Compare to reference →
+                                    Embed → Compare to the per-vendor
+                                    registration reference →
                                     Euclidean distance → Score
 
-                                8b. Stamp (EfficientNet)
-                                    Tamper check (always) → if no
-                                    reference: flag "Unknown stamp";
+                                8b. Stamp / Logo (EfficientNet)
+                                    Tamper check (always) → look up the
+                                    OCR city's reference logo; if none →
+                                    flag "Unknown/unreferenced logo";
                                     else compare → Cosine sim → Score
 
                                 9. Aggregate all scores →
@@ -530,9 +531,9 @@ VENDOR                          SYSTEM                              OFFICER / AD
                                                                     13. Decide: Approve / Reject
                                                                         Record decision + comments
                                                                         Status: APPROVED / REJECTED
-                                                                        If approved doc had an unknown
-                                                                        stamp → prompt: enroll as
-                                                                        trusted reference?
+                                                                        If approved doc carried a logo for
+                                                                        a city with no reference yet → seed
+                                                                        it as that city's reference logo
 
 14. Receive decision            ◄────────────────────────────────── Decision recorded
     notification                                                    Audit trail updated

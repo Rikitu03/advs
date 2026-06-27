@@ -6,11 +6,11 @@ pixel coordinates. It exists to *calibrate* the dataset generator: the exported
 ``bounding_boxes.json`` (keyword -> {x, y, w, h}) drops straight into
 ``python/scripts/bir_template_generator.py``'s ``FIELD_BOXES``.
 
-Run it from the project root with a Python that has Pillow:
+Run it from the repo root with a Python that has Pillow:
 
-    python annotate_boxes.py
+    python python/scripts/annotate_boxes.py
     # or, with this repo's venv:
-    python/env/Scripts/python.exe annotate_boxes.py
+    python/env/Scripts/python.exe python/scripts/annotate_boxes.py
 
 Workflow:
     1. Pick a keyword from the dropdown (the field you're locating).
@@ -70,9 +70,14 @@ except AttributeError:  # older Pillow
     _RESAMPLE = Image.LANCZOS
 
 APP_TITLE = "BIR Permit Template Bounding Box Annotator"
-PROJECT_ROOT = Path(__file__).resolve().parent
-TEMPLATE_PATH = PROJECT_ROOT / "python" / "data" / "template" / "BIR_PERMIT_TEMPLATE.png"
-OUTPUT_JSON = PROJECT_ROOT / "bounding_boxes.json"  # saved next to this script
+# This script lives in python/scripts/, so: parents[0]=python/scripts,
+# parents[1]=python, parents[2]=repo root. PROJECT_ROOT (repo root) is what the
+# `from python.scripts.ocr_dryrun import ...` package import needs on sys.path.
+SCRIPT_DIR = Path(__file__).resolve().parent
+PY_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TEMPLATE_PATH = PY_ROOT / "data" / "template" / "BIR_PERMIT_TEMPLATE.png"
+OUTPUT_JSON = PY_ROOT / "json_data" / "bounding_boxes.json"  # exported boxes
 
 # Minimal fallback keywords - only used if ocr_dryrun.py can't be loaded at all,
 # so the tool is still usable for debugging.
@@ -382,6 +387,7 @@ class AnnotatorApp:
     # ----- Buttons --------------------------------------------------------
     def _on_save(self) -> None:
         data = boxes_to_json(self.boxes)
+        OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
         OUTPUT_JSON.write_text(json.dumps(data, indent=2), encoding="utf-8")
         messagebox.showinfo(APP_TITLE, f"Saved {len(data)} box(es) to:\n{OUTPUT_JSON}")
         self.status.configure(text=f"Saved {len(data)} box(es) -> {OUTPUT_JSON.name}")
