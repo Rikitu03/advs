@@ -80,6 +80,16 @@ class Document extends Model
     }
 
     /**
+     * The ML pipeline result (Stages 2–4b) for this document.
+     *
+     * @return HasOne<ValidationResult, $this>
+     */
+    public function validationResult(): HasOne
+    {
+        return $this->hasOne(ValidationResult::class);
+    }
+
+    /**
      * The Stage T forensic-tampering result for this document.
      *
      * @return HasOne<TamperAnalysis, $this>
