@@ -30,6 +30,7 @@ yarn-error.log
 
 # ADVS Python ML training
 /python/env
+/python/venv
 /python/models/*
 !/python/models/.gitkeep
 /python/.smoke_data
