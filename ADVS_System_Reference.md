@@ -281,9 +281,37 @@ All feed into the composite risk score.
 
 ---
 
+### Stage T: Forensic Tampering Analysis (document-wide)
+
+**Input**: The **original uploaded file** (and, for PDFs, full-DPI rendered page images) — **not** the Stage 1 preprocessed image, whose grayscale + binarization + morphology destroy the very signals forensics depends on (JPEG compression history, colour, resolution, and the file container/metadata). The `documents` table retains both `file_path` (original) and `converted_image_path` (preprocessed) precisely so this stage can read the original.
+
+**Why this stage exists**: Stages 2–4b validate *components* (text, type, signature, stamp) but do not look for the traces of *editing* a document. A vendor can change a name, date, or TIN, or paste a genuine stamp/signature lifted from another document, while every component still "matches". Stage T is a **document-wide forensic layer** that hunts for those tampering traces. It is implemented as `python/scripts/tamper_analyze.py` over the `python/forensics` package and is **fail-forward**: a technique that cannot run (e.g. ELA on a non-raster page) is recorded as *skipped* and excluded from the blend rather than aborting the document.
+
+**Five techniques** (each returns an authenticity score in [0,1], 1 = clean):
+
+| # | Technique | Catches | Method |
+|---|---|---|---|
+| T1 | **Metadata analysis** | Editor software signatures (Photoshop/GIMP), modify-date after creation/issue date, stripped metadata | EXIF (Pillow/piexif) for images, document-info/XMP (pikepdf) for PDFs |
+| T2 | **Error Level Analysis (ELA)** | Pasted/edited regions with a different compression history | Recompress at a known JPEG quality, measure per-block error, flag spatially-clustered hotspots |
+| T3 | **Copy-move / clone detection** | A region (stamp, signature, field) duplicated within the same image | ORB keypoints self-matched, binned by a consistent translation offset |
+| T4 | **Font-consistency analysis** | A field re-typed in a mismatched font/size/spacing | Robust (median/MAD) outlier test over Stage 2 OCR word boxes |
+| T5 | **OCR cross-reference** | Malformed/fabricated identifiers (TIN, registration number) | Format/checksum validation in Python; authoritative DB existence check on the Laravel side (`App\Support\TinValidator`, `RegistrationNumberValidator`) |
+
+> A 6th **ML fusion** layer — a model trained on genuine/forged documents that ingests the five signals — is the planned next step; until a labelled tampered dataset exists, the aggregate uses a deterministic weighted blend of the five technique scores.
+
+**Relationship to Stage 4b**: complementary, not redundant. Stage 4b's EfficientNet texture check is *stamp-specific* (wet-ink vs. photocopy on the cropped seal); Stage T is *document-wide* and operates on the whole page and the file container.
+
+**Output**: an aggregate verdict stored one-to-one with the document in `tamper_analyses`:
+- `tamper_score` (0 clean .. 1 tampered) and `tamper_authenticity` (its inverse, fed to Stage 5 as the 5th weighted component),
+- `tamper_confidence` — the single strongest technique signal,
+- `hard_flag` — true when any one technique reports tamper evidence at/above `TAMPER_HARD_THRESHOLD` (e.g. an exact-pixel clone), which alone fails the forensic gate so strong localized fraud is not averaged away,
+- the per-technique breakdown and a merged `flags` list.
+
+---
+
 ### Stage 5: Risk Score Computation and Report Generation
 
-**Input**: All outputs from Stages 1–4b.
+**Input**: All outputs from Stages 1–4b **and Stage T**.
 
 **What happens**:
 1. The system **aggregates** results from all validation components:
@@ -291,6 +319,7 @@ All feed into the composite risk score.
    - Document classification confidence (from ResNet-50)
    - Signature similarity score (from Siamese CNN) — or "not detected" flag
    - Stamp similarity score (from EfficientNet) — or "not detected" flag
+   - Forensic tampering authenticity (from Stage T) — or *skipped*
 2. Each component contributes to a **composite risk score** using configurable weights.
 
 **Risk score formula** (conceptual):
@@ -300,17 +329,23 @@ Composite Risk = w1 × (1 - text_validation_score)
                + w2 × (1 - classification_confidence)
                + w3 × (1 - signature_similarity)
                + w4 × (1 - stamp_similarity)
+               + w5 × (1 - tamper_authenticity)
                + penalty_flags
+
+IF tamper_confidence ≥ TAMPER_HARD_THRESHOLD:
+        risk_level := High   (hard override — regardless of the weighted blend)
 ```
 
-Where `w1 + w2 + w3 + w4 = 1.0` and `penalty_flags` adds additional risk for missing components (no signature detected, no stamp detected, insufficient OCR text).
+Where `w1 + w2 + w3 + w4 + w5 = 1.0` and `penalty_flags` adds additional risk for missing components (no signature detected, no stamp detected, insufficient OCR text). A missing component is excluded from the (renormalised) weighted blend and instead contributes `MISSING_COMPONENT_PENALTY`; a *skipped* forensic stage carries no penalty (fail-forward). The **hard override** ensures a high-confidence tampering signal (e.g. an exact-pixel clone) forces a High Risk band even when the four clean component scores would otherwise dilute it.
 
 **Configurable parameters**:
-- `RISK_WEIGHT_TEXT` (w1) — e.g., 0.25
-- `RISK_WEIGHT_CLASSIFICATION` (w2) — e.g., 0.25
-- `RISK_WEIGHT_SIGNATURE` (w3) — e.g., 0.25
-- `RISK_WEIGHT_STAMP` (w4) — e.g., 0.25
+- `RISK_WEIGHT_TEXT` (w1) — e.g., 0.20
+- `RISK_WEIGHT_CLASSIFICATION` (w2) — e.g., 0.20
+- `RISK_WEIGHT_SIGNATURE` (w3) — e.g., 0.20
+- `RISK_WEIGHT_STAMP` (w4) — e.g., 0.20
+- `RISK_WEIGHT_TAMPER` (w5) — e.g., 0.20
 - `MISSING_COMPONENT_PENALTY` — additional risk points for undetected signatures/stamps
+- `TAMPER_HARD_THRESHOLD` — tamper confidence at/above which the band is forced to High
 
 **Output**: A **Validation Report** containing:
 - Per-document summary (each page processed)
@@ -357,9 +392,10 @@ The composite risk score is not a black box. When an officer clicks on a submiss
 | Document Classification (ResNet-50) | 96% confidence | 70% | ✓ Pass | Classified as "BIR Permit" |
 | Signature Match (Siamese CNN) | 43% similarity | 75% | ✗ Fail | Distance: 1.87 (threshold: 1.20) |
 | Stamp Match (EfficientNet) | 91% similarity | 85% | ✓ Pass | Cosine similarity: 0.91 |
+| Forensic Tampering (Stage T) | 88% authenticity | 50% | ✓ Pass | Metadata/ELA/copy-move/font/cross-ref all clean |
 | **Composite Risk Score** | **62 / 100** | — | ⚠ Medium | Signature mismatch is primary driver |
 
-Each row is expandable. Clicking **Signature Match**, for example, shows:
+Each row is expandable. The **Forensic Tampering** row expands into its five techniques (metadata, ELA, copy-move, font, cross-reference) with per-technique score, flags, and — for ELA/copy-move — the suspect region(s) highlighted on the page. Clicking **Signature Match**, for example, shows:
 - The reference signature image (enrolled during onboarding)
 - The query signature image (from this submission)
 - The 128-D embedding distance value
@@ -462,13 +498,21 @@ All configurable parameters that the implementing organization would set:
 | `YOLO_DETECTION_CONFIDENCE` | 0.50 | Minimum YOLOv8 detection confidence |
 | `SIGNATURE_DISTANCE_THRESHOLD` | Empirical | Maximum Euclidean distance for signature match |
 | `STAMP_SIMILARITY_THRESHOLD` | 0.85 | Minimum cosine similarity for stamp match (85%) |
-| `RISK_WEIGHT_TEXT` | 0.25 | Weight of text validation in composite risk |
-| `RISK_WEIGHT_CLASSIFICATION` | 0.25 | Weight of classification confidence in composite risk |
-| `RISK_WEIGHT_SIGNATURE` | 0.25 | Weight of signature score in composite risk |
-| `RISK_WEIGHT_STAMP` | 0.25 | Weight of stamp score in composite risk |
+| `RISK_WEIGHT_TEXT` | 0.20 | Weight of text validation in composite risk |
+| `RISK_WEIGHT_CLASSIFICATION` | 0.20 | Weight of classification confidence in composite risk |
+| `RISK_WEIGHT_SIGNATURE` | 0.20 | Weight of signature score in composite risk |
+| `RISK_WEIGHT_STAMP` | 0.20 | Weight of stamp score in composite risk |
+| `RISK_WEIGHT_TAMPER` | 0.20 | Weight of Stage T forensic authenticity in composite risk (w5) |
 | `MISSING_COMPONENT_PENALTY` | 15 | Additional risk points per missing component |
 | `HIGH_RISK_THRESHOLD` | 61 | Score above which submission is classified High Risk |
 | `MEDIUM_RISK_THRESHOLD` | 31 | Score above which submission is classified Medium Risk |
+| `TAMPER_AUTHENTICITY_THRESHOLD` | 0.50 | Aggregate forensic authenticity below which the Stage T gate fails |
+| `TAMPER_HARD_THRESHOLD` | 0.80 | Single-technique tamper confidence that hard-flags the doc / forces High Risk |
+| `TAMPER_WEIGHT_METADATA` | 0.20 | Stage T blend weight — metadata (T1) |
+| `TAMPER_WEIGHT_ELA` | 0.25 | Stage T blend weight — Error Level Analysis (T2) |
+| `TAMPER_WEIGHT_COPY_MOVE` | 0.25 | Stage T blend weight — copy-move detection (T3) |
+| `TAMPER_WEIGHT_FONT` | 0.15 | Stage T blend weight — font consistency (T4) |
+| `TAMPER_WEIGHT_CROSS_REFERENCE` | 0.15 | Stage T blend weight — OCR cross-reference (T5) |
 | `DATA_RETENTION_YEARS` | 5 | Years before documents are eligible for archival |
 
 ---
@@ -515,8 +559,14 @@ VENDOR                          SYSTEM                              OFFICER / AD
                                     reference: flag "Unknown stamp";
                                     else compare → Cosine sim → Score
 
-                                9. Aggregate all scores →
-                                   Compute composite risk →
+                                8c. Forensic Tampering (Stage T) — on the
+                                    ORIGINAL file, not the preprocessed image
+                                    Metadata + ELA + Copy-move + Font +
+                                    Cross-reference → tamper_score / confidence
+
+                                9. Aggregate all scores (incl. Stage T) →
+                                   Compute composite risk (5 weighted terms +
+                                   tamper hard-override) →
                                    Generate Validation Report →
                                    Status: PENDING_REVIEW
 

@@ -17,6 +17,11 @@ scikit-learn>=1.4
 scipy>=1.11
 opencv-python-headless>=4.9
 
+# --- document tampering forensics (Stage T: scripts/tamper_analyze.py) ---
+# ELA + copy-move reuse numpy/opencv above; these add provenance-metadata reads.
+pikepdf>=8.0                 # PDF document-info / XMP metadata (T1)
+piexif>=1.1                  # image EXIF read/inject (T1; tests inject a Software tag)
+
 # --- detection ---
 ultralytics>=8.1             # pulls in torch/torchvision
 onnx>=1.16,<1.17             # YOLOv8 ONNX export; 1.17+ needs ml_dtypes.float4, which conflicts with TF 2.16's ml-dtypes~=0.3.1
