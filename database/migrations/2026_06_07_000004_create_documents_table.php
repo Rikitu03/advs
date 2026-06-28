@@ -25,7 +25,7 @@ return new class extends Migration
             $table->unsignedSmallInteger('page_number')->default(1)->nullable();
             $table->enum('processing_status', [
                 'queued', 'preprocessing', 'ocr', 'classifying',
-                'detecting', 'verifying', 'completed', 'failed',
+                'detecting', 'verifying', 'forensics', 'completed', 'failed',
             ])->default('queued')->index();
             $table->timestamps();
         });
