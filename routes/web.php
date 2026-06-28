@@ -87,6 +87,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::post('{key}/reset', [SystemSettingsController::class, 'reset'])->name('reset');
         });
 
+        // Data Retention Configuration — admin-only policy management UI.
+        // The Volt page owns the live editing experience; the model/policy
+        // pair keeps the records secure and future-proof for more rules.
+        Route::middleware('role:admin')->prefix('admin/retention')->name('admin.retention.')->group(function () {
+            Volt::route('/', 'admin.retention.index')->name('index');
+        });
+
         // Audit Trail — admin-only viewer for the append-only audit log.
         // The Volt page owns the index, filtering, and search; the
         // controller serves the detail drill-down and CSV export.
@@ -94,6 +101,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Volt::route('/', 'admin.audit.index')->name('index');
             Route::get('export', [AuditLogController::class, 'export'])->name('export');
             Route::get('{audit}', [AuditLogController::class, 'show'])->name('show');
+        });
+
+        // ML Model Management — admin-only catalogue of the four ML weight
+        // files the pipeline consumes (ResNet-50, YOLOv8, Siamese, EfficientNet).
+        // The Volt page handles filtering, sync, and per-row edits. Authorization
+        // is also enforced inside the component via the MlModelPolicy.
+        Route::middleware('role:admin')->prefix('admin/models')->name('admin.models.')->group(function () {
+            Volt::route('/', 'admin.models.index')->name('index');
         });
     });
 });

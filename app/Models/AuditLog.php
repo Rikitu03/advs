@@ -186,6 +186,9 @@ class AuditLog extends Model
             'system_setting.reset',
             'submission.decided',
             'submission.flagged',
+            'ml_model.synced',
+            'ml_model.missing',
+            'ml_model.updated',
         ];
     }
 
@@ -202,6 +205,7 @@ class AuditLog extends Model
             'Users' => 'user',
             'System Settings' => 'system_setting',
             'Submissions' => 'submission',
+            'ML Models' => 'ml_model',
         ];
     }
 }
