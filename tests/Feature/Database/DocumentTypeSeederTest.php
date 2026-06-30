@@ -29,8 +29,8 @@ class DocumentTypeSeederTest extends TestCase
     {
         $types = $this->seedTypes();
 
-        // 24 real, submittable document types (fake/other are classifier-only).
-        $this->assertSame(24, $types->count());
+        // 20 real, submittable document types (fake/other are classifier-only).
+        $this->assertSame(20, $types->count());
         $this->assertArrayNotHasKey('fake', $types->all());
         $this->assertArrayNotHasKey('other', $types->all());
     }
@@ -43,8 +43,7 @@ class DocumentTypeSeederTest extends TestCase
         foreach ([
             'bir_certificate', 'sec_registration', 'sec_gis', 'dti_registration', 'business_permit',
             'sanitary_permit', 'fda_registration', 'food_handler_certificate',
-            'financial_statement', 'signed_contract', 'employment_contract',
-            'nbi_clearance', 'police_clearance', 'health_medical_certificate',
+            'financial_statement', 'signed_contract',
             'national_id', 'philhealth_id', 'sss_id', 'umid', 'postal_id',
             'drivers_license', 'passport', 'prc_id', 'voters_id', 'tin_id',
         ] as $code) {
@@ -65,7 +64,6 @@ class DocumentTypeSeederTest extends TestCase
         $this->assertSame('lgu', $types['business_permit']);
         $this->assertSame('lgu', $types['sanitary_permit']);
         $this->assertNull($types['financial_statement']);
-        $this->assertNull($types['employment_contract']);
         $this->assertSame('national', $types['national_id']); // gov IDs verify the issuing-agency logo
     }
 
@@ -85,6 +83,6 @@ class DocumentTypeSeederTest extends TestCase
         $this->seed(DocumentTypeSeeder::class);
         $this->seed(DocumentTypeSeeder::class);
 
-        $this->assertSame(24, DB::table('document_types')->count());
+        $this->assertSame(20, DB::table('document_types')->count());
     }
 }

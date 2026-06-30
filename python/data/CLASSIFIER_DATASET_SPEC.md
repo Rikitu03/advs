@@ -6,7 +6,7 @@
 >
 > Context: [`../DEVELOPMENT_PHASES.md`](../DEVELOPMENT_PHASES.md) (Phase 1 taxonomy lock-in, Phase 2
 > dataset generation) · [`../../docs/CLIENT_INTERVIEW_GAP_PLAN.md`](../../docs/CLIENT_INTERVIEW_GAP_PLAN.md)
-> (Negofood food-business + personnel scope) · [`../../ADVS_System_Reference.md`](../../ADVS_System_Reference.md)
+> (Negofood food-business / vendor scope) · [`../../ADVS_System_Reference.md`](../../ADVS_System_Reference.md)
 > (Stage 3 + §9 `CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.70`).
 
 ---
@@ -20,8 +20,8 @@
 | Test (optional) | 100 images | held-out, untouched until final eval |
 | Absolute floor | 300 train / 60 val | only if a type is data-scarce; pad toward uniform |
 
-**Uniform ~1,000 train / ~200 val per class.** With **26 classes** that's **≈ 26,000 train + ≈ 5,200 val**
-images (+ optional ≈ 2,600 test). Two existing classes (`bir_certificate` ≈ 1,014, `financial_statement`
+**Uniform ~1,000 train / ~200 val per class.** With **22 classes** that's **≈ 22,000 train + ≈ 4,400 val**
+images (+ optional ≈ 2,200 test). Two existing classes (`bir_certificate` ≈ 1,014, `financial_statement`
 ≈ 1,005) already sit at this target — so 1,000 is a *proven, reachable* balance point, not an arbitrary one.
 
 Balance is enforced at **two layers**: (1) **data-level** — generate to a uniform per-class count
@@ -36,7 +36,7 @@ prevents duplicate leakage across splits.
 
 ---
 
-## Canonical taxonomy (26 classes)
+## Canonical taxonomy (22 classes)
 
 `issuer_scope` drives **Stage 4b** logo/seal verification (`national` = one agency logo by type; `lgu` =
 per-city seal by type+city; `null` = no issuer logo). `requires_expiry` drives **Phase 8** field
@@ -63,16 +63,8 @@ extraction + the compliance expiry/renewal layer. Train/val targets are uniform 
 |---|---|---|---|---|---|
 | `financial_statement` | auditor | null | no | ✅ [financial_statement_generator](../scripts/financial_statement_generator.py) | `financial_stmt` ⚠️ rename |
 | `signed_contract` | counterparty | null | contextual | ❌ new | `signed_contract` ✓ |
-| `employment_contract` | employer | null | contextual | ❌ new | — new |
 
-### D. Personnel clearances & certificates
-| Class folder | Issuer | `issuer_scope` | `requires_expiry` | Generator |
-|---|---|---|---|---|
-| `nbi_clearance` | NBI | national | **yes** (1 yr) | ❌ new |
-| `police_clearance` | PNP / LGU | lgu | **yes** (6 mo–1 yr) | ❌ new |
-| `health_medical_certificate` | clinic/hospital | null | **yes** | ❌ new |
-
-### E. Government IDs (one class per ID type)
+### D. Government IDs (one class per ID type)
 All issued by a single national agency → `issuer_scope = national` (the agency logo/seal is the same
 nationwide). `requires_expiry` varies by ID.
 | Class folder | Issuing agency | `requires_expiry` |
@@ -88,7 +80,7 @@ nationwide). `requires_expiry` varies by ID.
 | `voters_id` | COMELEC | no |
 | `tin_id` | BIR | no |
 
-### F. Negative / reject
+### E. Negative / reject
 | Class folder | Purpose | Target |
 |---|---|---|
 | `fake` | forged / tampered / wrong-template negatives | 1,000–1,500, **diverse** |

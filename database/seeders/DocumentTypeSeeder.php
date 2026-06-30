@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\DB;
 class DocumentTypeSeeder extends Seeder
 {
     /**
-     * Seed the supported document types for the Negofood food-business + personnel
-     * accreditation domain.
+     * Seed the supported document types for the Negofood food-business
+     * (vendor) accreditation domain.
      *
      * The `code` of each type matches the ResNet-50 classifier's class folder name
      * (python/data/.../classifier_data/<code>/) so Stage 3's predicted label maps
@@ -22,9 +22,9 @@ class DocumentTypeSeeder extends Seeder
      * seal per city matched by document type + detected city; null = no official
      * issuer logo (the logo-reference lookup is skipped).
      *
-     * `is_required` is a COARSE, deployment-wide default — the real per-subject
-     * rules (which docs a Food Supplier vs a Kitchen Staff member must submit, and
-     * "any one government ID") will live in the planned `requirement_profiles`
+     * `is_required` is a COARSE, deployment-wide default — the real per-vendor
+     * rules (which docs a Food Supplier vs a Beverage Distributor must submit,
+     * and "any one government ID") will live in the planned `requirement_profiles`
      * tables. The classifier-only negative classes (`fake`, `other`) are NOT
      * document types and are intentionally excluded here.
      *
@@ -53,14 +53,8 @@ class DocumentTypeSeeder extends Seeder
             // --- Financial / contractual ---
             ['name' => 'Financial Statement', 'code' => 'financial_statement', 'description' => 'Audited financial statement', 'is_required' => true, 'issuer_scope' => null],
             ['name' => 'Signed Contract', 'code' => 'signed_contract', 'description' => 'Signed accreditation contract/agreement', 'is_required' => false, 'issuer_scope' => null],
-            ['name' => 'Employment Contract', 'code' => 'employment_contract', 'description' => 'Employment contract (personnel)', 'is_required' => false, 'issuer_scope' => null],
 
-            // --- Personnel clearances & certificates ---
-            ['name' => 'NBI Clearance', 'code' => 'nbi_clearance', 'description' => 'NBI clearance (personnel)', 'is_required' => false, 'issuer_scope' => 'national'],
-            ['name' => 'Police Clearance', 'code' => 'police_clearance', 'description' => 'Police clearance (personnel)', 'is_required' => false, 'issuer_scope' => 'lgu'],
-            ['name' => 'Medical / Health Certificate', 'code' => 'health_medical_certificate', 'description' => 'Medical / health certificate (personnel)', 'is_required' => false, 'issuer_scope' => null],
-
-            // --- Government IDs (one type per ID; single national issuing agency each) ---
+            // --- Government IDs of the authorized representative (one type per ID; single national issuing agency each) ---
             ['name' => 'PhilSys National ID', 'code' => 'national_id', 'description' => 'PhilSys National ID (PhilID)', 'is_required' => false, 'issuer_scope' => 'national'],
             ['name' => 'PhilHealth ID', 'code' => 'philhealth_id', 'description' => 'PhilHealth member ID', 'is_required' => false, 'issuer_scope' => 'national'],
             ['name' => 'SSS ID', 'code' => 'sss_id', 'description' => 'Social Security System ID', 'is_required' => false, 'issuer_scope' => 'national'],

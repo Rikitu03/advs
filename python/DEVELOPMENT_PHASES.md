@@ -93,7 +93,7 @@ stamp), operators set the rest.
 | `financial_statement` | **1005** | 2 | well-populated (not client-prioritized) |
 | `business_permit` | **200** | 2 | synthetic batch landed |
 | `fake` | **7** | 2 | ⚠️ far too few for a fraud class |
-| *(food/personnel types)* | **0** | 0 | ❌ none exist |
+| *(food-business types)* | **0** | 0 | ❌ none exist |
 
 > Validation split is **2 images/class** — a smoke-test placeholder, **not trainable**. A real val split
 > is required before training.
@@ -125,17 +125,13 @@ Three layers disagree on document codes:
 | Mayor's / Business Permit | vendor | lgu | 🟡 200 | ✅ |
 | DTI / SEC registration | vendor | national | ❌ | ❌ |
 | **Sanitary Permit** | vendor | lgu | ❌ | ❌ |
-| **Food Handler Certificate** | personnel | lgu | ❌ | ❌ |
+| **Food Handler Certificate** | vendor | lgu | ❌ | ❌ |
 | **FDA registration** | vendor | national | ❌ | ❌ |
 | Financial Statement | vendor | null | ✅ 1005 | ✅ |
-| Government ID | both | null | ❌ | ❌ |
-| NBI / Police Clearance | personnel | national | ❌ | ❌ |
-| Health / Medical Certificate | personnel | null | ❌ | ❌ |
-| SSS / PhilHealth / Pag-IBIG / TIN | personnel | national | ❌ | ❌ |
-| Employment Contract | personnel | null | ❌ | ❌ |
+| Government ID (authorized representative) | vendor | national | ❌ | ❌ |
 | `fake` (negative class) | — | — | ⚠️ 7 | ❌ |
 
-**~2 of ~12 client-relevant types have classifier data; the rest are unbuilt.** This is the long pole.
+**~2 of ~8 client-relevant types have classifier data; the rest are unbuilt.** This is the long pole.
 
 ---
 
@@ -153,11 +149,11 @@ confirm `.gitignore` excludes `data/training/**`, `data/validation/**`, `models/
 ## Phase 1 — Data taxonomy & layout lock-in ❌ → *do this first*  · (M0)
 
 **Goal:** One canonical document-type taxonomy shared by the classifier folders, `DocumentTypeSeeder`,
-and `ocr_template_rules`, extended to the Negofood food + personnel domain. Nothing else should be built
-on a moving taxonomy.
+and `ocr_template_rules`, extended to the Negofood food-business (vendor) domain. Nothing else should be
+built on a moving taxonomy.
 
 **Tasks:**
-- Decide the final class list (food + personnel + `fake`) and freeze **one** canonical folder name per
+- Decide the final class list (food-business + `fake`) and freeze **one** canonical folder name per
   class under `data/training/classifier_data/<class>` and `data/validation/classifier_data/<class>`.
 - Make folder names **==** `DocumentTypeSeeder` codes (resolve `bir_certificate`↔`bir_permit`,
   `financial_statement`↔`financial_stmt`). Coordinate the seeder change with pipeline Phase P1.
@@ -171,12 +167,12 @@ no non-canonical class name remains anywhere; `train_classifier.py --dry-run` ex
 
 ## Phase 2 — Synthetic classifier dataset generation 🟡 · (M1)
 
-**Goal:** Balanced clean + scan-degraded images for **every** class, including the new food/personnel
+**Goal:** Balanced clean + scan-degraded images for **every** class, including the new food-business
 types, using the template-fill generators.
 
 **Tasks:**
 - Run the existing generators ([bir](scripts/bir_dataset_generator.py), [business_permit](scripts/business_permit_dataset_generator.py), [financial_statement](scripts/financial_statement_generator.py)) — **10 samples first for visual QA**, then the full batch.
-- Build generators for the **new types** (Sanitary Permit, FDA, Food Handler, DTI/SEC, personnel docs)
+- Build generators for the **new types** (Sanitary Permit, FDA, Food Handler, DTI/SEC, government IDs)
   by **reusing** `bir_dataset_generator`'s helpers (text-fit, white-keyed asset compositing, Augraphy
   degrade, atomic manifest). **Do not reimplement** the machinery. Vendor each new blank template +
   seal/logo under `data/template/` / `data/seal/` / `logo/`.
@@ -362,10 +358,10 @@ Phase 11 eval/thresholds/packaging ❌  ──►  Phase 12 retrain/maintain ⏸
 
 ## Open decisions to confirm before Phase 1
 
-1. **Final taxonomy** — the exact food/personnel class list + each type's `issuer_scope` / `requires_expiry`.
+1. **Final taxonomy** — the exact food-business class list + each type's `issuer_scope` / `requires_expiry`.
 2. **Canonical codes** — adopt classifier folder names or the `DocumentTypeSeeder` codes as the single source.
-3. **Personnel templates** — which personnel docs get synthetic generators vs. real-sample collection
-   (PII-sensitive: NBI, health certs, IDs).
+3. **Government-ID templates** — which government IDs get synthetic generators vs. real-sample collection
+   (PII-sensitive).
 4. **`fake` strategy** — how negatives are synthesized/sourced at scale.
 
 *Tracks the M-phases in [`../docs/phases/MODEL_TRAINING_PHASES.md`](../docs/phases/MODEL_TRAINING_PHASES.md); current-state figures are a snapshot as of this writing — re-count the data folders before acting.*

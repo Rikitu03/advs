@@ -23,8 +23,9 @@ The interview changes **what the classifier must recognize**, not the model zoo:
 
 - **New classifier classes** for the food-business domain (G7): Mayor's/**Business Permit** (LGU),
   **BIR Certificate of Registration** (national), DTI/SEC (national), **Sanitary Permit** (LGU),
-  **Food Handler Certificate**, **FDA registration** (national), plus a `fake` class — and personnel
-  documents (NBI/Police Clearance, Health/Medical Certificate, Government ID, etc.).
+  **Food Handler Certificate**, **FDA registration** (national), the **Government IDs** of the
+  authorized representative, plus a `fake` class. (Vendor-only — personnel/employee document types
+  such as NBI/police clearance and health certificates are **out of scope**; see gap plan G5.)
 - **`issuer_scope` per class** must match the DB taxonomy (`document_types.issuer_scope`) so Stage 4b
   keys the logo reference correctly (`national` by type; `lgu` by type+city; `null` no logo). The class
   codes are **shared** with [PIPELINE_INTEGRATION_PHASES.md](./PIPELINE_INTEGRATION_PHASES.md) Phase P1's
@@ -87,7 +88,7 @@ The interview changes **what the classifier must recognize**, not the model zoo:
 the DB `document_types` codes, and `issuer_scope` all agree.
 
 **Tasks:**
-- Finalize the class list (food-domain + personnel + `fake`) and freeze the **canonical folder names**
+- Finalize the class list (food-domain + government IDs + `fake`) and freeze the **canonical folder names**
   under `python/data/training/classifier_data/<class>` (e.g. `bir_certificate`, `business_permit`,
   `financial_statement`, `fake`, …). There is **one** name per class — no phantom folders (a prior bug
   pointed a generator at a non-existent `business_registration`; the canonical code is `business_permit`).
@@ -112,7 +113,7 @@ template-fill generators, extended to the food domain.
   full batch.
 - Build generators (reusing the field-agnostic `bir_dataset_generator` helpers — text-fit, asset
   compositing, Augraphy degrade, atomic manifest) for the **new food-domain types**: Sanitary Permit
-  (LGU), FDA registration (national), Food Handler Certificate, plus personnel docs as templates allow.
+  (LGU), FDA registration (national), Food Handler Certificate, plus government IDs as templates allow.
   **Do not duplicate machinery** — import the shared helpers.
 - Ensure generated field VALUES satisfy the OCR regexes in `ocr_dryrun.py` `FIELD_SPECS` so documents
   read back the way Stage 2 / field extraction expects.

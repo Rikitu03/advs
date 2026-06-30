@@ -11,7 +11,7 @@
 > Sources this plan integrates:
 > - **Dashboard structure & behavior** — [ADVS_System_Reference.md](../../ADVS_System_Reference.md) (§4 navigation, §6 risk-score drill-down, §7 notifications).
 > - **How we build the frontend** — [CLAUDE.md](../../CLAUDE.md) (§4 Blade/Tailwind/Flux + Livewire/Volt conventions, §8 dashboard/portal phase).
-> - **New client direction** — [CLIENT_INTERVIEW_GAP_PLAN.md](../CLIENT_INTERVIEW_GAP_PLAN.md) §4 (checklist + extracted-fields panels, lifecycle KPI cards, resubmission, personnel portal, requirement-profile CRUD).
+> - **New client direction** — [CLIENT_INTERVIEW_GAP_PLAN.md](../CLIENT_INTERVIEW_GAP_PLAN.md) §4 (checklist + extracted-fields panels, lifecycle KPI cards, resubmission, requirement-profile CRUD).
 > - **Theme tokens** — [color_pallete.md](../../color_pallete.md).
 >
 > **Build skills:** `fluxui-development`, `volt-development`, `tailwindcss-development`, `frontend-design`.
@@ -46,10 +46,9 @@ The original dashboards (reference §4/§6) covered submissions, risk scores, an
 adds **lifecycle** surfaces:
 
 - **Lifecycle KPI cards:** Incomplete, Expiring soon, Expired, Due-for-renewal — beside pending/flagged/approval-rate.
-- **Checklist panel:** present / missing / expired per required document type, from the subject's requirement profile.
+- **Checklist panel:** present / missing / expired per required document type, from the vendor's requirement profile.
 - **Extracted-fields panel:** business name, document number, issue/expiry dates — with a **red badge when expired**.
 - **Request Resubmission** action: reopen upload for **only** the flagged items.
-- **Personnel portal:** the same flows as vendors, for employees/personnel subjects.
 - **Admin CRUD** for requirement profiles + food-domain document types.
 
 These render the data produced by [PIPELINE_INTEGRATION_PHASES.md](./PIPELINE_INTEGRATION_PHASES.md)
@@ -63,8 +62,7 @@ These render the data produced by [PIPELINE_INTEGRATION_PHASES.md](./PIPELINE_IN
 |---|---|---|
 | Flux app shell (sidebar/header) | ✅ Exists | Reusable `components/layouts/app`; nav not yet fully role-aware for new items. |
 | Officer/admin screens | ⚠️ Demo-backed | Dashboard, pending queue, submission drill-down, archived, vendor profiles, risk logs, notifications, user mgmt, settings, retention, audit, ML model mgmt — all wired but driven by **demo data**, not real persistence. |
-| Vendor portal | ⚠️ Demo-backed | submit / submissions / notifications / profile exist as demo flows. |
-| Personnel portal | ❌ Missing | Vendor-only today. |
+| Vendor portal | ⚠️ Demo-backed | submit / submissions / notifications / profile exist as demo flows. Vendor-only by design (no personnel portal — G5 descoped). |
 | Compliance panels (checklist / extracted fields / lifecycle KPIs / resubmission) | ❌ Missing | Not built. |
 | Risk-score drill-down (incl. Stage-T expand) | 🟡 Partial | Component breakdown design exists (reference §6); verify Stage-T five-technique expansion is surfaced. |
 
@@ -76,7 +74,7 @@ These render the data produced by [PIPELINE_INTEGRATION_PHASES.md](./PIPELINE_IN
 demo data to real models one at a time.
 
 **Tasks:**
-- Make the sidebar **role-aware** for all current + planned items (vendor / personnel / officer / admin),
+- Make the sidebar **role-aware** for all current + planned items (vendor / officer / admin),
   gated by `hasRole(...)` / `role:` middleware.
 - Land the theme tokens from [color_pallete.md](../../color_pallete.md) in `resources/css/app.css`
   (`@theme`) so brand color/surface/gradient are reusable utilities (no per-component hex).
@@ -89,17 +87,17 @@ console errors; a single screen is proven flippable demo→real without touching
 
 ---
 
-## Phase U1 — Vendor & Personnel portal
+## Phase U1 — Vendor portal
 
-**Goal:** Subjects (vendors **and** personnel) can submit, track lifecycle status, and respond to
-resubmission requests — on real persistence.
+**Goal:** Vendors can submit, track lifecycle status, and respond to resubmission requests — on real
+persistence. (Vendor-only; personnel/employee onboarding is out of scope — see gap plan G5.)
 
 **Screens & functions** (reference §4 Vendor sidebar, extended):
 - **Dashboard (Home):** summary cards (total / pending / approved / rejected) **+ checklist progress**
   ("4 of 6 required documents") and **expiry badges**; recent activity feed.
 - **Submit Documents:** Flux file field / drag-and-drop with MIME preview + **10 MB client guard**
-  (server-enforced in Pipeline P2). Format guidance; submission confirmation. For **personnel**, the
-  form is scoped to the personnel requirement profile.
+  (server-enforced in Pipeline P2). Format guidance; submission confirmation. The form is scoped to
+  the vendor's requirement profile.
 - **My Submissions:** table (date, document, status incl. `incomplete` / `resubmission_requested`,
   detail link); row → per-document statuses + **validity badges** (`valid`/`expiring_soon`/`expired`).
 - **Resubmission affordance:** for `resubmit_requested` items, a focused re-upload of **only** the
@@ -107,9 +105,9 @@ resubmission requests — on real persistence.
 - **Notifications:** received / processed / flagged / decision / **renewal-reminder** alerts (reference §7).
 - **Profile:** account settings, password, contact info. (Signature enrollment lives in registration, not here.)
 
-**Definition of Done:** a vendor and a personnel subject can each submit real files (rows persist, job
-dispatched), see checklist progress + expiry badges from real data, and complete a targeted re-upload.
-Demo store removed from these screens. Volt/feature tests cover submit + resubmission.
+**Definition of Done:** a vendor can submit real files (rows persist, job dispatched), see checklist
+progress + expiry badges from real data, and complete a targeted re-upload. Demo store removed from
+these screens. Volt/feature tests cover submit + resubmission.
 
 ---
 
@@ -121,7 +119,7 @@ Demo store removed from these screens. Volt/feature tests cover submit + resubmi
 **Screens & functions** (reference §4 Officer sidebar + §6 drill-down, extended):
 - **Dashboard (Home):** KPI cards — pending review, flagged today, approval rate **+ NEW** Incomplete,
   Expiring soon, Expired, and a **Due-for-renewal** list. Quick-access to the most urgent flagged submissions.
-- **Pending Submissions:** queue sorted by risk (highest first); each row shows vendor/personnel,
+- **Pending Submissions:** queue sorted by risk (highest first); each row shows vendor,
   date, **color-coded composite risk score**, flag count, **and compliance flags** (incomplete/expired).
 - **Validation Results (drill-down):** per-document breakdown — OCR text, classification + confidence,
   signature similarity, logo similarity (vs the **issuer** reference), Stage-T forensic authenticity, and
@@ -148,8 +146,8 @@ all writing real decisions + `audit_logs`. Decisions never auto-fire (human-in-t
 
 **Screens & functions:**
 - **User Management:** CRUD accounts; assign/change roles; activate/deactivate; reset passwords.
-- **NEW — Requirement Profiles:** CRUD named checklists ("Food Supplier", "Kitchen Staff") and their
-  items (`document_type`, `is_required`, `requires_expiry`, `renewal_window_days`), scoped by subject kind.
+- **NEW — Requirement Profiles:** CRUD named checklists per vendor category ("Food Supplier",
+  "Beverage Distributor") and their items (`document_type`, `is_required`, `requires_expiry`, `renewal_window_days`).
 - **NEW — Document Types (food domain):** manage the Negofood taxonomy + each type's `issuer_scope` and
   `ocr_template_rules` (keep in lockstep with the classifier classes in [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md)).
 - **System Settings:** the tunable parameters from [ADVS_System_Reference.md §9](../../ADVS_System_Reference.md)

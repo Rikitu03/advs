@@ -29,9 +29,9 @@ authorized person."**
 
 So this track keeps the ML pipeline **as-is** and adds a **compliance-lifecycle layer**: real upload →
 persistence, structured field extraction (esp. **expiry dates**), a **completeness checklist** per
-subject type, **expiration + renewal** monitoring, a **resubmission** loop, and **personnel** onboarding
-alongside vendors. The new compliance signals become **additional flags surfaced beside** the existing
-composite risk score — they do not replace it.
+vendor type, **expiration + renewal** monitoring, and a **resubmission** loop. The new compliance signals
+become **additional flags surfaced beside** the existing composite risk score — they do not replace it.
+(Subjects are **vendors only** — personnel/employee onboarding is out of scope; see gap plan G5.)
 
 > **Approved conceptual departure (flag, per `CLAUDE.md` precedence):**
 > [ADVS_System_Reference.md §1](../../ADVS_System_Reference.md) states the system is *"on-demand, not
@@ -49,7 +49,7 @@ composite risk score — they do not replace it.
 | Pipeline orchestration (PHP) | 🟡 Partial | `ProcessDocumentAction`, `ProcessDocumentJob`, `RiskScoreService`, `TamperDetectionService`, `SignatureAuthenticityService` exist; **not driven by a live upload.** |
 | Real upload → pipeline wiring | ❌ Missing | No `DocumentSubmissionController`; uploads don't persist `Document` rows or dispatch the job from the UI. |
 | Python inference contracts | 🟡 Partial | Present: `tamper_analyze.py`, `ocr_dryrun.py`, dataset generators. **Missing named contracts:** `preprocess.py`, `ocr_runner.py`, `classify_document.py`, `signature_verify.py`, `stamp_verify.py`, `enroll_reference.py` (see [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md) for the weights they load). |
-| Compliance lifecycle (expiry/checklist/renewal/personnel/resubmission) | ❌ Missing | None of the client-prioritized features exist yet. |
+| Compliance lifecycle (expiry/checklist/renewal/resubmission) | ❌ Missing | None of the client-prioritized features exist yet. |
 | Admin tooling | ✅ Strong | System settings, audit + CSV export, retention, ML model catalogue built. |
 
 **Bottom line:** the fraud-detection scaffold is well advanced; the **live end-to-end pipeline** and
@@ -60,7 +60,7 @@ composite risk score — they do not replace it.
 ## The integrated pipeline (target)
 
 ```
-Vendor / Personnel submits
+Vendor submits
         │
         ▼
 Stage 0  Intake → persist Submission + Documents → dispatch ProcessDocumentJob
@@ -122,17 +122,17 @@ known-good contract rather than guessing.
 
 ## Phase P1 — Data & domain model (compliance foundation)
 
-**Goal:** Add the schema the compliance layer needs — expiration fields, a generalized subject
-(vendor **or** personnel), requirement profiles, and lifecycle statuses — without editing shipped
-migrations. *(See [schema-first-modeling] discipline: read the live schema before adding columns.)*
+**Goal:** Add the schema the compliance layer needs — expiration fields, requirement profiles, and
+lifecycle statuses — without editing shipped migrations. *(See [schema-first-modeling] discipline:
+read the live schema before adding columns.)*
 
 > Coordinate column names/types/casts with [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md) where
 > field extraction writes into them, and with [UI_FUNCTION_PHASES.md](./UI_FUNCTION_PHASES.md) where they render.
 
 **Tasks:**
-- **Generalize the subject (G5).** Add a `personnel` table; add polymorphic `subject_type`/`subject_id`
-  to `submissions` so a submission belongs to a **vendor** or a **personnel** record. Vendor stays the
-  default path (least churn). Add `Subject` contract/relationships on both models.
+- **Subject stays the vendor (G5 descoped).** Submissions remain keyed to `vendors` only — **no**
+  `personnel`/`accreditation_subjects` table and **no** `subject_type`/`subject_id` polymorphism.
+  Personnel/employee onboarding is out of scope; do not reintroduce it.
 - **Expiration fields (G1/G4).** Add to `documents` (or `validation_results`): `issue_date` (nullable
   date), `expiry_date` (nullable date), `document_number` (nullable string), `extracted_fields` (json),
   and a derived `validity_status` enum (`valid` / `expiring_soon` / `expired` / `unknown`). Cast in `casts()`.
@@ -281,7 +281,7 @@ renewal reminder scheduled. `php artisan config:cache && route:cache && view:cac
 
 - `php artisan migrate:fresh --seed` clean; factories valid.
 - `php artisan test --compact` green — including new tests: expiration status transitions, checklist
-  completeness, resubmission flow, personnel submission, real upload happy-path +
+  completeness, resubmission flow, real upload happy-path +
   `Queue::assertPushed(ProcessDocumentJob)`, renewal scheduler across the window boundary.
 - Manual end-to-end click-through (the Phase P6 DoD scenario) passes.
 - Python inference contracts exist and pass their tests (owned by [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md)).
