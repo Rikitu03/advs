@@ -1,5 +1,7 @@
 You are an expert machine learning engineer. I need you to produce a **single, well‑commented Python training script** (or a set of clearly named functions inside one script) that trains all the models for my Automated Document Validation System (ADVS). The script must be self‑contained, reading data from the directory structure described below, and saving trained models. Assume all imports are available.
 
+> **This brief is operationalized in [`docs/phases/MODEL_TRAINING_PHASES.md`](docs/phases/MODEL_TRAINING_PHASES.md)** — the phased plan covering datasets (including the **Negofood** food-business document classes), training order, empirical thresholds, and the named inference contracts the Laravel pipeline calls. Keep the classifier's class list in lockstep with `DocumentTypeSeeder` (see [`docs/phases/PIPELINE_INTEGRATION_PHASES.md`](docs/phases/PIPELINE_INTEGRATION_PHASES.md) Phase P1).
+
 ### Project Overview
 - **Goal**: Automate vendor document accreditation by verifying document type, authenticity, signature, and stamp.
 - **Models to train**:

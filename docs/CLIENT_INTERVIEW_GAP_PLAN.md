@@ -202,6 +202,11 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
 
 ## Suggested phasing (incremental, staging-first)
 
+> **Now elaborated as three concern-split phase plans** — Phases A–E below are reorganized by concern and
+> carried into them: backend/pipeline → [phases/PIPELINE_INTEGRATION_PHASES.md](phases/PIPELINE_INTEGRATION_PHASES.md),
+> ML training → [phases/MODEL_TRAINING_PHASES.md](phases/MODEL_TRAINING_PHASES.md),
+> UI functions → [phases/UI_FUNCTION_PHASES.md](phases/UI_FUNCTION_PHASES.md).
+
 - **Phase A — Data & domain:** migrations (expiry fields, personnel, requirement profiles,
   status enums), models/relationships/factories, re-seed food document types. *DoD:*
   `migrate:fresh --seed` green; `php artisan test` green.
