@@ -23,13 +23,16 @@ tamper forensics → composite risk score). The client, however, was explicit:
 
 Their actual priorities are **compliance lifecycle management**: completeness checklists,
 **expiration monitoring + renewal reminders**, **OCR field extraction** (esp. expiry dates),
-centralized status tracking, a clean **resubmission** loop, an **audit trail**, and onboarding
-of **both vendors and personnel/employees**. The food-business context also changes the
-**document types** (Philippine LGU/food-safety permits) the system must recognize.
+centralized status tracking, a clean **resubmission** loop, and an **audit trail**. The
+food-business context also changes the **document types** (Philippine LGU/food-safety
+permits) the system must recognize.
 
 **Approved direction (confirmed with the user):**
 1. **Keep the existing ML pipeline**, add a compliance lifecycle layer on top of it.
-2. **Include personnel/employees now** via a generalized subject model.
+2. **Vendor-only scope.** The interview raised onboarding employees/personnel, but the
+   accreditation **subject is the vendor only** — personnel/employee onboarding is
+   **explicitly out of scope** (no personnel subject model, no personnel-specific document
+   types). The system accredits the *business*, not its individual staff.
 3. This request's output is the **plan document only** (no feature code yet).
 
 ---
@@ -49,7 +52,7 @@ of **both vendors and personnel/employees**. The food-business context also chan
 
 **Bottom line:** The *fraud-detection scaffold* is well advanced (schema, services, admin
 tooling, demo UI). The *end-to-end live pipeline* and — critically — **every feature the
-client actually prioritized** (expiration, checklists, personnel, resubmission, renewals)
+client actually prioritized** (expiration, checklists, resubmission, renewals)
 **do not exist yet.**
 
 ---
@@ -60,9 +63,9 @@ client actually prioritized** (expiration, checklists, personnel, resubmission, 
 |---|---|---|---|
 | G1 | **Expiration monitoring** — flag expired permits; the #1 pain | No expiry/issue-date fields anywhere | New data fields + extraction + status logic |
 | G2 | **Renewal reminders** — calendar-driven alerts before expiry | System is explicitly "on-demand, not calendar-driven" | New scheduler + reminder notifications |
-| G3 | **Completeness checklist** per vendor/personnel type — "detect missing documents" | `document_types.is_required` boolean only | Requirement profiles + per-submission checklist state |
+| G3 | **Completeness checklist** per vendor type — "detect missing documents" | `document_types.is_required` boolean only | Requirement profiles + per-submission checklist state |
 | G4 | **OCR field extraction** — business name, registration #, expiry, permit validity | OCR returns raw text + confidence; no structured fields | Structured field parsing + storage + display |
-| G5 | **Personnel/employee onboarding** — IDs, health/food-handler certs, NBI, SSS/PhilHealth, contracts | Vendor-only | Generalized subject model + personnel doc types |
+| G5 | **Personnel/employee onboarding** | Vendor-only | **DESCOPED — out of scope.** Accreditation subjects are vendors only; no personnel subject model and no personnel-specific document types. Kept here only to record the decision. |
 | G6 | **Resubmission loop** — "request resubmission" of missing/expired/unclear docs | Statuses: processing/pending_review/approved/rejected | New states + request-resubmission action + vendor re-upload |
 | G7 | **Food-business document types** — Mayor's/Business Permit, BIR COR, DTI/SEC, Sanitary, FDA, food-handler | Seeded: BIR, GIS, Financial Stmt, Business Permit, Signed Contract | Re-seed/extend document types for the domain |
 | G8 | **Centralized status visibility** — pending/incomplete/approved/rejected/due-for-renewal at a glance | Status exists but no "incomplete" / "due for renewal" | Add lifecycle statuses + dashboard surfacing |
@@ -79,19 +82,16 @@ client actually prioritized** (expiration, checklists, personnel, resubmission, 
 > on models; extend factories/seeders. Representative files:
 > `database/migrations/`, `app/Models/`, `database/seeders/DocumentTypeSeeder.php`.
 
-- **Generalize the subject (G5).** Introduce an `accreditation_subjects` concept so a
-  submission belongs to either a **vendor** or a **personnel** record. Two viable shapes —
-  recommend **(a)** for least churn:
-  - (a) Keep `vendors`; add a `personnel` table; add `subject_type`/`subject_id`
-    (polymorphic) to `submissions`. Vendor stays the default path.
-  - (b) Rename to a unified `subjects` table with a `kind` enum. (Bigger refactor — defer.)
+- **Subject stays the vendor (G5 descoped).** Submissions remain keyed to `vendors` only —
+  **no** `personnel`/`accreditation_subjects` table and **no** `subject_type`/`subject_id`
+  polymorphism. The vendor-centric model is the final shape.
 - **Expiration fields (G1/G4).** Add to `documents` (or `validation_results`):
   `issue_date` (nullable date), `expiry_date` (nullable date),
   `document_number` (nullable string), `extracted_fields` (json),
   and a derived `validity_status` (`valid` / `expiring_soon` / `expired` / `unknown`).
 - **Checklist / requirement profiles (G3).** New tables:
-  - `requirement_profiles` — a named checklist (e.g., "Food Supplier", "Kitchen Staff"),
-    scoped by subject kind.
+  - `requirement_profiles` — a named checklist per vendor category
+    (e.g., "Food Supplier", "Beverage Distributor").
   - `requirement_profile_items` — links a profile to `document_types` with
     `is_required`, `requires_expiry`, `renewal_window_days`.
   - Per-submission completeness derived by comparing uploaded docs against the profile.
@@ -129,7 +129,7 @@ client actually prioritized** (expiration, checklists, personnel, resubmission, 
 ### 3. Workflow changes
 
 ```
-Vendor/Personnel submits
+Vendor submits
         │
         ▼
 Intake → persist Submission + Documents
@@ -158,7 +158,7 @@ Decision logged (audit trail) ; if approved + expiry → schedule renewal remind
 - **Submission drill-down:** add a **checklist panel** (present/missing/expired per required
   type) and an **extracted-fields panel** (business name, doc #, issue/expiry dates with a
   red badge when expired). Add the **Request Resubmission** action.
-- **Vendor/personnel portal:** show checklist progress ("4 of 6 required documents"),
+- **Vendor portal:** show checklist progress ("4 of 6 required documents"),
   expiry badges, and a re-upload affordance for resubmission-requested items.
 - **Admin:** CRUD for **requirement profiles** and their items; food-domain document types.
 - Wire the above to **real persistence**, replacing the demo store incrementally.
@@ -171,9 +171,10 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
 - Mayor's / Business Permit (LGU, expires) · BIR Certificate of Registration (national) ·
   DTI or SEC registration (national) · **Sanitary Permit** (LGU, expires) ·
   **Food Handler Certificate** (expires) · **FDA registration/certificate** (national, expires) ·
-  Valid Government ID · Supplier Accreditation Form · Bank details ·
-  **Personnel:** NBI/Police Clearance (expires), Health/Medical Certificate (expires),
-  SSS/PhilHealth/Pag-IBIG/TIN, Employment Contract.
+  Valid Government ID (of the authorized representative) · Supplier Accreditation Form · Bank details.
+
+> Personnel-specific document types (NBI/police clearance, health/medical certificate,
+> employment contract) are **out of scope** (vendor-only) and are intentionally **not** seeded.
 
 ### 6. Python scripts
 
@@ -190,10 +191,10 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
 
 1. The system **monitors document validity** and **flags expired credentials**.
 2. The system **sends renewal reminders** ahead of expiry (configurable window).
-3. The system **tracks completeness** against a **per-subject-type checklist** and flags
+3. The system **tracks completeness** against a **per-vendor-type checklist** and flags
    missing documents.
 4. The system **extracts key fields** (name, registration #, dates) and shows them to the reviewer.
-5. The system onboards **both vendors and personnel** with distinct requirement profiles.
+5. The system onboards **vendors** against **per-vendor-type requirement profiles** (vendor-only; no personnel onboarding).
 6. The system supports a **resubmission loop** (request → re-upload flagged items only).
 7. **Human officer makes the final decision**; every decision is **audit-logged**.
 8. Document types reflect **Philippine food-business compliance** (LGU + food-safety permits).
@@ -202,7 +203,12 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
 
 ## Suggested phasing (incremental, staging-first)
 
-- **Phase A — Data & domain:** migrations (expiry fields, personnel, requirement profiles,
+> **Now elaborated as three concern-split phase plans** — Phases A–E below are reorganized by concern and
+> carried into them: backend/pipeline → [phases/PIPELINE_INTEGRATION_PHASES.md](phases/PIPELINE_INTEGRATION_PHASES.md),
+> ML training → [phases/MODEL_TRAINING_PHASES.md](phases/MODEL_TRAINING_PHASES.md),
+> UI functions → [phases/UI_FUNCTION_PHASES.md](phases/UI_FUNCTION_PHASES.md).
+
+- **Phase A — Data & domain:** migrations (expiry fields, requirement profiles,
   status enums), models/relationships/factories, re-seed food document types. *DoD:*
   `migrate:fresh --seed` green; `php artisan test` green.
 - **Phase B — Live pipeline:** `DocumentSubmissionController` + Form Request + real
@@ -213,7 +219,7 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
 - **Phase D — Renewal scheduler:** daily command + reminder notifications. *DoD:* a doc
   expiring within the window produces a notification.
 - **Phase E — UI wiring:** replace demo store with real data; checklist/extracted-fields
-  panels; officer + vendor/personnel views. *DoD:* end-to-end click-through works.
+  panels; officer + vendor views. *DoD:* end-to-end click-through works.
 
 ---
 
@@ -227,9 +233,10 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
   "valid". Never auto-approve on extracted fields; reviewer confirms.
 - **Demo-store coupling:** much current UI depends on `VendorDemoData`/DemoStore; plan to
   migrate views to real models incrementally to avoid a big-bang rewrite.
-- **Personnel = PII:** health certs, NBI, IDs are sensitive — keep under
+- **Government IDs = PII:** uploaded representative IDs are sensitive — keep under
   `storage/app/documents/` (private), honor retention policies, role-gate access.
 - **Scope discipline:** ML pipeline stays as-is this round; resist re-tuning models.
+  **Vendor-only** subject — do not reintroduce personnel/employee onboarding (see G5, descoped).
 
 ---
 
@@ -238,7 +245,7 @@ Replace/extend `DocumentTypeSeeder` with Negofood-relevant types, each tagged wi
 - `php artisan migrate:fresh --seed` runs clean; new factories produce valid records.
 - `php artisan test --compact` green, including new tests:
   expiration status transitions, checklist completeness, resubmission flow,
-  personnel submission, real upload happy-path + `Queue::assertPushed(ProcessDocumentJob)`.
+  real upload happy-path + `Queue::assertPushed(ProcessDocumentJob)`.
 - `pytest python/tests/ -v` green for new inference + field-extraction scripts.
 - Manual click-through: vendor upload (expired permit) → officer sees "expired" +
   "incomplete" flags → requests resubmission → vendor re-uploads → approval logged →

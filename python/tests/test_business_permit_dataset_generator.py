@@ -60,6 +60,15 @@ def test_load_field_boxes_reads_the_exported_json():
     assert "name_of_proprietor" in boxes and "city_logo" in boxes
 
 
+def test_output_dir_targets_the_canonical_business_permit_class_folder():
+    # The classifier reads the class label from the folder name. The canonical
+    # code in DocumentTypeSeeder is `business_permit` (LGU business permit); there
+    # is no `business_registration` class on disk or in the DB taxonomy, so the
+    # generator's default output must land in the real `business_permit` folder.
+    assert gen.OUTPUT_DIR.name == "business_permit"
+    assert gen.OUTPUT_DIR.parts[-4:] == ("data", "training", "classifier_data", "business_permit")
+
+
 # ----- field values ---------------------------------------------------------
 def test_ordinal_day_suffixes():
     assert gen.ordinal(1) == "1st"
@@ -155,7 +164,7 @@ def test_render_permit_fills_text_logo_and_signatures():
 
 # ----- batch ----------------------------------------------------------------
 def test_run_batch_writes_variants_and_manifest(tmp_path):
-    out = tmp_path / "business_registration"
+    out = tmp_path / "business_permit"
     summary = gen.run_batch(2, out_dir=out, seed=99, font_dir=FONT_DIR)
     pngs = sorted(out.glob("synthetic_permit_*_clean.png"))
     jpgs = sorted(out.glob("synthetic_permit_*_scan.jpg"))
@@ -165,7 +174,7 @@ def test_run_batch_writes_variants_and_manifest(tmp_path):
 
 
 def test_second_run_appends_without_duplicates(tmp_path):
-    out = tmp_path / "business_registration"
+    out = tmp_path / "business_permit"
     gen.run_batch(2, out_dir=out, seed=1, font_dir=FONT_DIR)
     gen.run_batch(2, out_dir=out, seed=2, font_dir=FONT_DIR)
     manifest = gen.load_manifest(out / "_synthetic_manifest.json")
@@ -178,7 +187,7 @@ def test_second_run_appends_without_duplicates(tmp_path):
 
 
 def test_dry_run_writes_nothing(tmp_path):
-    out = tmp_path / "business_registration"
+    out = tmp_path / "business_permit"
     out.mkdir()
     rc = gen.main(["--dry-run", "--out-dir", str(out), "--font-dir", str(FONT_DIR)])
     assert rc == 0

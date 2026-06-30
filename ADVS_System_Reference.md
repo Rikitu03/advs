@@ -4,11 +4,17 @@
 
 ---
 
+> **Implementation phase plans:** this reference defines *what* the system does; the *how/when* now lives in three concern-split phase plans under [`docs/phases/`](docs/phases/) — [pipeline integration](docs/phases/PIPELINE_INTEGRATION_PHASES.md) · [model training](docs/phases/MODEL_TRAINING_PHASES.md) · [UI functions](docs/phases/UI_FUNCTION_PHASES.md) — each folding in the Negofood client-interview direction ([gap plan](docs/CLIENT_INTERVIEW_GAP_PLAN.md)).
+
+---
+
 ## 1. System Purpose and Core Logic
 
 The ADVS is a web-based system built on a **Laravel 11 backend with Python inference scripts** that automates the verification of vendor accreditation documents. Its core problem statement is direct: manual document review is slow, error-prone, and vulnerable to fraud. The system replaces that process with a multi-stage machine learning pipeline that examines every document from four independent angles — text content, document classification, signature authenticity (vs a per-vendor reference enrolled at registration), and stamp/logo authenticity (vs a per-issuer reference library — per-agency for national logos like BIR/SEC, per-city for LGU seals) — then fuses those signals into a single composite risk score for a human officer to act on.
 
 The system is **on-demand, not calendar-driven**. It activates whenever a vendor submits documents — whether that's an initial application, a renewal, or an update triggered by an expiring credential or new regulation. The implementing organization decides the cadence; ADVS simply processes whatever arrives.
+
+> **Approved update (Negofood client interview, 2026-06-29):** a **renewal scheduler** is being added that proactively flags expiring/expired credentials and sends renewal reminders — a deliberate **calendar-driven** dimension layered on top of the on-demand core. This is the one approved departure from the statement above. See the compliance-lifecycle plan in [`docs/phases/PIPELINE_INTEGRATION_PHASES.md`](docs/phases/PIPELINE_INTEGRATION_PHASES.md) (Phase P5) and [`docs/CLIENT_INTERVIEW_GAP_PLAN.md`](docs/CLIENT_INTERVIEW_GAP_PLAN.md).
 
 Three distinct user roles interact with the system: **Vendors** (who submit documents), **Compliance Officers** (who review validation results and render accreditation decisions), and **System Administrators** (who manage users, configure thresholds, and oversee the platform). Each role has a scoped view of the system enforced by role-based access control.
 

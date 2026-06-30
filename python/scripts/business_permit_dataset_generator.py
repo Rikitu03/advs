@@ -4,7 +4,7 @@ The business-permit analogue of ``bir_dataset_generator.py``. It fills the blank
 City of Digos Business Permit template with OCR-realistic synthetic field data,
 composites a crisp City seal (``python/logo/logo_digos.png``) and two officer
 signatures, then emits a CLEAN image and an Augraphy-degraded SCAN image into the
-ResNet-50 classifier's ``business_registration`` class folder. A per-folder JSON
+ResNet-50 classifier's ``business_permit`` class folder. A per-folder JSON
 ledger (``_synthetic_manifest.json``) records every record's content hash so
 reruns never duplicate data and filenames keep incrementing.
 
@@ -51,7 +51,7 @@ LOGO_PATH = PY_ROOT / "logo" / "logo_digos.png"
 SIGNATURE_PATH = PY_ROOT / "data" / "stamps" / "BIR_OFFICER_STAMP.png"  # blue-ink signature asset
 FONT_DIR = PY_ROOT / "data" / "fonts"
 BOXES_JSON = PY_ROOT / "json_data" / "business_permit_boxes.json"
-OUTPUT_DIR = PY_ROOT / "data" / "training" / "classifier_data" / "business_registration"
+OUTPUT_DIR = PY_ROOT / "data" / "training" / "classifier_data" / "business_permit"
 
 # The City seal sits at the template's top-left. The blank template already shows
 # a faint printed seal; we composite the crisp logo squarely over it (box found by
