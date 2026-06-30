@@ -236,3 +236,6 @@ These stale `business_registration` references exist elsewhere but are NOT requi
 - `python/.claude/skills/run-advs-training/make_fixtures.py:30` (smoke-test fixture class list)
 - `python/data/README.md:20` and `AGENTS.md:149` (documentation)
 - A matching **validation** set: `train_classifier.py` requires `python/data/validation/classifier_data/business_permit/` to be populated too before the classifier can train; generating that (e.g. a smaller `--count` into the validation folder via `--out-dir`) is a separate task.
+
+
+10 samples first for approval
