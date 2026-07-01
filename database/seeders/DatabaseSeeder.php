@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Models\Vendor;
+use App\Models\VendorRepresentative;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -34,14 +36,48 @@ class DatabaseSeeder extends Seeder
                 ],
             );
 
-            // Seeded vendors skip the signature-enrollment gate so the demo
-            // account lands on the dashboard. (signature_path is a placeholder;
-            // no real reference image exists for seeded data.)
-            if ($role === User::ROLE_VENDOR && ! $user->hasEnrolledSignature()) {
+            // Seeded vendors skip the onboarding gates so the demo account lands
+            // on the dashboard: a complete declared profile + an enrolled
+            // signature. (signature_path is a placeholder; no real reference
+            // image exists for seeded data.)
+            if ($role === User::ROLE_VENDOR) {
                 $user->forceFill([
                     'signature_path' => "signatures/{$user->id}/seeded-reference.jpg",
                     'signature_enrolled_at' => now(),
+                    'vendor_profile_completed_at' => now(),
                 ])->save();
+
+                $vendor = Vendor::firstOrCreate(
+                    ['user_id' => $user->id],
+                    [
+                        'company_name' => 'Negofood Demo Trading',
+                        'business_entity_type' => 'sole_proprietorship',
+                        'tin' => '123-456-789-000',
+                        'dti_registration_number' => 'DTI-2026000',
+                        'business_permit_number' => 'BP-2026-000',
+                        'nature_of_business' => 'Food retail and distribution',
+                        'business_street' => '1 Caruncho Ave',
+                        'business_barangay' => 'Barangay San Nicolas',
+                        'business_city' => 'Pasig',
+                        'business_province' => 'Metro Manila',
+                        'business_postal_code' => '1600',
+                        'status' => Vendor::STATUS_PENDING,
+                    ],
+                );
+
+                VendorRepresentative::firstOrCreate(
+                    ['vendor_id' => $vendor->id],
+                    [
+                        'first_name' => 'Demo',
+                        'last_name' => 'Vendor',
+                        'date_of_birth' => '1990-01-01',
+                        'gender' => 'male',
+                        'contact_number' => '+63 917 000 0000',
+                        'government_id_type' => 'national_id',
+                        'government_id_number' => '1234-5678-9012',
+                        'home_address' => '1 Caruncho Ave, Pasig, Metro Manila',
+                    ],
+                );
             }
         }
 
