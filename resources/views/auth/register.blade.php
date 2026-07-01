@@ -12,7 +12,7 @@
             />
         @endif
 
-        {{-- Step indicator: account → signature enrollment → email verification --}}
+        {{-- Step indicator: account → details → signature → verify email --}}
         <ol class="flex items-center gap-2 text-xs font-medium">
             <li class="flex items-center gap-1.5 text-cu-purple">
                 <span class="flex size-4 items-center justify-center rounded-full bg-cu-purple text-[10px] text-white">1</span>
@@ -21,11 +21,16 @@
             <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
             <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
                 <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">2</span>
-                {{ __('Signature') }}
+                {{ __('Details') }}
             </li>
             <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
             <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
                 <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">3</span>
+                {{ __('Signature') }}
+            </li>
+            <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
+            <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
+                <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">4</span>
                 {{ __('Verify email') }}
             </li>
         </ol>
@@ -34,8 +39,8 @@
         <div class="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
             <flux:icon icon="finger-print" class="mt-0.5 size-5 shrink-0 text-cu-purple" />
             <div class="text-xs text-zinc-600 dark:text-zinc-400">
-                <p class="mb-1 text-sm font-medium text-zinc-800 dark:text-zinc-200">{{ __('Next: enroll your signature') }}</p>
-                {{ __('After this step you will upload a clear photo of 3 handwritten signatures, stacked vertically on white bond paper. Use an original, unedited photo — it becomes your reference signature for document validation.') }}
+                <p class="mb-1 text-sm font-medium text-zinc-800 dark:text-zinc-200">{{ __('Next: your business & owner details') }}</p>
+                {{ __('After creating your account you will declare your business and representative information, then enroll your reference signature.') }}
             </div>
         </div>
 
