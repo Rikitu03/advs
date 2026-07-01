@@ -124,6 +124,11 @@ Route::middleware(['auth'])->group(function () {
     // EnsureSignatureEnrolled gate by its route name.
     Volt::route('signature/enroll', 'auth.signature-enroll')->name('signature.create');
 
+    // Step 2 of vendor registration: declare business + owner details before
+    // signature enrollment. Auth-only (the user is not verified yet) and exempt
+    // from the EnsureVendorProfileComplete gate by its route name.
+    Volt::route('register/business', 'auth.business-details')->name('business.create');
+
     Route::redirect('settings', 'settings/profile');
 
     Volt::route('settings/profile', 'settings.profile')->name('settings.profile');
