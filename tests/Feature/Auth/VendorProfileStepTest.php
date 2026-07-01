@@ -117,4 +117,53 @@ class VendorProfileStepTest extends TestCase
             ->call('save')
             ->assertHasErrors(['tin']);
     }
+
+    public function test_vendor_without_a_profile_is_gated_to_the_business_step(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->create();
+
+        $this->actingAs($user)->get('/dashboard')->assertRedirect(route('business.create'));
+        $this->actingAs($user)->get(route('vendor.dashboard'))->assertRedirect(route('business.create'));
+    }
+
+    public function test_signature_gate_does_not_fire_before_the_profile_is_complete(): void
+    {
+        // No profile and no signature: the business gate wins; the user must not
+        // be bounced to the signature step yet.
+        $user = User::factory()->withoutVendorProfile()->unenrolled()->create();
+
+        $this->actingAs($user)->get(route('vendor.dashboard'))->assertRedirect(route('business.create'));
+    }
+
+    public function test_complete_profile_but_unenrolled_vendor_is_gated_to_signature(): void
+    {
+        $user = User::factory()->unenrolled()->create(); // profile complete by default
+
+        $this->actingAs($user)->get(route('vendor.dashboard'))->assertRedirect(route('signature.create'));
+    }
+
+    public function test_livewire_endpoints_are_never_gated_to_the_business_step(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->unverified()->create();
+
+        $response = $this->actingAs($user)->post(route('default-livewire.update'));
+
+        $this->assertNotSame(
+            route('business.create'),
+            $response->headers->get('Location'),
+            'Livewire update requests must not be redirected by the profile gate.'
+        );
+    }
+
+    public function test_officers_and_admins_are_never_gated_to_the_business_step(): void
+    {
+        $officer = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->withoutVendorProfile()->create();
+
+        $this->actingAs($officer)->get(route('admin.dashboard'))->assertOk();
+    }
+
+    public function test_guests_cannot_access_the_business_step(): void
+    {
+        $this->get(route('business.create'))->assertRedirect('/login');
+    }
 }
