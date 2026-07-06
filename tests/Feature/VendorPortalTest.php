@@ -30,6 +30,14 @@ class VendorPortalTest extends TestCase
             ->assertOk()
             ->assertSee('Submit Documents')
             ->assertSee('Document submission')
+            ->assertSee('Drop files here or click to upload')
+            ->assertSee('File queue')
+            ->assertSee('Business Permit')
+            ->assertSee('BIR Permit')
+            ->assertSee('Financial Statement')
+            ->assertSee('Upload ready files')
+            ->assertSee('Retry')
+            ->assertSee('Suggested')
             ->assertSee('PDF, PNG, JPG');
     }
 
