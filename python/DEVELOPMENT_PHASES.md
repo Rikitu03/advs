@@ -216,13 +216,13 @@ callbacks (checkpoint/early-stop/reduce-LR); save `resnet50_authenticity.h5` + `
 
 ---
 
-## Phase 5 — YOLOv8 signature/stamp detector ❌ · (M3)
+## Phase 5 — YOLOv8 signature/stamp/logo detector ❌ · (M3)
 
-**Goal:** Detect `signature` + `stamp` anywhere on a page (no ROI/homography).
+**Goal:** Detect `signature` + `stamp` + `logo` anywhere on a page (no ROI/homography).
 **Tasks:** write `data.yaml`; train `yolov8n.pt` (50 epochs, `imgsz=640`, `batch=16`, `patience=10`,
 GPU if available, `cache=True`); report mAP@0.5; export `yolov8_document.pt` + ONNX (honor `onnx < 1.17`).
-**DoD:** mAP@0.5 recorded; crops route correctly (sig → 4a, stamp → 4b); no-detection returns a graceful
-JSON flag (`no_signature_detected` / `no_stamp_detected`).
+**DoD:** mAP@0.5 recorded; crops route correctly (sig → 4a, stamp/logo → 4b); no-detection returns a graceful
+JSON flag (`no_signature_detected` / `no_stamp_detected` / `no_logo_detected`).
 
 ---
 

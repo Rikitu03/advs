@@ -66,9 +66,9 @@ from annotate_boxes import (  # noqa: E402  -- re-export the SAME objects so bot
 
 APP_TITLE = "Business Permit Template Bounding Box Annotator"
 PY_ROOT = Path(__file__).resolve().parents[1]            # .../python
-TEMPLATE_DIR = PY_ROOT / "data" / "template" / "business_permits"
-DEFAULT_TEMPLATE = TEMPLATE_DIR / "Business Permit (Digos).png"
-OUTPUT_JSON = PY_ROOT / "json_data" / "business_permit_boxes.json"  # exported boxes
+TEMPLATE_DIR = PY_ROOT / "data" / "template" / "dti_registration"
+DEFAULT_TEMPLATE = TEMPLATE_DIR / "dti_template.png"
+OUTPUT_JSON = PY_ROOT / "json_data" / "dti_registration_Taguig.json"  # exported boxes
 
 PROMPT_TEXT = (
     "Enter the field labels to annotate, separated by commas.\n"

@@ -14,6 +14,8 @@ pandas>=2.1
 # --- classification / signature / stamp models ---
 tensorflow==2.16.*           # use tensorflow-cpu==2.16.* on machines without CUDA
 scikit-learn>=1.4
+keras-tuner>=1.4             # hyperparameter tuning
+scipy>=1.11
 scipy>=1.11
 opencv-python-headless>=4.9
 

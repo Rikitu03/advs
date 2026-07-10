@@ -32,7 +32,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 PY_ROOT = Path(__file__).resolve().parents[1]            # .../python
-TEMPLATE_PATH = PY_ROOT / "data" / "template" / "BIR_PERMIT_TEMPLATE.png"
+TEMPLATE_PATH = PY_ROOT / "data" / "template" / "bir_permit" / "BIR_PERMIT_TEMPLATE.png"
 SEAL_PATH = PY_ROOT / "data" / "seal" / "BIR_SEAL.png"
 SIGNATURE_PATH = PY_ROOT / "data" / "stamps" / "BIR_OFFICER_STAMP.png"
 FONT_DIR = PY_ROOT / "data" / "fonts"

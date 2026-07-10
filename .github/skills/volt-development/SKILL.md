@@ -8,8 +8,6 @@ metadata:
 
 # Volt Development
 
-> **ADVS domain reference:** the components you build (upload form, My Submissions list, validation-report drill-down) are specified in [`ADVS_System_Reference.md`](../../../ADVS_System_Reference.md) `§4`–`§6`. Activate the `advs-system-reference` skill for ADVS component work.
-
 ## Documentation
 
 Use `search-docs` for detailed Volt patterns and documentation.

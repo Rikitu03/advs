@@ -29,13 +29,14 @@ class RegistrationTest extends TestCase
 
         $this->assertAuthenticated();
 
-        // Step 2 of registration: enroll a reference signature before email verification.
-        $response->assertRedirect(route('signature.create'));
+        // Step 2 of registration: declare business + owner details before signature.
+        $response->assertRedirect(route('business.create'));
 
         $this->assertDatabaseHas('users', [
             'email' => 'test@example.com',
             'role' => User::ROLE_VENDOR,
             'signature_enrolled_at' => null,
+            'vendor_profile_completed_at' => null,
         ]);
 
         // Email verification is the final step: the link must not be sent at

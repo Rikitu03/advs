@@ -25,8 +25,10 @@ class EnsureSignatureEnrolled
         // reachable, or the signature page itself could not submit. Livewire v4
         // names the update route "default-livewire.update", so both prefixes
         // must be exempted.
+        // Runs after EnsureVendorProfileComplete; only fires once the business profile is complete.
         if ($user instanceof User
             && $user->hasRole(User::ROLE_VENDOR)
+            && $user->hasCompletedVendorProfile()
             && ! $user->hasEnrolledSignature()
             && ! $request->routeIs('signature.*', 'logout', 'livewire.*', 'default-livewire.*')
         ) {

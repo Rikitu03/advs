@@ -301,11 +301,7 @@ python/env/Scripts/python.exe scripts/train_classifier.py --dry-run
 ---
 
 > The Laravel Boost guidelines below are auto-managed by `php artisan boost:update` — keep this
-> orientation content **above** the `<laravel-boost-guidelines>` block so updates don't clobber it.
-
----
-
-<laravel-boost-guidelines>
+> orientation content **above** the `<laravel-boost-guidelines>
 === foundation rules ===
 
 # Laravel Boost Guidelines
