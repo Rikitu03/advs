@@ -1,6 +1,11 @@
 <?php
 
+use App\Models\Document;
+use App\Models\Submission;
 use App\Support\VendorDemoData;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Component;
 
 new class extends Component {
@@ -18,8 +23,23 @@ new class extends Component {
      */
     public function with(): array
     {
-        $rows = VendorDemoData::submissions()
-            ->when($this->filter !== 'all', fn ($items) => $items->where('status', $this->filter))
+        $vendor = Auth::user()->vendor;
+        $typeNames = DB::table('document_types')->pluck('name', 'id');
+
+        $realRows = $vendor
+            ? Submission::query()
+                ->with('documents')
+                ->where('vendor_id', $vendor->id)
+                ->latest()
+                ->get()
+                ->flatMap(fn (Submission $submission): Collection => $submission->documents
+                    ->map(fn (Document $document): array => $this->row($submission, $document, $typeNames)))
+            : collect();
+
+        $sourceRows = $realRows->isNotEmpty() ? $realRows : $this->fallbackRows();
+
+        $rows = $sourceRows
+            ->when($this->filter !== 'all', fn (Collection $items): Collection => $items->where('status_key', $this->filter))
             ->filter(function (array $submission): bool {
                 $search = mb_strtolower(trim($this->search));
 
@@ -27,14 +47,123 @@ new class extends Component {
                     return true;
                 }
 
-                return str_contains(mb_strtolower("{$submission['ref']} {$submission['document_type']} {$submission['file_name']} {$submission['status']}"), $search);
+                return str_contains(mb_strtolower("{$submission['ref']} {$submission['document_summary']} {$submission['file_summary']} {$submission['status']}"), $search);
             })
             ->values();
 
         return [
             'rows' => $rows,
-            'total' => VendorDemoData::submissions()->count(),
+            'total' => $sourceRows->count(),
         ];
+    }
+
+    /**
+     * @param  Collection<int, string>  $typeNames
+     * @return array<string, mixed>
+     */
+    private function row(Submission $submission, Document $document, Collection $typeNames): array
+    {
+        $status = $this->statusLabel($submission->status);
+        $documentType = $typeNames[$document->document_type_id] ?? 'Unassigned document';
+
+        return [
+            'id' => $submission->id.'-'.$document->id,
+            'ref' => 'SUB-'.str_pad((string) $submission->id, 5, '0', STR_PAD_LEFT),
+            'document_summary' => $documentType,
+            'file_summary' => $document->original_filename,
+            'submitted_at' => $submission->created_at,
+            'status_key' => $submission->status,
+            'status' => $status,
+            'progress' => $this->progressFor($submission->status),
+            'note' => $this->noteFor($submission->status),
+            'documents' => [[
+                'id' => $document->id,
+                'type' => $documentType,
+                'file_name' => $document->original_filename,
+                'size' => $this->formatBytes((int) $document->file_size_bytes),
+                'path' => $document->file_path,
+                'processing_status' => str($document->processing_status)->headline()->toString(),
+            ]],
+        ];
+    }
+
+    private function statusLabel(string $status): string
+    {
+        return match ($status) {
+            Submission::STATUS_PROCESSING => 'Processing',
+            Submission::STATUS_PENDING_REVIEW => 'Pending Review',
+            Submission::STATUS_APPROVED => 'Approved',
+            Submission::STATUS_REJECTED => 'Rejected',
+            default => str($status)->headline()->toString(),
+        };
+    }
+
+    private function progressFor(string $status): int
+    {
+        return match ($status) {
+            Submission::STATUS_PROCESSING => 35,
+            Submission::STATUS_PENDING_REVIEW => 70,
+            Submission::STATUS_APPROVED, Submission::STATUS_REJECTED => 100,
+            default => 0,
+        };
+    }
+
+    private function statusKeyFor(string $status): string
+    {
+        return match ($status) {
+            'Processing' => Submission::STATUS_PROCESSING,
+            'Pending Review' => Submission::STATUS_PENDING_REVIEW,
+            'Approved' => Submission::STATUS_APPROVED,
+            'Rejected' => Submission::STATUS_REJECTED,
+            default => 'demo',
+        };
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function fallbackRows(): Collection
+    {
+        return VendorDemoData::submissions()
+            ->map(fn (array $submission): array => [
+                'id' => 'demo-'.$submission['id'],
+                'ref' => $submission['ref'],
+                'document_summary' => $submission['document_type'],
+                'file_summary' => $submission['file_name'],
+                'submitted_at' => $submission['submitted_at'],
+                'status_key' => $this->statusKeyFor($submission['status']),
+                'status' => $submission['status'],
+                'progress' => $this->progressFor($this->statusKeyFor($submission['status'])),
+                'note' => $submission['note'],
+                'documents' => [[
+                    'id' => $submission['id'],
+                    'type' => $submission['document_type'],
+                    'file_name' => $submission['file_name'],
+                    'size' => $submission['size'],
+                    'path' => null,
+                    'processing_status' => $submission['status'],
+                ]],
+            ]);
+    }
+
+    private function noteFor(string $status): string
+    {
+        return match ($status) {
+            Submission::STATUS_PROCESSING => 'Your documents are queued for automated validation.',
+            Submission::STATUS_PENDING_REVIEW => 'Your completed submission is waiting for compliance officer review.',
+            Submission::STATUS_APPROVED => 'Your submission has been approved.',
+            Submission::STATUS_REJECTED => 'Your submission was rejected. Review the officer comments before submitting again.',
+            default => 'Submission status is being updated.',
+        };
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        if ($bytes < 1024 * 1024) {
+            return number_format($bytes / 1024, 1).' KB';
+        }
+
+        return number_format($bytes / 1024 / 1024, 2).' MB';
     }
 }; ?>
 
@@ -53,10 +182,16 @@ new class extends Component {
             </div>
         </div>
 
+        @if (session('status'))
+            <div class="cu-animate-in rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                {{ session('status') }}
+            </div>
+        @endif
+
         <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-4 shadow-sm" style="animation-delay: 80ms">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1">
-                    @foreach (['all' => 'All', 'Processing' => 'Processing', 'Pending Review' => 'Pending Review', 'Approved' => 'Approved', 'Rejected' => 'Rejected'] as $value => $label)
+                    @foreach (['all' => 'All', 'processing' => 'Processing', 'pending_review' => 'Pending Review', 'approved' => 'Approved', 'rejected' => 'Rejected'] as $value => $label)
                         <button type="button" wire:click="setFilter('{{ $value }}')"
                                 class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $filter === $value ? 'bg-cu-purple text-white shadow-sm' : 'text-cu-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-cu-text' }}">
                             {{ $label }}
@@ -88,8 +223,8 @@ new class extends Component {
                                 <flux:icon icon="document-text" class="size-5" />
                             </span>
                             <div class="min-w-0">
-                                <p class="truncate text-sm font-medium text-cu-text">{{ $submission['document_type'] }}</p>
-                                <p class="truncate text-xs text-cu-muted">{{ $submission['ref'] }} - {{ $submission['file_name'] }}</p>
+                                <p class="truncate text-sm font-medium text-cu-text">{{ $submission['document_summary'] ?: 'Submission batch' }}</p>
+                                <p class="truncate text-xs text-cu-muted">{{ $submission['ref'] }} - {{ $submission['file_summary'] }}</p>
                             </div>
                         </div>
                         <div class="text-sm text-cu-muted">
@@ -111,17 +246,13 @@ new class extends Component {
                                     Details
                                 </button>
                             </flux:modal.trigger>
-                            <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-rose-500/40 bg-cu-surface px-3 py-1.5 text-sm font-medium text-rose-700 dark:text-rose-300 transition hover:bg-rose-500/15">
-                                <flux:icon icon="arrow-uturn-left" class="size-4" />
-                                Unsubmit
-                            </button>
                         </div>
 
                         <flux:modal name="submission-{{ $submission['id'] }}" class="md:w-[32rem]">
                             <div class="space-y-5">
                                 <div>
                                     <flux:heading size="lg">{{ $submission['ref'] }}</flux:heading>
-                                    <flux:subheading>{{ $submission['document_type'] }} - {{ $submission['file_name'] }}</flux:subheading>
+                                    <flux:subheading>{{ $submission['document_summary'] ?: 'Submission batch' }}</flux:subheading>
                                 </div>
                                 <div class="grid gap-3 sm:grid-cols-2">
                                     <div class="rounded-xl border border-cu-border p-4">
@@ -135,8 +266,15 @@ new class extends Component {
                                 </div>
                                 <p class="text-sm text-cu-muted">{{ $submission['note'] }}</p>
                                 <div class="rounded-xl border border-cu-border p-4">
-                                    <p class="text-sm font-semibold">Included file</p>
-                                    <p class="mt-1 text-sm text-cu-muted">{{ $submission['file_name'] }} - {{ $submission['size'] }}</p>
+                                    <p class="text-sm font-semibold">Included files</p>
+                                    <div class="mt-2 flex flex-col gap-2">
+                                        @foreach ($submission['documents'] as $document)
+                                            <div class="rounded-lg bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
+                                                <p class="font-medium text-cu-text">{{ $document['type'] }}</p>
+                                                <p class="text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }} - {{ $document['processing_status'] }}</p>
+                                            </div>
+                                        @endforeach
+                                    </div>
                                 </div>
                             </div>
                         </flux:modal>
@@ -151,6 +289,6 @@ new class extends Component {
             </div>
         </div>
 
-        <p class="text-center text-xs text-cu-muted">Showing {{ $rows->count() }} of {{ $total }} submissions.</p>
+        <p class="text-center text-xs text-cu-muted">Showing {{ $rows->count() }} of {{ $total }} documents.</p>
     </div>
 </x-page>
