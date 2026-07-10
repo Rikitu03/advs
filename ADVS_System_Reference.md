@@ -113,6 +113,8 @@ The admin sees **everything the officer sees**, plus additional tabs:
 | **Audit Trail** | Immutable log of every significant system event: logins, submissions, validation runs, officer decisions, configuration changes, user account modifications. Each entry is timestamped and attributed to a user. |
 | **Data Retention** | Configuration for archival and purging policies. Set retention periods for uploaded documents, processed images, validation reports, and embedding vectors. |
 
+| **Document Requirements (Per Vendor Type)** | Editable admin UI to define which documents each vendor type must submit (example vendor types: `franchisee`, `supplier`). Admins can add/remove document types, mark each as **required** or **optional**, attach guidance text and example images, set an effective date and version, and scope rules to vendor types. Changes are stored in the global document catalog and become visible to officers and vendors without code changes. |
+
 ---
 
 ## 5. Processing Pipeline — Complete Document Flow
@@ -457,6 +459,22 @@ All file paths are stored as references in the database, not the files themselve
 | Logo / stamp / seal reference vector | Database, **per issuer** (the `logo_references` table, keyed by `document_type` for national issuers and `(document_type, city)` for LGU issuers) | Float vector per issuer (dimension depends on EfficientNet variant), serialized similarly |
 
 The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. financial statements, signed contracts) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
+
+### Global Document Catalog & "Available Documents" Storage
+
+The application exposes a centrally managed, editable catalog of document types and submission requirements that drives the vendor submission UI and officer/admin views. This global catalog is maintained by administrators via the **Document Requirements** admin tab (see Section 4). Key aspects:
+
+- **Persistence**: stored in a new `document_requirements` table with fields: `id`, `code`, `title`, `description`, `vendor_type` (enum: e.g. `franchisee`,`supplier`,`all`), `required` (boolean), `examples` (JSON — image paths / guidance), `effective_at` (datetime), `version` (int), `created_by`, `updated_by`, `created_at`, `updated_at`. Each row defines a single document requirement record. Administrators can create multiple rows per vendor type and update them over time (versioned via `version` + `effective_at`).
+
+- **Cache & availability API**: to make the current set of available/required documents inexpensive to read from the submission UI and officer dashboards, the app writes a derived payload to a cache key (for example `available_documents`) after any admin change. The payload groups requirements by `vendor_type` and exposes the currently effective version for each type. A read-only API endpoint (e.g. `GET /api/catalog/available-documents`) returns the cached payload to web clients; when cache is cold the endpoint recomputes the derived payload from `document_requirements`.
+
+- **UI consumption**: the vendor `Submit Documents` form queries the `available_documents` payload for the authenticated vendor's `vendor_type` and renders required vs optional upload slots, guidance text, and example images. Officers and admins see the same payload in an `Available Documents` pane on their dashboard so they know what documents the vendor was expected to submit when reviewing a submission.
+
+- **Editable (not fixed)**: because the catalog is fully editable through the admin UI, administrators can add/remove document types, change required flags, attach new guidance images, and set effective dates without code deployments. All edits are recorded in the audit trail, and a `preview` or `draft` mode lets admins stage changes before making them effective.
+
+- **Enforcement**: submission Form Requests validate that a vendor has supplied all `required` documents present in the effective catalog for their `vendor_type`. Validation failures return 422 with a helpful list of missing documents. Historical submissions retain the catalog version at the time of submission (the submission record stores `catalog_version`), ensuring audits reference the correct expectation set.
+
+- **Examples**: out-of-the-box vendor types include `franchisee` and `supplier`. Admins can add other types (e.g., `distributor`) as needed. Typical requirements for the two example types might include rows such as: BIR Permit (required for `franchisee`), Business Permit (required for `franchisee` and `supplier`), Product List / Pricelist (required for `supplier`), Food Safety Certificate (optional for `supplier`, required for certain franchise categories). Administrators tailor the catalog to local regulatory needs.
 
 ### Model Files
 

@@ -22,6 +22,9 @@ if str(_SCRIPTS) not in sys.path:
 _SCRIPT = _SCRIPTS / "business_permit_dataset_generator.py"
 _spec = importlib.util.spec_from_file_location("business_permit_dataset_generator", _SCRIPT)
 gen = importlib.util.module_from_spec(_spec)
+# Register before exec (importlib recipe): @dataclass resolves the module's
+# string annotations through sys.modules[cls.__module__].
+sys.modules[_spec.name] = gen
 _spec.loader.exec_module(gen)
 
 FONT_DIR = Path(__file__).resolve().parents[1] / "data" / "fonts"
@@ -190,5 +193,172 @@ def test_dry_run_writes_nothing(tmp_path):
     out = tmp_path / "business_permit"
     out.mkdir()
     rc = gen.main(["--dry-run", "--out-dir", str(out), "--font-dir", str(FONT_DIR)])
+    assert rc == 0
+    assert list(out.iterdir()) == []
+
+
+# ----- city layouts (Makati / Manila) ---------------------------------------
+def _amount(value: str) -> float:
+    return float(value.replace(",", ""))
+
+
+def _region_changed(before: Image.Image, after: Image.Image, box: dict) -> bool:
+    rect = (box["x"], box["y"], box["x"] + box["w"], box["y"] + box["h"])
+    return before.crop(rect).tobytes() != after.crop(rect).tobytes()
+
+
+def test_city_layouts_registry_and_assets_exist():
+    assert set(gen.CITY_LAYOUTS) == {"makati", "manila", "marikina", "taguig"}
+    for layout in gen.CITY_LAYOUTS.values():
+        assert layout.template_path.exists(), layout.template_path
+        assert layout.boxes_json.exists(), layout.boxes_json
+        assert gen.validate_city_assets(layout, FONT_DIR) == []
+
+
+def test_city_boxes_fit_inside_their_templates():
+    for layout in gen.CITY_LAYOUTS.values():
+        boxes = layout.load_boxes()
+        with Image.open(layout.template_path) as im:
+            assert gen.bir.boxes_out_of_bounds(im.size, boxes) == []
+
+
+def test_city_records_cover_exactly_the_text_boxes():
+    faker, rng = _fresh_faker()
+    for layout in gen.CITY_LAYOUTS.values():
+        record = layout.make_record(faker, rng)
+        assert set(record) == set(layout.text_keys(layout.load_boxes())), layout.name
+        assert all(isinstance(v, str) and v for v in record.values()), layout.name
+
+
+def test_makati_total_is_the_sum_of_the_fee_table():
+    faker, rng = _fresh_faker()
+    record = gen.generate_makati_record(faker, rng)
+    fee_keys = list(gen.MAKATI_FEE_RANGES) + ["meat_inspection_fee", "fsi_fee"]
+    assert abs(sum(_amount(record[k]) for k in fee_keys) - _amount(record["total"])) < 0.01
+    assert record["expiry_date"] == f"DECEMBER 31, {record['tax_year']}"
+
+
+def test_manila_total_and_amount_paid_are_consistent():
+    faker, rng = _fresh_faker()
+    record = gen.generate_manila_record(faker, rng)
+    expected = _amount(record["business_tax"]) + _amount(record["fixed_fee"])
+    assert abs(expected - _amount(record["total_fee"])) < 0.01
+    assert record["amount_paid"] == record["total_fee"]
+
+
+def _ink_bbox(img: Image.Image):
+    from PIL import ImageOps
+    return ImageOps.invert(img.convert("L")).getbbox()
+
+
+def test_draw_text_in_box_nowrap_keeps_dates_on_one_line():
+    box = {"x": 10, "y": 10, "w": 170, "h": 70}
+    sizing = {"sizes": (28, 26, 22), "min_size": 16}
+    wrapped = Image.new("RGB", (200, 100), "white")
+    gen.draw_text_in_box(ImageDraw.Draw(wrapped), "January 2, 2026", box,
+                         font_dir=FONT_DIR, **sizing)
+    single = Image.new("RGB", (200, 100), "white")
+    gen.draw_text_in_box(ImageDraw.Draw(single), "January 2, 2026", box,
+                         font_dir=FONT_DIR, nowrap=True, **sizing)
+    wb, sb = _ink_bbox(wrapped), _ink_bbox(single)
+    assert wb and sb
+    single_height = sb[3] - sb[1]
+    assert single_height < 30                      # one line of <=22px text
+    assert single_height < (wb[3] - wb[1])         # default sizing wraps to two
+
+
+def test_marikina_total_and_dates_are_consistent():
+    faker, rng = _fresh_faker()
+    record = gen.generate_marikina_record(faker, rng)
+    fee_total = sum(_amount(record[k]) for k in gen.MARIKINA_FEE_RANGES)
+    assert abs(fee_total - _amount(record["total"])) < 0.01
+    assert record["valid_until"] == f"DECEMBER 31, {gen.MARIKINA_FORM_YEAR}"
+    assert record["deadline_of_renewal"] == f"January 20, {gen.MARIKINA_FORM_YEAR + 1}"
+    assert record["permit_no"].startswith(f"{gen.MARIKINA_FORM_YEAR}-")
+    assert str(gen.MARIKINA_FORM_YEAR) in record["date_issued"]
+
+
+def test_taguig_fire_code_is_ten_percent_and_total_sums():
+    faker, rng = _fresh_faker()
+    record = gen.generate_taguig_record(faker, rng)
+    subtotal = sum(_amount(record[k]) for k in gen.TAGUIG_FEE_RANGES)
+    assert abs(_amount(record["fire_code"]) - round(0.10 * subtotal, 2)) < 0.01
+    fee_total = subtotal + _amount(record["fire_code"])
+    assert abs(fee_total - _amount(record["total"])) < 0.01
+    assert record["date_issued"].endswith(f"/{gen.TAGUIG_FORM_YEAR}")
+    assert record["valid_until"] == f"12/31/{gen.TAGUIG_FORM_YEAR}"
+
+
+def test_render_marikina_fills_text_and_the_chief_signature():
+    faker, rng = _fresh_faker()
+    layout = gen.CITY_LAYOUTS["marikina"]
+    boxes = layout.load_boxes()
+    record = gen.generate_marikina_record(faker, rng)
+    blank = Image.open(layout.template_path).convert("RGB")
+    out = gen.render_city_permit(layout, record, font_dir=FONT_DIR)
+    for key in ("business_name", "business_address", "business_tax",
+                "total", "city_mayor_name", "acting_chief_signature"):
+        assert _region_changed(blank, out, boxes[key]), key
+
+
+def test_render_taguig_fills_text_and_the_bplo_head_signature():
+    faker, rng = _fresh_faker()
+    layout = gen.CITY_LAYOUTS["taguig"]
+    boxes = layout.load_boxes()
+    record = gen.generate_taguig_record(faker, rng)
+    blank = Image.open(layout.template_path).convert("RGB")
+    out = gen.render_city_permit(layout, record, font_dir=FONT_DIR)
+    for key in ("name_of_entity", "contractors_management", "fire_code",
+                "total", "bplo_head_signature"):
+        assert _region_changed(blank, out, boxes[key]), key
+
+
+def test_render_makati_fills_text_but_never_the_preprinted_regions():
+    faker, rng = _fresh_faker()
+    layout = gen.CITY_LAYOUTS["makati"]
+    boxes = layout.load_boxes()
+    record = gen.generate_makati_record(faker, rng)
+    blank = Image.open(layout.template_path).convert("RGB")
+    out = gen.render_city_permit(layout, record, font_dir=FONT_DIR)
+    assert out.mode == "RGB" and out.size == blank.size
+    assert _region_changed(blank, out, boxes["business_name"])
+    assert _region_changed(blank, out, boxes["total"])
+    # The OIC/Mayor names + signatures are printed on the template already.
+    for key in sorted(layout.preprinted_keys):
+        assert not _region_changed(blank, out, boxes[key]), key
+
+
+def test_render_manila_fills_text_and_composites_the_secretary_signature():
+    faker, rng = _fresh_faker()
+    layout = gen.CITY_LAYOUTS["manila"]
+    boxes = layout.load_boxes()
+    record = gen.generate_manila_record(faker, rng)
+    blank = Image.open(layout.template_path).convert("RGB")
+    out = gen.render_city_permit(layout, record, font_dir=FONT_DIR)
+    assert _region_changed(blank, out, boxes["name"])
+    assert _region_changed(blank, out, boxes["kind_of_business"])
+    assert _region_changed(blank, out, boxes["secretary_signature"])
+
+
+def test_run_city_batch_uses_per_city_stems_and_manifest(tmp_path):
+    layout = gen.CITY_LAYOUTS["manila"]
+    out = tmp_path / "business_permit"
+    summary = gen.run_city_batch(layout, 2, out_dir=out, seed=7, font_dir=FONT_DIR)
+    assert len(sorted(out.glob("synthetic_permit_manila_*_clean.png"))) == 2
+    assert len(sorted(out.glob("synthetic_permit_manila_*_scan.jpg"))) == 2
+    assert (out / "_synthetic_manifest_manila.json").exists()
+    assert summary["count"] == 2 and summary["next_index"] == 3
+    # A second run appends after the first (no filename reuse, no dup content).
+    gen.run_city_batch(layout, 1, out_dir=out, seed=8, font_dir=FONT_DIR)
+    manifest = gen.load_manifest(out / "_synthetic_manifest_manila.json")
+    assert manifest["next_index"] == 4
+    assert len(manifest["used_hashes"]) == len(set(manifest["used_hashes"]))
+
+
+def test_city_dry_run_writes_nothing(tmp_path):
+    out = tmp_path / "business_permit"
+    out.mkdir()
+    rc = gen.main(["--city", "makati", "--dry-run",
+                   "--out-dir", str(out), "--font-dir", str(FONT_DIR)])
     assert rc == 0
     assert list(out.iterdir()) == []
