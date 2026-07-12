@@ -3,9 +3,11 @@
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
+use App\Models\Document;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
 
 /*
@@ -37,6 +39,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Volt::route('vendor/dashboard', 'vendor.dashboard')->name('vendor.dashboard');
         Volt::route('vendor/submit', 'vendor.submit')->name('vendor.submit');
         Volt::route('vendor/submissions', 'vendor.submissions')->name('vendor.submissions');
+        Route::get('vendor/documents/{document}', function (Document $document) {
+            $vendor = Auth::user()?->vendor;
+
+            abort_unless($vendor !== null && $document->vendor_id === $vendor->id, 404);
+
+            $path = ltrim($document->file_path, '/');
+
+            abort_unless(Storage::exists($path), 404);
+
+            return Storage::response($path, $document->original_filename, [
+                'Content-Type' => $document->mime_type,
+            ]);
+        })->name('vendor.documents.show');
         Volt::route('vendor/notifications', 'vendor.notifications')->name('vendor.notifications');
         Volt::route('vendor/profile', 'vendor.profile')->name('vendor.profile');
     });

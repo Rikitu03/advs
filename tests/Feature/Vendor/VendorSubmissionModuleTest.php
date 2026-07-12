@@ -8,7 +8,9 @@ use App\Models\User;
 use App\Models\Vendor;
 use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -62,6 +64,7 @@ class VendorSubmissionModuleTest extends TestCase
 
     public function test_submit_batch_persists_a_real_submission_and_documents_for_the_vendor(): void
     {
+        Storage::fake('local');
         $this->seed(DocumentTypeSeeder::class);
 
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
@@ -69,6 +72,10 @@ class VendorSubmissionModuleTest extends TestCase
 
         $component = Livewire::actingAs($user)
             ->test('vendor.submit')
+            ->set('uploadedFiles', [
+                UploadedFile::fake()->create('bir_certificate.pdf', 128, 'application/pdf'),
+                UploadedFile::fake()->create('financial_statement.pdf', 256, 'application/pdf'),
+            ])
             ->call('submitBatch', [[
                 'name' => 'bir_certificate.pdf',
                 'type' => 'BIR Permit',
@@ -90,6 +97,7 @@ class VendorSubmissionModuleTest extends TestCase
             'vendor_id' => $vendor->id,
             'status' => Submission::STATUS_PROCESSING,
         ]);
+        $this->assertSame(1, $vendor->submissions()->count());
         $this->assertDatabaseHas('documents', [
             'vendor_id' => $vendor->id,
             'original_filename' => 'bir_certificate.pdf',
@@ -100,6 +108,10 @@ class VendorSubmissionModuleTest extends TestCase
             'original_filename' => 'financial_statement.pdf',
             'document_type_id' => $financialStatementId,
         ]);
+
+        $vendor->documents()->get()->each(function (Document $document): void {
+            Storage::assertExists($document->file_path);
+        });
     }
 
     public function test_my_submissions_uses_the_logged_in_vendors_database_records(): void
@@ -116,14 +128,14 @@ class VendorSubmissionModuleTest extends TestCase
             'status' => Submission::STATUS_PENDING_REVIEW,
         ]);
 
-        Document::factory()->for($submission)->for($vendor)->create([
+        $businessPermit = Document::factory()->for($submission)->for($vendor)->create([
             'document_type_id' => $businessPermitId,
             'original_filename' => 'pasig-business-permit.pdf',
             'file_path' => "vendor{$vendor->id}/business_permit00001.pdf",
             'mime_type' => 'application/pdf',
         ]);
 
-        Document::factory()->for($submission)->for($vendor)->create([
+        $financialStatement = Document::factory()->for($submission)->for($vendor)->create([
             'document_type_id' => $financialStatementId,
             'original_filename' => 'audited-financial-statement.pdf',
             'file_path' => "vendor{$vendor->id}/financial_statement00001.pdf",
@@ -142,15 +154,75 @@ class VendorSubmissionModuleTest extends TestCase
         $this->actingAs($user)
             ->get(route('vendor.submissions'))
             ->assertOk()
+            ->assertSee("Document Submission #{$submission->id}")
+            ->assertSee('2 files')
             ->assertSee('pasig-business-permit.pdf')
             ->assertSee('audited-financial-statement.pdf')
             ->assertSee('Business Permit')
             ->assertSee('Financial Statement')
             ->assertSee('Pending Review')
             ->assertSee('70%')
-            ->assertSee('Showing 2 of 2 documents.')
+            ->assertSee('Included files')
+            ->assertSee(route('vendor.documents.show', $businessPermit), false)
+            ->assertSee(route('vendor.documents.show', $financialStatement), false)
+            ->assertSee('target="_blank"', false)
+            ->assertSee('Showing 1 of 1 submissions.')
             ->assertDontSee('Unassigned document')
             ->assertDontSee('other-vendor-permit.pdf');
+    }
+
+    public function test_vendor_can_open_their_uploaded_document_file(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+        $businessPermitId = DB::table('document_types')->where('code', 'business_permit')->value('id');
+        $path = "vendor{$vendor->id}/business_permit00001.pdf";
+
+        Storage::put($path, 'document contents');
+
+        $submission = Submission::factory()->for($vendor)->create();
+        $document = Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $businessPermitId,
+            'original_filename' => 'business-permit.pdf',
+            'file_path' => $path,
+            'mime_type' => 'application/pdf',
+        ]);
+
+        $response = $this->actingAs($user)
+            ->get(route('vendor.documents.show', $document))
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+
+        $this->assertStringContainsString('business-permit.pdf', $response->headers->get('content-disposition'));
+    }
+
+    public function test_vendor_cannot_open_another_vendors_uploaded_document_file(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        Vendor::factory()->for($user)->create();
+        $otherVendor = Vendor::factory()->create();
+        $businessPermitId = DB::table('document_types')->where('code', 'business_permit')->value('id');
+        $path = "vendor{$otherVendor->id}/business_permit00001.pdf";
+
+        Storage::put($path, 'document contents');
+
+        $submission = Submission::factory()->for($otherVendor)->create();
+        $document = Document::factory()->for($submission)->for($otherVendor)->create([
+            'document_type_id' => $businessPermitId,
+            'original_filename' => 'other-business-permit.pdf',
+            'file_path' => $path,
+            'mime_type' => 'application/pdf',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('vendor.documents.show', $document))
+            ->assertNotFound();
     }
 
     public function test_processing_submissions_start_at_the_first_progress_stage(): void

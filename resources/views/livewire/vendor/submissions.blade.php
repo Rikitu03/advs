@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Document;
 use App\Models\Submission;
 use App\Support\VendorDemoData;
 use Illuminate\Support\Collection;
@@ -32,8 +31,7 @@ new class extends Component {
                 ->where('vendor_id', $vendor->id)
                 ->latest()
                 ->get()
-                ->flatMap(fn (Submission $submission): Collection => $submission->documents
-                    ->map(fn (Document $document): array => $this->row($submission, $document, $typeNames)))
+                ->map(fn (Submission $submission): array => $this->row($submission, $typeNames))
             : collect();
 
         $sourceRows = $realRows->isNotEmpty() ? $realRows : $this->fallbackRows();
@@ -61,29 +59,30 @@ new class extends Component {
      * @param  Collection<int, string>  $typeNames
      * @return array<string, mixed>
      */
-    private function row(Submission $submission, Document $document, Collection $typeNames): array
+    private function row(Submission $submission, Collection $typeNames): array
     {
         $status = $this->statusLabel($submission->status);
-        $documentType = $typeNames[$document->document_type_id] ?? 'Unassigned document';
+        $documents = $submission->documents;
 
         return [
-            'id' => $submission->id.'-'.$document->id,
+            'id' => $submission->id,
             'ref' => 'SUB-'.str_pad((string) $submission->id, 5, '0', STR_PAD_LEFT),
-            'document_summary' => $documentType,
-            'file_summary' => $document->original_filename,
+            'document_summary' => 'Document Submission #'.$submission->id,
+            'file_summary' => $documents->count().' '.($documents->count() === 1 ? 'file' : 'files'),
             'submitted_at' => $submission->created_at,
             'status_key' => $submission->status,
             'status' => $status,
             'progress' => $this->progressFor($submission->status),
             'note' => $this->noteFor($submission->status),
-            'documents' => [[
+            'documents' => $documents->map(fn ($document): array => [
                 'id' => $document->id,
-                'type' => $documentType,
+                'type' => $typeNames[$document->document_type_id] ?? 'Unassigned document',
                 'file_name' => $document->original_filename,
                 'size' => $this->formatBytes((int) $document->file_size_bytes),
                 'path' => $document->file_path,
+                'url' => route('vendor.documents.show', $document),
                 'processing_status' => str($document->processing_status)->headline()->toString(),
-            ]],
+            ])->values(),
         ];
     }
 
@@ -128,8 +127,8 @@ new class extends Component {
             ->map(fn (array $submission): array => [
                 'id' => 'demo-'.$submission['id'],
                 'ref' => $submission['ref'],
-                'document_summary' => $submission['document_type'],
-                'file_summary' => $submission['file_name'],
+                'document_summary' => 'Document Submission #'.$submission['id'],
+                'file_summary' => '1 file',
                 'submitted_at' => $submission['submitted_at'],
                 'status_key' => $this->statusKeyFor($submission['status']),
                 'status' => $submission['status'],
@@ -141,6 +140,7 @@ new class extends Component {
                     'file_name' => $submission['file_name'],
                     'size' => $submission['size'],
                     'path' => null,
+                    'url' => null,
                     'processing_status' => $submission['status'],
                 ]],
             ]);
@@ -270,8 +270,15 @@ new class extends Component {
                                     <div class="mt-2 flex flex-col gap-2">
                                         @foreach ($submission['documents'] as $document)
                                             <div class="rounded-lg bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
-                                                <p class="font-medium text-cu-text">{{ $document['type'] }}</p>
-                                                <p class="text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }} - {{ $document['processing_status'] }}</p>
+                                                @if ($document['url'])
+                                                    <a href="{{ $document['url'] }}" target="_blank" rel="noopener" class="block rounded-lg transition hover:text-sky-700 dark:hover:text-sky-300">
+                                                        <p class="font-medium text-cu-text">{{ $document['type'] }}</p>
+                                                        <p class="text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }} - {{ $document['processing_status'] }}</p>
+                                                    </a>
+                                                @else
+                                                    <p class="font-medium text-cu-text">{{ $document['type'] }}</p>
+                                                    <p class="text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }} - {{ $document['processing_status'] }}</p>
+                                                @endif
                                             </div>
                                         @endforeach
                                     </div>
@@ -289,6 +296,6 @@ new class extends Component {
             </div>
         </div>
 
-        <p class="text-center text-xs text-cu-muted">Showing {{ $rows->count() }} of {{ $total }} documents.</p>
+        <p class="text-center text-xs text-cu-muted">Showing {{ $rows->count() }} of {{ $total }} submissions.</p>
     </div>
 </x-page>
