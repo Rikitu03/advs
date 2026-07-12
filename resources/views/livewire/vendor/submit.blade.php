@@ -4,9 +4,16 @@ use App\Models\Document;
 use App\Models\Submission;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Volt\Component;
+use Livewire\WithFileUploads;
 
 new class extends Component {
+    use WithFileUploads;
+
+    /** @var array<int, mixed> */
+    public array $uploadedFiles = [];
+
     public function submitBatch(array $files = []): mixed
     {
         $user = Auth::user();
@@ -16,12 +23,15 @@ new class extends Component {
             abort(403);
         }
 
-        $submission = Submission::create([
-            'vendor_id' => $vendor->id,
-            'status' => Submission::STATUS_PROCESSING,
-        ]);
+        if ($this->uploadedFiles !== []) {
+            $this->validate([
+                'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
+            ]);
+        }
 
-        foreach ($files as $file) {
+        $documents = [];
+
+        foreach ($files as $index => $file) {
             $name = (string) ($file['name'] ?? '');
             $type = (string) ($file['type'] ?? '');
             $extension = (string) ($file['extension'] ?? '');
@@ -31,20 +41,49 @@ new class extends Component {
                 continue;
             }
 
-            Document::create([
-                'submission_id' => $submission->id,
+            $uploadedFile = $this->uploadedFiles[$index] ?? null;
+            $storedPath = 'pending/'.$name;
+            $mimeType = match ($extension) {
+                'pdf' => 'application/pdf',
+                'png' => 'image/png',
+                'jpg', 'jpeg' => 'image/jpeg',
+                default => 'application/octet-stream',
+            };
+
+            if ($uploadedFile !== null) {
+                $uploadedExtension = $uploadedFile->extension();
+                $uploadedMimeType = $uploadedFile->getMimeType();
+                $uploadedSizeBytes = $uploadedFile->getSize();
+
+                $storedPath = $uploadedFile->storeAs(
+                    "vendor{$vendor->id}",
+                    $this->storedFileName($name, $type, $index, $uploadedExtension),
+                    'local',
+                );
+                $mimeType = $uploadedMimeType ?: $mimeType;
+                $sizeBytes = $uploadedSizeBytes ?: $sizeBytes;
+            }
+
+            $documents[] = [
                 'vendor_id' => $vendor->id,
                 'document_type_id' => $this->documentTypeIdFor($type),
                 'original_filename' => $name,
-                'file_path' => 'pending/'.$name,
-                'mime_type' => match ($extension) {
-                    'pdf' => 'application/pdf',
-                    'png' => 'image/png',
-                    'jpg', 'jpeg' => 'image/jpeg',
-                    default => 'application/octet-stream',
-                },
+                'file_path' => $storedPath,
+                'mime_type' => $mimeType,
                 'file_size_bytes' => $sizeBytes,
                 'processing_status' => Document::STATUS_QUEUED,
+            ];
+        }
+
+        $submission = Submission::create([
+            'vendor_id' => $vendor->id,
+            'status' => Submission::STATUS_PROCESSING,
+        ]);
+
+        foreach ($documents as $document) {
+            Document::create([
+                'submission_id' => $submission->id,
+                ...$document,
             ]);
         }
 
@@ -66,6 +105,14 @@ new class extends Component {
             ->value('id');
 
         return $id !== null ? (int) $id : null;
+    }
+
+    private function storedFileName(string $name, string $type, int $index, string $extension): string
+    {
+        $prefix = Str::slug($type, '_') ?: 'document';
+        $baseName = Str::slug(pathinfo($name, PATHINFO_FILENAME), '_') ?: 'file';
+
+        return $prefix.'_'.$baseName.'_'.now()->format('YmdHis').'_'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'.'.$extension;
     }
 }; ?>
 
@@ -319,7 +366,7 @@ new class extends Component {
                 </div>
 
                 <div class="flex flex-col gap-5 p-5">
-                    <input x-ref="upload" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" class="hidden" @change="readFiles($event.target.files)">
+                    <input x-ref="upload" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" class="hidden" wire:model="uploadedFiles" @change="readFiles($event.target.files)">
 
                     <div
                         x-show="! hasFiles"
