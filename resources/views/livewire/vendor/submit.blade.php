@@ -1,9 +1,12 @@
 <?php
 
+use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use App\Models\Submission;
+use App\Services\NotificationService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
@@ -11,9 +14,16 @@ use Livewire\WithFileUploads;
 new class extends Component {
     use WithFileUploads;
 
+    private const ACCEPTED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+
     /** @var array<int, mixed> */
     public array $uploadedFiles = [];
 
+    /**
+     * Persist the batch (Stage 0 intake): every Document row is backed by a
+     * really-stored upload, then the validation pipeline job is dispatched
+     * per document (ADVS_System_Reference.md §5 Stage 0).
+     */
     public function submitBatch(array $files = []): mixed
     {
         $user = Auth::user();
@@ -23,45 +33,49 @@ new class extends Component {
             abort(403);
         }
 
-        if ($this->uploadedFiles !== []) {
-            $this->validate([
-                'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
-            ]);
-        }
+        $this->validate([
+            'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
+        ]);
 
+        // The Alpine queue (names/types) and the Livewire temp uploads travel
+        // separately; join them by client filename — never by array index,
+        // which desyncs when lanes are removed or batches are re-selected.
+        $available = collect($this->uploadedFiles);
         $documents = [];
 
         foreach ($files as $index => $file) {
             $name = (string) ($file['name'] ?? '');
             $type = (string) ($file['type'] ?? '');
-            $extension = (string) ($file['extension'] ?? '');
-            $sizeBytes = (int) ($file['sizeBytes'] ?? 0);
 
             if ($name === '' || $type === '') {
                 continue;
             }
 
-            $uploadedFile = $this->uploadedFiles[$index] ?? null;
-            $storedPath = 'pending/'.$name;
-            $mimeType = match ($extension) {
-                'pdf' => 'application/pdf',
-                'png' => 'image/png',
-                'jpg', 'jpeg' => 'image/jpeg',
-                default => 'application/octet-stream',
-            };
+            $matchIndex = $available->search(
+                fn ($upload): bool => $upload !== null && $upload->getClientOriginalName() === $name,
+            );
 
-            if ($uploadedFile !== null) {
-                $uploadedExtension = $uploadedFile->extension();
-                $uploadedMimeType = $uploadedFile->getMimeType();
-                $uploadedSizeBytes = $uploadedFile->getSize();
+            if ($matchIndex === false) {
+                continue;
+            }
 
-                $storedPath = $uploadedFile->storeAs(
-                    "vendor{$vendor->id}",
-                    $this->storedFileName($name, $type, $index, $uploadedExtension),
-                    'local',
-                );
-                $mimeType = $uploadedMimeType ?: $mimeType;
-                $sizeBytes = $uploadedSizeBytes ?: $sizeBytes;
+            $uploadedFile = $available->pull($matchIndex);
+
+            $storedPath = $uploadedFile->storeAs(
+                "vendor{$vendor->id}",
+                $this->storedFileName($name, $type, $index, $uploadedFile->extension()),
+                'local',
+            );
+
+            // Sniff the stored bytes — Livewire's TemporaryUploadedFile reports
+            // its MIME from the extension, so a disguised file (e.g. PHP named
+            // .pdf) would sail through a getMimeType() check (CLAUDE.md §5).
+            $mimeType = (string) (mime_content_type(Storage::disk('local')->path($storedPath)) ?: '');
+
+            if (! in_array($mimeType, self::ACCEPTED_MIME_TYPES, true)) {
+                Storage::disk('local')->delete($storedPath);
+
+                continue;
             }
 
             $documents[] = [
@@ -70,22 +84,34 @@ new class extends Component {
                 'original_filename' => $name,
                 'file_path' => $storedPath,
                 'mime_type' => $mimeType,
-                'file_size_bytes' => $sizeBytes,
+                'file_size_bytes' => (int) $uploadedFile->getSize(),
                 'processing_status' => Document::STATUS_QUEUED,
             ];
         }
 
-        $submission = Submission::create([
-            'vendor_id' => $vendor->id,
-            'status' => Submission::STATUS_PROCESSING,
-        ]);
+        if ($documents === []) {
+            $this->addError('uploadedFiles', 'No files were uploaded. Please re-add your files and try again.');
 
-        foreach ($documents as $document) {
-            Document::create([
+            return null;
+        }
+
+        [$submission, $created] = DB::transaction(function () use ($vendor, $documents): array {
+            $submission = Submission::create([
+                'vendor_id' => $vendor->id,
+                'status' => Submission::STATUS_PROCESSING,
+            ]);
+
+            $created = collect($documents)->map(fn (array $document): Document => Document::create([
                 'submission_id' => $submission->id,
                 ...$document,
-            ]);
-        }
+            ]));
+
+            return [$submission, $created];
+        });
+
+        app(NotificationService::class)->submissionReceived($submission);
+
+        $created->each(fn (Document $document) => ProcessDocumentJob::dispatch($document));
 
         return redirect()->route('vendor.submissions')->with('status', 'Submission queued successfully.');
     }
@@ -100,8 +126,9 @@ new class extends Component {
         };
 
         $id = DB::table('document_types')
-            ->whereIn('code', $aliases)
-            ->orWhereIn('name', $aliases)
+            ->where(function ($query) use ($aliases): void {
+                $query->whereIn('code', $aliases)->orWhereIn('name', $aliases);
+            })
             ->value('id');
 
         return $id !== null ? (int) $id : null;

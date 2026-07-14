@@ -56,9 +56,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Volt::route('vendor/profile', 'vendor.profile')->name('vendor.profile');
     });
 
-    // Compliance officer / admin dashboard + review workflow.
-    // All pages are full-page Volt components backed by the session-scoped
-    // DemoStore, so officer actions (decisions, read-states) work end to end.
+    // Compliance officer / admin dashboard + review workflow. All pages are
+    // full-page Volt components backed by Eloquent; officer decisions persist
+    // to the database and cascade to the vendor's accreditation status.
     Route::middleware('role:admin,compliance_officer')->group(function () {
         Volt::route('admin/dashboard', 'admin.dashboard')->name('admin.dashboard');
 
@@ -67,6 +67,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Validation Results drill-down + officer decision for one submission (§6).
         Volt::route('admin/submissions/{submission}', 'admin.submissions.show')->name('admin.submissions.show');
+
+        // Original uploaded file for review — streamed from private storage;
+        // reaching here already requires the admin/compliance_officer role.
+        Route::get('admin/documents/{document}', function (Document $document) {
+            $path = ltrim($document->file_path, '/');
+
+            abort_unless(Storage::exists($path), 404);
+
+            return Storage::response($path, $document->original_filename, [
+                'Content-Type' => $document->mime_type,
+            ]);
+        })->name('admin.documents.show');
 
         // Archived Reports — searchable archive of decided submissions (§4).
         Volt::route('admin/archived', 'admin.archived')->name('admin.archived');

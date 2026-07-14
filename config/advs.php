@@ -37,6 +37,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Per-component pass thresholds (§9) — authenticity scores in [0,1]
+    |--------------------------------------------------------------------------
+    |
+    | Displayed on the risk drill-down and used to mark a component pass/fail.
+    | SIGNATURE_DISTANCE_THRESHOLD is empirical (§9); the similarity threshold
+    | here is its presentation-side equivalent.
+    */
+
+    'thresholds' => [
+        'text' => (float) env('TEXT_VALIDATION_THRESHOLD', 0.70),
+        'classification' => (float) env('CLASSIFICATION_CONFIDENCE_THRESHOLD', 0.70),
+        'signature' => (float) env('SIGNATURE_SIMILARITY_THRESHOLD', 0.75),
+        'stamp' => (float) env('STAMP_SIMILARITY_THRESHOLD', 0.85),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Stage T — forensic tampering analysis (python/scripts/tamper_analyze.py)
     |--------------------------------------------------------------------------
     */

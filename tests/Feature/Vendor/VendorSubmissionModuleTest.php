@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Vendor;
 
+use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
+use App\Models\Notification;
 use App\Models\Submission;
 use App\Models\User;
 use App\Models\Vendor;
@@ -10,6 +12,7 @@ use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -64,6 +67,7 @@ class VendorSubmissionModuleTest extends TestCase
 
     public function test_submit_batch_persists_a_real_submission_and_documents_for_the_vendor(): void
     {
+        Queue::fake();
         Storage::fake('local');
         $this->seed(DocumentTypeSeeder::class);
 
@@ -73,8 +77,8 @@ class VendorSubmissionModuleTest extends TestCase
         $component = Livewire::actingAs($user)
             ->test('vendor.submit')
             ->set('uploadedFiles', [
-                UploadedFile::fake()->create('bir_certificate.pdf', 128, 'application/pdf'),
-                UploadedFile::fake()->create('financial_statement.pdf', 256, 'application/pdf'),
+                UploadedFile::fake()->createWithContent('bir_certificate.pdf', "%PDF-1.4\n%fake fixture bir\n%%EOF"),
+                UploadedFile::fake()->createWithContent('financial_statement.pdf', "%PDF-1.4\n%fake fixture fs\n%%EOF"),
             ])
             ->call('submitBatch', [[
                 'name' => 'bir_certificate.pdf',
@@ -112,6 +116,64 @@ class VendorSubmissionModuleTest extends TestCase
         $vendor->documents()->get()->each(function (Document $document): void {
             Storage::assertExists($document->file_path);
         });
+
+        // Stage 0 dispatches the validation pipeline once per document and
+        // notifies the vendor that the submission was received (§7).
+        Queue::assertPushed(ProcessDocumentJob::class, 2);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $user->id,
+            'type' => Notification::TYPE_SUBMISSION_RECEIVED,
+        ]);
+    }
+
+    public function test_submit_batch_rejects_a_manifest_with_no_matching_uploads(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+
+        Livewire::actingAs($user)
+            ->test('vendor.submit')
+            ->call('submitBatch', [[
+                'name' => 'ghost-file.pdf',
+                'type' => 'BIR Permit',
+                'extension' => 'pdf',
+                'sizeBytes' => 1_024,
+            ]])
+            ->assertHasErrors('uploadedFiles');
+
+        $this->assertSame(0, $vendor->submissions()->count());
+        $this->assertSame(0, Document::count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_submit_batch_skips_files_whose_real_mime_type_is_not_allowed(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+
+        Livewire::actingAs($user)
+            ->test('vendor.submit')
+            ->set('uploadedFiles', [
+                UploadedFile::fake()->createWithContent('disguised.pdf', '<?php echo "not a pdf"; ?>'),
+            ])
+            ->call('submitBatch', [[
+                'name' => 'disguised.pdf',
+                'type' => 'BIR Permit',
+                'extension' => 'pdf',
+                'sizeBytes' => 1_024,
+            ]])
+            ->assertHasErrors();
+
+        $this->assertSame(0, $vendor->submissions()->count());
+        Queue::assertNothingPushed();
     }
 
     public function test_my_submissions_uses_the_logged_in_vendors_database_records(): void

@@ -1,13 +1,17 @@
 <?php
 
-use App\Support\DemoData;
-use App\Support\DemoStore;
+use App\Models\Submission;
+use App\Services\Document\OfficerDecisionService;
+use App\Support\SubmissionPresenter;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 new class extends Component {
+    /** The submission id under review (from the {submission} route parameter). */
+    public int $submissionId;
+
     /**
-     * The submission under review. Named $record so the {submission} route
-     * parameter is not auto-assigned to it before mount() runs.
+     * Presented drill-down data for the template.
      *
      * @var array<string, mixed>
      */
@@ -20,11 +24,18 @@ new class extends Component {
 
     public function mount(string $submission): void
     {
-        $found = DemoStore::findSubmission($submission);
+        $model = Submission::query()
+            ->whereIn('status', [
+                Submission::STATUS_PENDING_REVIEW,
+                Submission::STATUS_APPROVED,
+                Submission::STATUS_REJECTED,
+            ])
+            ->find($submission);
 
-        abort_if($found === null, 404);
+        abort_if($model === null, 404);
 
-        $this->record = $found;
+        $this->submissionId = $model->id;
+        $this->record = SubmissionPresenter::detail($model);
     }
 
     public function startDecision(string $mode): void
@@ -40,18 +51,20 @@ new class extends Component {
         $this->confirming = null;
     }
 
-    public function submitDecision(): void
+    public function submitDecision(OfficerDecisionService $decisions): void
     {
         if ($this->confirming === null) {
             return;
         }
 
-        // Simulated processing so the confirm-button spinner is visible.
-        DemoStore::simulateProcessing(700);
+        $submission = Submission::query()->findOrFail($this->submissionId);
 
-        DemoStore::decide(
-            $this->record['id'],
-            $this->confirming === 'approve' ? 'approved' : 'rejected',
+        abort_unless($submission->status === Submission::STATUS_PENDING_REVIEW, 400);
+
+        $decisions->decide(
+            $submission,
+            Auth::user(),
+            $this->confirming === 'approve' ? Submission::STATUS_APPROVED : Submission::STATUS_REJECTED,
             $this->comments,
         );
 
@@ -59,16 +72,11 @@ new class extends Component {
         $this->refreshRecord();
     }
 
-    public function undoDecision(): void
-    {
-        DemoStore::simulateProcessing(400);
-        DemoStore::undoDecision($this->record['id']);
-        $this->refreshRecord();
-    }
-
     private function refreshRecord(): void
     {
-        $this->record = DemoStore::findSubmission($this->record['id']);
+        $this->record = SubmissionPresenter::detail(
+            Submission::query()->findOrFail($this->submissionId),
+        );
     }
 }; ?>
 
@@ -77,30 +85,36 @@ new class extends Component {
         $s = $record;
         $c = $s['components'];
         $decision = $s['decision'];
+        $thresholds = config('advs.thresholds');
 
         // Normalised component-breakdown rows (ADVS_System_Reference.md §6).
+        // A null score means the stage is not yet live (standby pipeline).
         $sigDetected = $c['signature']['detected'];
         $stampDetected = $c['stamp']['detected'];
 
         $breakdown = [
             [
                 'key' => 'text', 'label' => 'Text Validation (OCR)', 'icon' => 'document-text',
-                'score' => $c['text']['score'].'%', 'threshold' => DemoData::TEXT_THRESHOLD.'%',
+                'score' => $c['text']['score'] !== null ? $c['text']['score'].'%' : 'Unavailable',
+                'threshold' => round($thresholds['text'] * 100).'%',
                 'pass' => $c['text']['pass'], 'detail' => $c['text']['detail'], 'expandable' => false,
             ],
             [
                 'key' => 'classification', 'label' => 'Document Classification (ResNet-50)', 'icon' => 'sparkles',
-                'score' => $c['classification']['confidence'].'% conf.', 'threshold' => DemoData::CLASSIFICATION_THRESHOLD.'%',
+                'score' => $c['classification']['confidence'] !== null ? $c['classification']['confidence'].'% conf.' : 'Unavailable',
+                'threshold' => round($thresholds['classification'] * 100).'%',
                 'pass' => $c['classification']['pass'], 'detail' => $c['classification']['detail'], 'expandable' => false,
             ],
             [
                 'key' => 'signature', 'label' => 'Signature Match (Siamese CNN)', 'icon' => 'finger-print',
-                'score' => $sigDetected ? $c['signature']['similarity'].'% sim.' : 'Not detected', 'threshold' => DemoData::SIGNATURE_THRESHOLD.'%',
+                'score' => $sigDetected ? $c['signature']['similarity'].'% sim.' : 'Not detected',
+                'threshold' => round($thresholds['signature'] * 100).'%',
                 'pass' => $c['signature']['pass'], 'detail' => $c['signature']['detail'], 'expandable' => true,
             ],
             [
                 'key' => 'stamp', 'label' => 'Stamp Match (EfficientNet)', 'icon' => 'check-badge',
-                'score' => $stampDetected ? $c['stamp']['similarity'].'% sim.' : 'Not detected', 'threshold' => DemoData::STAMP_THRESHOLD.'%',
+                'score' => $stampDetected ? $c['stamp']['similarity'].'% sim.' : 'Not detected',
+                'threshold' => round($thresholds['stamp'] * 100).'%',
                 'pass' => $c['stamp']['pass'], 'detail' => $c['stamp']['detail'], 'expandable' => true,
             ],
         ];
@@ -192,11 +206,6 @@ new class extends Component {
                                 <p class="mt-1 text-cu-muted">"{{ $s['review_comments'] }}"</p>
                             @endif
                         </div>
-                        <button type="button" wire:click="undoDecision" wire:loading.attr="disabled" wire:target="undoDecision"
-                                class="ml-auto inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-cu-blue transition hover:text-cu-purple disabled:opacity-50">
-                            <flux:icon.loading wire:loading wire:target="undoDecision" variant="micro" class="size-3.5" />
-                            Undo
-                        </button>
                     </div>
                 @endif
             </div>
@@ -304,13 +313,16 @@ new class extends Component {
                 <h2 class="text-base font-semibold text-cu-text">Documents ({{ count($s['documents']) }})</h2>
                 <ul class="mt-3 flex flex-col gap-2">
                     @foreach ($s['documents'] as $doc)
-                        <li class="flex items-center gap-3 rounded-xl border border-cu-border bg-cu-bg px-3 py-2.5">
-                            <flux:icon icon="document-text" class="size-5 shrink-0 text-cu-blue" />
-                            <div class="min-w-0 flex-1">
-                                <p class="truncate text-sm font-medium text-cu-text">{{ $doc['name'] }}</p>
-                                <p class="text-xs text-cu-muted">{{ $doc['type'] }} · {{ $doc['pages'] }} {{ \Illuminate\Support\Str::plural('page', $doc['pages']) }} · {{ $doc['size'] }}</p>
-                            </div>
-                            <flux:icon icon="document-arrow-down" class="size-4 shrink-0 text-cu-muted" />
+                        <li>
+                            <a href="{{ route('admin.documents.show', $doc['id']) }}" target="_blank"
+                               class="flex items-center gap-3 rounded-xl border border-cu-border bg-cu-bg px-3 py-2.5 transition hover:border-cu-purple">
+                                <flux:icon icon="document-text" class="size-5 shrink-0 text-cu-blue" />
+                                <div class="min-w-0 flex-1">
+                                    <p class="truncate text-sm font-medium text-cu-text">{{ $doc['name'] }}</p>
+                                    <p class="text-xs text-cu-muted">{{ $doc['type'] }} · {{ $doc['pages'] }} {{ \Illuminate\Support\Str::plural('page', $doc['pages']) }} · {{ $doc['size'] }}</p>
+                                </div>
+                                <flux:icon icon="document-arrow-down" class="size-4 shrink-0 text-cu-muted" />
+                            </a>
                         </li>
                     @endforeach
                 </ul>
@@ -326,9 +338,6 @@ new class extends Component {
             </div>
         </div>
 
-        <p class="text-center text-xs text-cu-muted/70">
-            Prototype data — decisions are kept in your session only and reset from the dashboard.
-        </p>
     </div>
 
     {{-- Approve / Reject confirmation modal (Livewire-driven) --}}

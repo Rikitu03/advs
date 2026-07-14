@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Document;
+use App\Models\Notification;
 use App\Models\Submission;
 use App\Models\User;
 use App\Models\Vendor;
@@ -78,6 +79,13 @@ class VendorPortalTest extends TestCase
     public function test_vendor_can_view_notifications(): void
     {
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
+
+        Notification::factory()->create([
+            'user_id' => $user->id,
+            'type' => Notification::TYPE_SUBMISSION_RECEIVED,
+            'subject' => 'Submission received',
+            'body' => 'Your submission has been received and is being processed.',
+        ]);
 
         $this->actingAs($user)
             ->get(route('vendor.notifications'))
