@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     public string $filter = 'all';
 
     public string $search = '';
@@ -129,27 +130,35 @@ new class extends Component {
     private function fallbackRows(): Collection
     {
         return VendorDemoData::submissions()
-            ->map(fn (array $submission): array => [
-                'id' => 'demo-'.$submission['id'],
-                'ref' => $submission['ref'],
-                'document_summary' => 'Document Submission #'.$submission['id'],
-                'file_summary' => '1 file',
-                'submitted_at' => $submission['submitted_at'],
-                'status_key' => $this->statusKeyFor($submission['status']),
-                'status' => $submission['status'],
-                'progress' => $this->progressFor($this->statusKeyFor($submission['status'])),
-                'note' => $submission['note'],
-                'documents' => [[
-                    'id' => $submission['id'],
-                    'type' => $submission['document_type'],
-                    'file_name' => $submission['file_name'],
-                    'size' => $submission['size'],
-                    'path' => null,
-                    'url' => null,
-                    'processing_status' => $submission['status'],
-                    'kind' => 'file',
-                ]],
-            ]);
+            ->map(function (array $submission): array {
+                $documents = collect($submission['documents']);
+
+                return [
+                    'id' => 'demo-'.$submission['id'],
+                    'ref' => $submission['ref'],
+                    'document_summary' => 'Document Submission #'.$submission['id'],
+                    'file_summary' => $documents->count().' '.($documents->count() === 1 ? 'file' : 'files'),
+                    'submitted_at' => $submission['submitted_at'],
+                    'status_key' => $this->statusKeyFor($submission['status']),
+                    'status' => $submission['status'],
+                    'progress' => $this->progressFor($this->statusKeyFor($submission['status'])),
+                    'note' => $submission['note'],
+                    'documents' => $documents->values()->map(fn (array $document, int $index): array => [
+                        'id' => $submission['id'].'-'.($index + 1),
+                        'type' => $document['type'],
+                        'file_name' => $document['file_name'],
+                        'size' => $document['size'],
+                        'path' => null,
+                        'url' => null,
+                        'processing_status' => $submission['status'],
+                        'kind' => match (pathinfo($document['file_name'], PATHINFO_EXTENSION)) {
+                            'png', 'jpg', 'jpeg' => 'image',
+                            'pdf' => 'pdf',
+                            default => 'file',
+                        },
+                    ]),
+                ];
+            });
     }
 
     private function noteFor(string $status): string

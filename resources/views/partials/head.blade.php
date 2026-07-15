@@ -26,6 +26,15 @@
         }
 
         function apply(value) {
+            // Light-locked surfaces (the landing page and the auth flow) opt out of
+            // theming entirely: they are drawn ink-on-white with no `dark:` variants,
+            // so letting a dark-preferring visitor stamp `.dark` would only recolour
+            // the Flux controls inside them and split the page in two.
+            if (document.documentElement.dataset.themeLock === 'light') {
+                document.documentElement.classList.remove('dark');
+                return;
+            }
+
             document.documentElement.classList.toggle('dark', isDark(value));
         }
 

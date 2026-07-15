@@ -15,6 +15,10 @@ use Illuminate\Support\Collection;
 class VendorDemoData
 {
     /**
+     * A submission is one accreditation batch that bundles one or more
+     * documents (mirrors the real Submission → hasMany(Document) model), so
+     * each entry carries a `documents` array rather than a single file.
+     *
      * @return Collection<int, array<string, mixed>>
      */
     public static function submissions(): Collection
@@ -23,54 +27,49 @@ class VendorDemoData
             [
                 'id' => 2004,
                 'ref' => 'SUB-2004',
-                'document_type' => 'Business Permit',
-                'file_name' => 'business_permit_2026.pdf',
                 'submitted_at' => Carbon::now()->subHours(3),
                 'status' => 'Processing',
                 'status_tone' => 'processing',
-                'size' => '2.4 MB',
-                'pages' => 2,
-                'progress' => 25,
-                'note' => 'Your document is being prepared for validation.',
+                'note' => 'Your documents are being prepared for validation.',
+                'documents' => [
+                    ['type' => 'Business Permit', 'file_name' => 'business_permit_2026.pdf', 'size' => '2.4 MB'],
+                    ['type' => 'BIR Permit', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
+                    ['type' => 'Financial Statement', 'file_name' => 'audited_financial_statement_2025.pdf', 'size' => '3.8 MB'],
+                ],
             ],
             [
                 'id' => 2003,
                 'ref' => 'SUB-2003',
-                'document_type' => 'Business Permit',
-                'file_name' => 'pasig_business_permit_scan.png',
                 'submitted_at' => Carbon::now()->subDays(1)->subHours(4),
                 'status' => 'Pending Review',
                 'status_tone' => 'review',
-                'size' => '1.1 MB',
-                'pages' => 1,
-                'progress' => 75,
                 'note' => 'Validation is complete and waiting for officer review.',
+                'documents' => [
+                    ['type' => 'Business Permit', 'file_name' => 'pasig_business_permit_scan.png', 'size' => '1.1 MB'],
+                ],
             ],
             [
                 'id' => 2002,
                 'ref' => 'SUB-2002',
-                'document_type' => 'BIR Permit',
-                'file_name' => 'bir_certificate_registration.pdf',
                 'submitted_at' => Carbon::now()->subDays(9),
                 'status' => 'Approved',
                 'status_tone' => 'approved',
-                'size' => '980 KB',
-                'pages' => 1,
-                'progress' => 100,
-                'note' => 'This document was accepted and added to your vendor record.',
+                'note' => 'This submission was accepted and added to your vendor record.',
+                'documents' => [
+                    ['type' => 'BIR Permit', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
+                ],
             ],
             [
                 'id' => 2001,
                 'ref' => 'SUB-2001',
-                'document_type' => 'Financial Statement',
-                'file_name' => 'audited_financial_statement_2025.pdf',
                 'submitted_at' => Carbon::now()->subDays(18),
                 'status' => 'Rejected',
                 'status_tone' => 'rejected',
-                'size' => '3.8 MB',
-                'pages' => 2,
-                'progress' => 100,
-                'note' => 'A clearer scan is required before this document can be accepted.',
+                'note' => 'A clearer scan is required before this submission can be accepted.',
+                'documents' => [
+                    ['type' => 'Financial Statement', 'file_name' => 'audited_financial_statement_2025.pdf', 'size' => '3.8 MB'],
+                    ['type' => 'Business Permit', 'file_name' => 'business_permit_2025.pdf', 'size' => '2.1 MB'],
+                ],
             ],
         ]);
     }

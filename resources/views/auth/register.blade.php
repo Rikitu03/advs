@@ -1,5 +1,5 @@
 <x-layouts.auth>
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-8">
         <x-auth-header :title="__('Create a vendor account')" :description="__('Register to submit accreditation documents for validation')" />
 
         <x-auth-session-status class="text-center" :status="session('status')" />
@@ -12,35 +12,19 @@
             />
         @endif
 
-        {{-- Step indicator: account → details → signature → verify email --}}
-        <ol class="flex items-center gap-2 text-xs font-medium">
-            <li class="flex items-center gap-1.5 text-cu-purple">
-                <span class="flex size-4 items-center justify-center rounded-full bg-cu-purple text-[10px] text-white">1</span>
-                {{ __('Account') }}
-            </li>
-            <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-            <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-                <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">2</span>
-                {{ __('Details') }}
-            </li>
-            <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-            <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-                <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">3</span>
-                {{ __('Signature') }}
-            </li>
-            <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-            <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-                <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">4</span>
-                {{ __('Verify email') }}
-            </li>
-        </ol>
+        <x-auth.steps current="account" />
 
-        {{-- Heads-up for the signature-enrollment step that follows --}}
-        <div class="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
-            <flux:icon icon="finger-print" class="mt-0.5 size-5 shrink-0 text-cu-purple" />
-            <div class="text-xs text-zinc-600 dark:text-zinc-400">
-                <p class="mb-1 text-sm font-medium text-zinc-800 dark:text-zinc-200">{{ __('Next: your business & owner details') }}</p>
-                {{ __('After creating your account you will declare your business and representative information, then enroll your reference signature.') }}
+        {{-- What the next stage asks for, so the account form does not look like the
+             whole of registration. --}}
+        <div class="flex items-start gap-3 rounded-2xl bg-ink-mute/50 p-4 ring-1 ring-black/5">
+            <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-ink text-white" aria-hidden="true">
+                <flux:icon icon="finger-print" variant="micro" class="size-4" />
+            </span>
+            <div>
+                <p class="font-jakarta text-sm font-semibold text-ink">{{ __('Next: your business & owner details') }}</p>
+                <p class="mt-0.5 font-jakarta text-xs leading-[1.5] text-ink/60">
+                    {{ __('After creating your account you will declare your business and representative information, then enroll your reference signature.') }}
+                </p>
             </div>
         </div>
 
@@ -88,12 +72,17 @@
                 viewable
             />
 
-            <flux:button type="submit" variant="primary" class="w-full">{{ __('Create account') }}</flux:button>
+            <x-auth.submit class="mt-1">{{ __('Create account') }}</x-auth.submit>
         </form>
 
-        <div class="space-x-1 text-center text-sm text-zinc-600 dark:text-zinc-400">
+        <p class="text-center font-jakarta text-sm text-ink/60">
             {{ __('Already have an account?') }}
-            <flux:link :href="route('login')">{{ __('Log in') }}</flux:link>
-        </div>
+            <a
+                href="{{ route('login') }}"
+                class="font-semibold text-ink underline-offset-4 transition-colors hover:text-flame hover:underline"
+            >
+                {{ __('Log in') }}
+            </a>
+        </p>
     </div>
 </x-layouts.auth>

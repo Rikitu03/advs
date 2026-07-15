@@ -65,6 +65,27 @@ class VendorSubmissionModuleTest extends TestCase
         $this->assertSame(0, $vendor->submissions()->count());
     }
 
+    public function test_fallback_rows_group_multiple_documents_under_one_submission(): void
+    {
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+
+        $this->assertSame(0, $vendor->submissions()->count());
+
+        // The showcase demo submission bundles three documents (Business
+        // Permit + BIR Permit + Financial Statement) under a single batch,
+        // mirroring the real Submission → hasMany(Document) model.
+        $this->actingAs($user)
+            ->get(route('vendor.submissions'))
+            ->assertOk()
+            ->assertSee('3 files')
+            ->assertSee('Included files')
+            ->assertSee('business_permit_2026.pdf')
+            ->assertSee('bir_certificate_registration.pdf')
+            ->assertSee('audited_financial_statement_2025.pdf')
+            ->assertDontSee('1 files');
+    }
+
     public function test_submit_batch_persists_a_real_submission_and_documents_for_the_vendor(): void
     {
         Queue::fake();
@@ -74,11 +95,14 @@ class VendorSubmissionModuleTest extends TestCase
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
         $vendor = Vendor::factory()->for($user)->create();
 
+        $birContent = "%PDF-1.4\n%fake fixture bir\n%%EOF";
+        $financialContent = "%PDF-1.4\n%fake fixture fs\n%%EOF";
+
         $component = Livewire::actingAs($user)
             ->test('vendor.submit')
             ->set('uploadedFiles', [
-                UploadedFile::fake()->createWithContent('bir_certificate.pdf', "%PDF-1.4\n%fake fixture bir\n%%EOF"),
-                UploadedFile::fake()->createWithContent('financial_statement.pdf', "%PDF-1.4\n%fake fixture fs\n%%EOF"),
+                UploadedFile::fake()->createWithContent('bir_certificate.pdf', $birContent),
+                UploadedFile::fake()->createWithContent('financial_statement.pdf', $financialContent),
             ])
             ->call('submitBatch', [[
                 'name' => 'bir_certificate.pdf',
@@ -106,15 +130,25 @@ class VendorSubmissionModuleTest extends TestCase
             'vendor_id' => $vendor->id,
             'original_filename' => 'bir_certificate.pdf',
             'document_type_id' => $birCertificateId,
+            // The recorded size must match the stored copy's real byte length.
+            // storeAs() moves the livewire-tmp file off disk before the size is
+            // read, so the size must come from the persisted file, not the temp
+            // upload (which would throw UnableToRetrieveMetadata in the browser).
+            'file_size_bytes' => strlen($birContent),
         ]);
         $this->assertDatabaseHas('documents', [
             'vendor_id' => $vendor->id,
             'original_filename' => 'financial_statement.pdf',
             'document_type_id' => $financialStatementId,
+            'file_size_bytes' => strlen($financialContent),
         ]);
 
         $vendor->documents()->get()->each(function (Document $document): void {
             Storage::assertExists($document->file_path);
+            $this->assertSame(
+                Storage::disk('local')->size($document->file_path),
+                $document->file_size_bytes,
+            );
         });
 
         // Stage 0 dispatches the validation pipeline once per document and
