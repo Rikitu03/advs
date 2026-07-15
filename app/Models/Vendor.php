@@ -151,4 +151,17 @@ class Vendor extends Model
     {
         return $query->where('status', self::STATUS_APPROVED);
     }
+
+    /**
+     * Flux badge color for an accreditation status.
+     */
+    public static function statusColor(string $status): string
+    {
+        return match ($status) {
+            self::STATUS_APPROVED => 'emerald',
+            self::STATUS_REJECTED => 'red',
+            self::STATUS_UNDER_REVIEW => 'amber',
+            default => 'zinc',
+        };
+    }
 }

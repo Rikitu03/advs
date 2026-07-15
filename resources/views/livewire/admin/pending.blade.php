@@ -1,6 +1,7 @@
 <?php
 
-use App\Support\DemoStore;
+use App\Models\Submission;
+use App\Support\SubmissionPresenter;
 use Illuminate\Support\Collection;
 use Livewire\Volt\Component;
 
@@ -15,14 +16,22 @@ new class extends Component {
     }
 
     /**
+     * Pending-review queue, highest composite risk first (§5 Stage 6).
+     *
      * @return Collection<int, array<string, mixed>>
      */
     public function filtered(): Collection
     {
         $term = mb_strtolower(trim($this->search));
+        $typeNames = SubmissionPresenter::typeNames();
 
-        return DemoStore::pendingSubmissions()
-            ->when($this->risk !== 'all', fn (Collection $rows) => $rows->where('risk_level', $this->risk))
+        return Submission::query()
+            ->where('status', Submission::STATUS_PENDING_REVIEW)
+            ->when($this->risk !== 'all', fn ($query) => $query->where('risk_level', $this->risk))
+            ->with(['vendor.user', 'documents.validationResult'])
+            ->orderByDesc('composite_risk_score')
+            ->get()
+            ->map(fn (Submission $submission): array => SubmissionPresenter::summary($submission, $typeNames))
             ->when($term !== '', fn (Collection $rows) => $rows->filter(
                 fn (array $s): bool => str_contains(
                     mb_strtolower("{$s['ref']} {$s['company']} {$s['vendor']} {$s['document_type']}"),
@@ -39,7 +48,7 @@ new class extends Component {
     {
         return [
             'rows' => $this->filtered(),
-            'total' => DemoStore::pendingSubmissions()->count(),
+            'total' => Submission::query()->where('status', Submission::STATUS_PENDING_REVIEW)->count(),
         ];
     }
 }; ?>

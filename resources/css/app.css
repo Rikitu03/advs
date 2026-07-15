@@ -11,6 +11,21 @@
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
+    /* Landing page faces (resources/views/components/landing/*). Jakarta carries
+       every structural heading; Inter is reserved for the small hero chips. */
+    --font-jakarta: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-inter: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+    /* Landing page ink + the single accent. Flame is the only hue on the page —
+       it marks the two things a visitor can act on (the primary CTA) and the two
+       chips the engine "speaks" in. Everything else is ink on white. */
+    --color-ink: #1e1e1e;
+    --color-ink-panel: #232323;
+    --color-ink-rail: #d9d9d9;
+    --color-ink-hair: #aaaaaa;
+    --color-ink-mute: #ebebeb;
+    --color-flame: #e07228;
+
     --color-zinc-50: #fafafa;
     --color-zinc-100: #f5f5f5;
     --color-zinc-200: #e5e5e5;
@@ -42,6 +57,72 @@
     --color-cu-text: #18181b;
     --color-cu-muted: #6b7280;
     --color-cu-border: #e5e7eb;
+}
+
+/* ── Landing page signature ────────────────────────────────────────────────
+   The giant ADVS wordmark bleeds past both margins (630px at a 1440px frame =
+   43.75vw) and the footer slab is pulled up to crop its lower third. Both the
+   size and the overlap are derived from the same clamp so the crop holds its
+   proportion from a 360px phone to a 1440px desktop. */
+@utility landing-wordmark {
+    font-size: clamp(4rem, 43.75vw, 39.375rem);
+    line-height: 1.26;
+    letter-spacing: -0.14em;
+}
+
+@utility landing-wordmark-crop {
+    margin-top: calc(clamp(4rem, 43.75vw, 39.375rem) * -0.3);
+}
+
+/* The white dome rising out of the footer: a shallow elliptical arc, not a
+   circle, so it keeps its shape at every width. */
+@utility landing-dome {
+    border-top-left-radius: 50% 90px;
+    border-top-right-radius: 50% 90px;
+}
+
+/* Warm glow behind the hero and the metrics heading. Flame at low alpha, never
+   a hard edge — it should read as light falling on paper, not as a colour block. */
+@utility landing-glow {
+    background-image:
+        radial-gradient(58% 46% at 50% 22%, rgb(224 114 40 / 0.16), transparent 72%),
+        radial-gradient(42% 38% at 12% 62%, rgb(224 114 40 / 0.11), transparent 74%),
+        radial-gradient(36% 34% at 92% 74%, rgb(224 114 40 / 0.08), transparent 76%);
+}
+
+@utility landing-glow-left {
+    background-image: radial-gradient(46% 52% at 6% 34%, rgb(224 114 40 / 0.16), transparent 72%);
+}
+
+/* ── Landing motion ────────────────────────────────────────────────────────
+   `landing-verdict` — the hero chips are the engine's verdicts, so they arrive
+   one after another once scrolled into view (gated by `x-intersect` in
+   hero.blade.php) rather than being present from the start.
+
+   The metrics rail's fill (metrics.blade.php) is scroll-position-driven via
+   Alpine, not a CSS keyframe, so its height tracks scroll directly and has
+   nothing to disable under reduced motion — it only ever reaches the position
+   the user has actually scrolled to. */
+@keyframes landing-verdict {
+    from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@utility landing-verdict {
+    animation: landing-verdict 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .landing-verdict {
+        animation: none;
+    }
 }
 
 /* ClickUp signature gradient (color_pallete.md) as reusable utilities. */

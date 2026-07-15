@@ -1,6 +1,7 @@
 <?php
 
-use App\Support\DemoStore;
+use App\Models\Notification;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 new class extends Component {
@@ -13,13 +14,12 @@ new class extends Component {
 
     public function markRead(int $id): void
     {
-        DemoStore::markNotificationRead($id);
+        Auth::user()->notifications()->whereKey($id)->update(['is_read' => true]);
     }
 
     public function markAllRead(): void
     {
-        DemoStore::simulateProcessing(400);
-        DemoStore::markAllNotificationsRead();
+        Auth::user()->notifications()->unread()->update(['is_read' => true]);
     }
 
     /**
@@ -27,13 +27,36 @@ new class extends Component {
      */
     public function with(): array
     {
-        $notifications = DemoStore::notifications();
+        $rows = Auth::user()->notifications()
+            ->when($this->filter === 'unread', fn ($query) => $query->unread())
+            ->get()
+            ->map(fn (Notification $notification): array => [
+                'id' => $notification->id,
+                'read' => $notification->is_read,
+                'icon' => match ($notification->type) {
+                    Notification::TYPE_HIGH_RISK_ALERT => 'exclamation-triangle',
+                    Notification::TYPE_DOCUMENT_FLAGGED => 'flag',
+                    Notification::TYPE_DECISION_MADE => 'check-circle',
+                    Notification::TYPE_SUBMISSION_RECEIVED => 'inbox-arrow-down',
+                    Notification::TYPE_PROCESSING_COMPLETE => 'check-badge',
+                    default => 'bell',
+                },
+                'color' => match ($notification->type) {
+                    Notification::TYPE_HIGH_RISK_ALERT => 'rose',
+                    Notification::TYPE_DOCUMENT_FLAGGED => 'amber',
+                    Notification::TYPE_DECISION_MADE, Notification::TYPE_PROCESSING_COMPLETE => 'emerald',
+                    Notification::TYPE_SUBMISSION_RECEIVED => 'sky',
+                    default => 'zinc',
+                },
+                'title' => $notification->subject,
+                'body' => $notification->body,
+                'at' => $notification->created_at,
+                'submission_id' => $notification->related_submission_id,
+            ]);
 
         return [
-            'rows' => $this->filter === 'unread'
-                ? $notifications->where('read', false)->values()
-                : $notifications,
-            'unreadCount' => $notifications->where('read', false)->count(),
+            'rows' => $rows,
+            'unreadCount' => Auth::user()->notifications()->unread()->count(),
         ];
     }
 }; ?>

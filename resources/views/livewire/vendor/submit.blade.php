@@ -1,19 +1,30 @@
 <?php
 
+use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use App\Models\Submission;
+use App\Services\NotificationService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
 
-new class extends Component {
+new class extends Component
+{
     use WithFileUploads;
+
+    private const ACCEPTED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
 
     /** @var array<int, mixed> */
     public array $uploadedFiles = [];
 
+    /**
+     * Persist the batch (Stage 0 intake): every Document row is backed by a
+     * really-stored upload, then the validation pipeline job is dispatched
+     * per document (ADVS_System_Reference.md §5 Stage 0).
+     */
     public function submitBatch(array $files = []): mixed
     {
         $user = Auth::user();
@@ -23,45 +34,49 @@ new class extends Component {
             abort(403);
         }
 
-        if ($this->uploadedFiles !== []) {
-            $this->validate([
-                'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
-            ]);
-        }
+        $this->validate([
+            'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
+        ]);
 
+        // The Alpine queue (names/types) and the Livewire temp uploads travel
+        // separately; join them by client filename — never by array index,
+        // which desyncs when lanes are removed or batches are re-selected.
+        $available = collect($this->uploadedFiles);
         $documents = [];
 
         foreach ($files as $index => $file) {
             $name = (string) ($file['name'] ?? '');
             $type = (string) ($file['type'] ?? '');
-            $extension = (string) ($file['extension'] ?? '');
-            $sizeBytes = (int) ($file['sizeBytes'] ?? 0);
 
             if ($name === '' || $type === '') {
                 continue;
             }
 
-            $uploadedFile = $this->uploadedFiles[$index] ?? null;
-            $storedPath = 'pending/'.$name;
-            $mimeType = match ($extension) {
-                'pdf' => 'application/pdf',
-                'png' => 'image/png',
-                'jpg', 'jpeg' => 'image/jpeg',
-                default => 'application/octet-stream',
-            };
+            $matchIndex = $available->search(
+                fn ($upload): bool => $upload !== null && $upload->getClientOriginalName() === $name,
+            );
 
-            if ($uploadedFile !== null) {
-                $uploadedExtension = $uploadedFile->extension();
-                $uploadedMimeType = $uploadedFile->getMimeType();
-                $uploadedSizeBytes = $uploadedFile->getSize();
+            if ($matchIndex === false) {
+                continue;
+            }
 
-                $storedPath = $uploadedFile->storeAs(
-                    "vendor{$vendor->id}",
-                    $this->storedFileName($name, $type, $index, $uploadedExtension),
-                    'local',
-                );
-                $mimeType = $uploadedMimeType ?: $mimeType;
-                $sizeBytes = $uploadedSizeBytes ?: $sizeBytes;
+            $uploadedFile = $available->pull($matchIndex);
+
+            $storedPath = $uploadedFile->storeAs(
+                "vendor{$vendor->id}",
+                $this->storedFileName($name, $type, $index, $uploadedFile->extension()),
+                'local',
+            );
+
+            // Sniff the stored bytes — Livewire's TemporaryUploadedFile reports
+            // its MIME from the extension, so a disguised file (e.g. PHP named
+            // .pdf) would sail through a getMimeType() check (CLAUDE.md §5).
+            $mimeType = (string) (mime_content_type(Storage::disk('local')->path($storedPath)) ?: '');
+
+            if (! in_array($mimeType, self::ACCEPTED_MIME_TYPES, true)) {
+                Storage::disk('local')->delete($storedPath);
+
+                continue;
             }
 
             $documents[] = [
@@ -70,22 +85,38 @@ new class extends Component {
                 'original_filename' => $name,
                 'file_path' => $storedPath,
                 'mime_type' => $mimeType,
-                'file_size_bytes' => $sizeBytes,
+                // Read the size from the stored copy, not $uploadedFile->getSize():
+                // storeAs() above moves (deletes) the livewire-tmp file when the temp
+                // disk and destination are both 'local', so the temp path is already
+                // gone here and getSize() would throw UnableToRetrieveMetadata.
+                'file_size_bytes' => (int) Storage::disk('local')->size($storedPath),
                 'processing_status' => Document::STATUS_QUEUED,
             ];
         }
 
-        $submission = Submission::create([
-            'vendor_id' => $vendor->id,
-            'status' => Submission::STATUS_PROCESSING,
-        ]);
+        if ($documents === []) {
+            $this->addError('uploadedFiles', 'No files were uploaded. Please re-add your files and try again.');
 
-        foreach ($documents as $document) {
-            Document::create([
+            return null;
+        }
+
+        [$submission, $created] = DB::transaction(function () use ($vendor, $documents): array {
+            $submission = Submission::create([
+                'vendor_id' => $vendor->id,
+                'status' => Submission::STATUS_PROCESSING,
+            ]);
+
+            $created = collect($documents)->map(fn (array $document): Document => Document::create([
                 'submission_id' => $submission->id,
                 ...$document,
-            ]);
-        }
+            ]));
+
+            return [$submission, $created];
+        });
+
+        app(NotificationService::class)->submissionReceived($submission);
+
+        $created->each(fn (Document $document) => ProcessDocumentJob::dispatch($document));
 
         return redirect()->route('vendor.submissions')->with('status', 'Submission queued successfully.');
     }
@@ -100,8 +131,9 @@ new class extends Component {
         };
 
         $id = DB::table('document_types')
-            ->whereIn('code', $aliases)
-            ->orWhereIn('name', $aliases)
+            ->where(function ($query) use ($aliases): void {
+                $query->whereIn('code', $aliases)->orWhereIn('name', $aliases);
+            })
             ->value('id');
 
         return $id !== null ? (int) $id : null;
@@ -119,24 +151,13 @@ new class extends Component {
 <x-page>
     <div
         class="mx-auto flex w-full max-w-7xl flex-col gap-6"
-        x-init="
-            $watch('files', () => {
-                const hasPending = files.some((file) => file.status !== 'completed' && file.status !== 'invalid' && file.status !== 'failed');
-                if (! hasPending) {
-                    submitted = false;
-                }
-            });
-            Livewire.on('submit-batch', (payload) => {
-                $wire.submitBatch(payload.files || []);
-            });
-        "
         x-data="{
             files: [],
-            timers: {},
             allowed: ['pdf', 'png', 'jpg', 'jpeg'],
             maxBytes: 10 * 1024 * 1024,
             dragActive: false,
             submitted: false,
+            uploading: false,
             readFiles(fileList) {
                 const selectedFiles = Array.from(fileList);
 
@@ -145,14 +166,12 @@ new class extends Component {
                 }
 
                 selectedFiles.forEach((selected) => {
-                    const file = this.createFileLane(selected);
-
-                    this.files.push(file);
-                    this.prepareFile(file);
+                    this.files.push(this.createFileLane(selected));
                 });
 
                 this.$refs.upload.value = '';
                 this.submitted = false;
+                this.syncUpload();
             },
             createFileLane(selected) {
                 const extension = selected.name.split('.').pop().toLowerCase();
@@ -160,6 +179,7 @@ new class extends Component {
                 const validSize = selected.size <= this.maxBytes;
                 return {
                     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                    file: selected,
                     name: selected.name,
                     size: this.formatBytes(selected.size),
                     sizeBytes: selected.size,
@@ -169,7 +189,7 @@ new class extends Component {
                         ? 'File must be a PDF, PNG, JPG, or JPEG.'
                         : (! validSize ? 'File is larger than the 10 MB per-file limit.' : ''),
                     type: '',
-                    status: validType && validSize ? 'waiting' : 'invalid',
+                    status: validType && validSize ? 'uploading' : 'invalid',
                     progress: 0,
                 };
             },
@@ -180,6 +200,55 @@ new class extends Component {
 
                 return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
             },
+            // Stage every valid file's real bytes on the server through Livewire's
+            // upload API and only mark the lane 'completed' when the upload truly
+            // finishes. The batch is submittable only once THIS resolves, so
+            // submitBatch never runs against an empty uploadedFiles array — the old
+            // race (a simulated progress bar decoupled from the real upload) left
+            // the queue on-screen but persisted nothing.
+            syncUpload() {
+                const validLanes = this.files.filter((lane) => lane.valid);
+
+                if (validLanes.length === 0) {
+                    this.uploading = false;
+                    this.$wire.set('uploadedFiles', []);
+                    return;
+                }
+
+                this.uploading = true;
+                validLanes.forEach((lane) => {
+                    lane.status = 'uploading';
+                    lane.error = '';
+                });
+
+                this.$wire.uploadMultiple(
+                    'uploadedFiles',
+                    validLanes.map((lane) => lane.file),
+                    () => {
+                        validLanes.forEach((lane) => {
+                            lane.status = 'completed';
+                            lane.progress = 100;
+                        });
+                        this.uploading = false;
+                    },
+                    () => {
+                        validLanes.forEach((lane) => {
+                            lane.status = 'failed';
+                            lane.progress = 0;
+                            lane.error = 'Upload failed. Remove or replace this file.';
+                        });
+                        this.uploading = false;
+                    },
+                    (event) => {
+                        const progress = event?.detail?.progress ?? 0;
+                        validLanes.forEach((lane) => {
+                            if (lane.status === 'uploading') {
+                                lane.progress = progress;
+                            }
+                        });
+                    },
+                );
+            },
             statusLabel(file) {
                 if (file.status === 'invalid') {
                     return 'Check File';
@@ -187,10 +256,6 @@ new class extends Component {
 
                 if (file.status === 'uploading') {
                     return 'Uploading';
-                }
-
-                if (file.status === 'completed') {
-                    return 'Ready';
                 }
 
                 if (file.status === 'failed') {
@@ -201,13 +266,13 @@ new class extends Component {
                     return 'Pending Type Selection';
                 }
 
+                if (file.status === 'completed') {
+                    return 'Ready';
+                }
+
                 return 'Waiting';
             },
             statusClasses(file) {
-                if (file.status === 'completed') {
-                    return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
-                }
-
                 if (file.status === 'failed' || file.status === 'invalid') {
                     return 'bg-rose-500/15 text-rose-700 dark:text-rose-300';
                 }
@@ -220,41 +285,26 @@ new class extends Component {
                     return 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
                 }
 
-                return 'bg-black/10 text-cu-muted dark:bg-white/10';
-            },
-            handleTypeChange(file) {
-                window.clearInterval(this.timers[file.id]);
-                file.status = file.valid ? 'waiting' : 'invalid';
-                file.progress = 0;
-                this.submitted = false;
-                this.prepareFile(file);
-            },
-            canUpload(file) {
-                return file.valid && file.type !== '' && ['waiting', 'failed'].includes(file.status);
-            },
-            prepareFile(file) {
-                if (! this.canUpload(file)) {
-                    return;
+                if (file.status === 'completed') {
+                    return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
                 }
 
-                window.clearInterval(this.timers[file.id]);
-
-                file.status = 'uploading';
-                file.progress = 0;
-                file.error = '';
-
-                this.timers[file.id] = window.setInterval(() => {
-                    const nextProgress = Math.min(100, file.progress + Math.floor(Math.random() * 18) + 12);
-                    file.progress = nextProgress;
-
-                    if (nextProgress < 100) {
-                        return;
-                    }
-
-                    window.clearInterval(this.timers[file.id]);
-                    file.status = 'completed';
-                    file.progress = 100;
-                }, 180);
+                return 'bg-black/10 text-cu-muted dark:bg-white/10';
+            },
+            handleTypeChange() {
+                this.submitted = false;
+            },
+            removeFile(file) {
+                this.files = this.files.filter((lane) => lane.id !== file.id);
+                this.submitted = false;
+                this.syncUpload();
+            },
+            clearFiles() {
+                this.files = [];
+                this.$refs.upload.value = '';
+                this.submitted = false;
+                this.uploading = false;
+                this.$wire.set('uploadedFiles', []);
             },
             uploadReadyFiles() {
                 if (! this.canSubmit) {
@@ -263,66 +313,24 @@ new class extends Component {
 
                 this.submitted = true;
 
-                const payload = this.files.map((file) => ({
-                    name: file.name,
-                    type: file.type,
-                    extension: file.extension,
-                    sizeBytes: file.sizeBytes ?? 0,
-                }));
+                const payload = this.files
+                    .filter((file) => file.valid)
+                    .map((file) => ({
+                        name: file.name,
+                        type: file.type,
+                        extension: file.extension,
+                        sizeBytes: file.sizeBytes ?? 0,
+                    }));
 
-                Livewire.dispatch('submit-batch', { files: payload });
-            },
-            uploadFile(file) {
-                if (! this.canUpload(file)) {
-                    return;
-                }
-
-                window.clearInterval(this.timers[file.id]);
-
-                file.status = 'uploading';
-                file.progress = 0;
-                file.error = '';
-
-                this.timers[file.id] = window.setInterval(() => {
-                    const nextProgress = Math.min(100, file.progress + Math.floor(Math.random() * 14) + 7);
-                    file.progress = nextProgress;
-
-                    if (nextProgress < 100) {
-                        return;
-                    }
-
-                    window.clearInterval(this.timers[file.id]);
-
-                    const shouldFail = file.name.toLowerCase().includes('fail') || Math.random() < 0.08;
-
-                    if (shouldFail) {
-                        file.status = 'failed';
-                        file.progress = 0;
-                        file.error = 'Preparation failed. Remove or replace this file.';
-                        return;
-                    }
-
-                    file.status = 'completed';
-                    file.progress = 100;
-                }, 260);
-            },
-            removeFile(file) {
-                window.clearInterval(this.timers[file.id]);
-                this.files = this.files.filter((lane) => lane.id !== file.id);
-                this.submitted = false;
-            },
-            clearFiles() {
-                this.files.forEach((file) => window.clearInterval(this.timers[file.id]));
-                this.files = [];
-                this.timers = {};
-                this.$refs.upload.value = '';
-                this.submitted = false;
+                // On success submitBatch redirects to My Submissions; this promise
+                // only resolves in-page when the server declined the batch (e.g. a
+                // disguised file was skipped), so drop the banner to surface the error.
+                this.$wire.submitBatch(payload).then(() => {
+                    this.submitted = false;
+                });
             },
             get hasFiles() {
                 return this.files.length > 0;
-            },
-            get readyCount() {
-                return this.files.filter((file) => this.canUpload(file)).length;
             },
             get completedCount() {
                 return this.files.filter((file) => file.status === 'completed').length;
@@ -331,7 +339,9 @@ new class extends Component {
                 return this.submitted && this.hasFiles && this.completedCount === this.files.length;
             },
             get canSubmit() {
-                return this.hasFiles && this.files.every((file) => file.valid && file.type !== '' && file.status === 'completed');
+                return ! this.uploading
+                    && this.hasFiles
+                    && this.files.every((file) => file.valid && file.type !== '' && file.status === 'completed');
             },
         }"
     >
@@ -366,7 +376,13 @@ new class extends Component {
                 </div>
 
                 <div class="flex flex-col gap-5 p-5">
-                    <input x-ref="upload" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" class="hidden" wire:model="uploadedFiles" @change="readFiles($event.target.files)">
+                    <input x-ref="upload" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" class="hidden" @change="readFiles($event.target.files)">
+
+                    @error('uploadedFiles')
+                        <div class="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm font-medium text-rose-700 dark:text-rose-300">
+                            {{ $message }}
+                        </div>
+                    @enderror
 
                     <div
                         x-show="! hasFiles"

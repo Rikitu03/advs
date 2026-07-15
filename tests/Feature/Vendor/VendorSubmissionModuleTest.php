@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Vendor;
 
+use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
+use App\Models\Notification;
 use App\Models\Submission;
 use App\Models\User;
 use App\Models\Vendor;
@@ -10,6 +12,7 @@ use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -62,19 +65,44 @@ class VendorSubmissionModuleTest extends TestCase
         $this->assertSame(0, $vendor->submissions()->count());
     }
 
+    public function test_fallback_rows_group_multiple_documents_under_one_submission(): void
+    {
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+
+        $this->assertSame(0, $vendor->submissions()->count());
+
+        // The showcase demo submission bundles three documents (Business
+        // Permit + BIR Permit + Financial Statement) under a single batch,
+        // mirroring the real Submission → hasMany(Document) model.
+        $this->actingAs($user)
+            ->get(route('vendor.submissions'))
+            ->assertOk()
+            ->assertSee('3 files')
+            ->assertSee('Included files')
+            ->assertSee('business_permit_2026.pdf')
+            ->assertSee('bir_certificate_registration.pdf')
+            ->assertSee('audited_financial_statement_2025.pdf')
+            ->assertDontSee('1 files');
+    }
+
     public function test_submit_batch_persists_a_real_submission_and_documents_for_the_vendor(): void
     {
+        Queue::fake();
         Storage::fake('local');
         $this->seed(DocumentTypeSeeder::class);
 
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
         $vendor = Vendor::factory()->for($user)->create();
 
+        $birContent = "%PDF-1.4\n%fake fixture bir\n%%EOF";
+        $financialContent = "%PDF-1.4\n%fake fixture fs\n%%EOF";
+
         $component = Livewire::actingAs($user)
             ->test('vendor.submit')
             ->set('uploadedFiles', [
-                UploadedFile::fake()->create('bir_certificate.pdf', 128, 'application/pdf'),
-                UploadedFile::fake()->create('financial_statement.pdf', 256, 'application/pdf'),
+                UploadedFile::fake()->createWithContent('bir_certificate.pdf', $birContent),
+                UploadedFile::fake()->createWithContent('financial_statement.pdf', $financialContent),
             ])
             ->call('submitBatch', [[
                 'name' => 'bir_certificate.pdf',
@@ -102,16 +130,84 @@ class VendorSubmissionModuleTest extends TestCase
             'vendor_id' => $vendor->id,
             'original_filename' => 'bir_certificate.pdf',
             'document_type_id' => $birCertificateId,
+            // The recorded size must match the stored copy's real byte length.
+            // storeAs() moves the livewire-tmp file off disk before the size is
+            // read, so the size must come from the persisted file, not the temp
+            // upload (which would throw UnableToRetrieveMetadata in the browser).
+            'file_size_bytes' => strlen($birContent),
         ]);
         $this->assertDatabaseHas('documents', [
             'vendor_id' => $vendor->id,
             'original_filename' => 'financial_statement.pdf',
             'document_type_id' => $financialStatementId,
+            'file_size_bytes' => strlen($financialContent),
         ]);
 
         $vendor->documents()->get()->each(function (Document $document): void {
             Storage::assertExists($document->file_path);
+            $this->assertSame(
+                Storage::disk('local')->size($document->file_path),
+                $document->file_size_bytes,
+            );
         });
+
+        // Stage 0 dispatches the validation pipeline once per document and
+        // notifies the vendor that the submission was received (§7).
+        Queue::assertPushed(ProcessDocumentJob::class, 2);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $user->id,
+            'type' => Notification::TYPE_SUBMISSION_RECEIVED,
+        ]);
+    }
+
+    public function test_submit_batch_rejects_a_manifest_with_no_matching_uploads(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+
+        Livewire::actingAs($user)
+            ->test('vendor.submit')
+            ->call('submitBatch', [[
+                'name' => 'ghost-file.pdf',
+                'type' => 'BIR Permit',
+                'extension' => 'pdf',
+                'sizeBytes' => 1_024,
+            ]])
+            ->assertHasErrors('uploadedFiles');
+
+        $this->assertSame(0, $vendor->submissions()->count());
+        $this->assertSame(0, Document::count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_submit_batch_skips_files_whose_real_mime_type_is_not_allowed(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+
+        Livewire::actingAs($user)
+            ->test('vendor.submit')
+            ->set('uploadedFiles', [
+                UploadedFile::fake()->createWithContent('disguised.pdf', '<?php echo "not a pdf"; ?>'),
+            ])
+            ->call('submitBatch', [[
+                'name' => 'disguised.pdf',
+                'type' => 'BIR Permit',
+                'extension' => 'pdf',
+                'sizeBytes' => 1_024,
+            ]])
+            ->assertHasErrors();
+
+        $this->assertSame(0, $vendor->submissions()->count());
+        Queue::assertNothingPushed();
     }
 
     public function test_my_submissions_uses_the_logged_in_vendors_database_records(): void

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "ClaudeTalkToFigma": {
-      "command": "bunx",
-      "args": ["claude-talk-to-figma-mcp@latest"]
+      "command": "bun",
+      "args": ["claude-talk-to-figma-mcp/dist/talk_to_figma_mcp/server.js"]
     }
   }
 }

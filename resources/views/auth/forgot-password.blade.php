@@ -1,10 +1,10 @@
 <x-layouts.auth>
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-7">
         <x-auth-header :title="__('Forgot password')" :description="__('Enter your email to receive a password reset link')" />
 
         <x-auth-session-status class="text-center" :status="session('status')" />
 
-        <form method="POST" action="{{ route('password.email') }}" class="flex flex-col gap-6">
+        <form method="POST" action="{{ route('password.email') }}" class="flex flex-col gap-5">
             @csrf
 
             <flux:input
@@ -17,12 +17,17 @@
                 :value="old('email')"
             />
 
-            <flux:button variant="primary" type="submit" class="w-full">{{ __('Email password reset link') }}</flux:button>
+            <x-auth.submit class="mt-1">{{ __('Email password reset link') }}</x-auth.submit>
         </form>
 
-        <div class="space-x-1 text-center text-sm text-zinc-600 dark:text-zinc-400">
+        <p class="text-center font-jakarta text-sm text-ink/60">
             {{ __('Or, return to') }}
-            <flux:link :href="route('login')">{{ __('log in') }}</flux:link>
-        </div>
+            <a
+                href="{{ route('login') }}"
+                class="font-semibold text-ink underline-offset-4 transition-colors hover:text-flame hover:underline"
+            >
+                {{ __('log in') }}
+            </a>
+        </p>
     </div>
 </x-layouts.auth>

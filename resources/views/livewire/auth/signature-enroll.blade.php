@@ -125,50 +125,44 @@ new #[Layout('components.layouts.auth')] class extends Component {
 <div class="flex flex-col gap-6">
     <x-auth-header
         :title="__('Enroll your signature')"
-        :description="__('Step 2 of 3 — capture your reference signatures before verifying your email.')"
+        :description="__('Step 3 of 4 — capture your reference signatures before verifying your email.')"
     />
 
-    {{-- Step indicator --}}
-    <ol class="flex items-center gap-2 text-xs font-medium">
-        <li class="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-            <flux:icon icon="check-circle" variant="micro" class="size-4" /> {{ __('Account') }}
-        </li>
-        <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-        <li class="flex items-center gap-1.5 text-cu-purple">
-            <span class="flex size-4 items-center justify-center rounded-full bg-cu-purple text-[10px] text-white">2</span>
-            {{ __('Signature') }}
-        </li>
-        <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-        <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-            <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">3</span>
-            {{ __('Verify email') }}
-        </li>
-    </ol>
+    <x-auth.steps current="signature" />
 
     {{-- Capture guidance --}}
-    <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
-        <p class="mb-2 text-sm font-medium">{{ __('How to capture your signatures') }}</p>
-        <ul class="flex flex-col gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
-            <li class="flex items-start gap-2"><flux:icon icon="check" variant="micro" class="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> {{ __('Sign 3 times, stacked vertically, on white bond paper.') }}</li>
-            <li class="flex items-start gap-2"><flux:icon icon="check" variant="micro" class="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> {{ __('Photograph the whole page, straight-on, in good lighting.') }}</li>
-            <li class="flex items-start gap-2"><flux:icon icon="check" variant="micro" class="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> {{ __('Use the original photo — no filters, cropping, or editing apps.') }}</li>
-            <li class="flex items-start gap-2"><flux:icon icon="check" variant="micro" class="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> {{ __('JPG or PNG, up to 10 MB, at least 600 × 800 px.') }}</li>
+    <div class="rounded-2xl bg-ink-mute/50 p-4 ring-1 ring-black/5">
+        <p class="mb-2.5 font-jakarta text-sm font-semibold text-ink">{{ __('How to capture your signatures') }}</p>
+        <ul class="flex flex-col gap-2 font-jakarta text-xs leading-[1.5] text-ink/70">
+            @foreach ([
+                __('Sign 3 times, stacked vertically, on white bond paper.'),
+                __('Photograph the whole page, straight-on, in good lighting.'),
+                __('Use the original photo — no filters, cropping, or editing apps.'),
+                __('JPG or PNG, up to 10 MB, at least 600 × 800 px.'),
+            ] as $rule)
+                <li class="flex items-start gap-2.5">
+                    <svg class="mt-0.5 size-3.5 shrink-0 text-ink" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m3 8.5 3 3 7-8" />
+                    </svg>
+                    {{ $rule }}
+                </li>
+            @endforeach
         </ul>
     </div>
 
     {{-- Rejection notice --}}
     @if ($rejected)
-        <div class="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-500/30 dark:bg-red-500/10" role="alert">
-            <div class="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-300">
-                <flux:icon icon="x-circle" variant="micro" class="size-4" />
+        <div class="rounded-2xl bg-red-50 p-4 ring-1 ring-red-200" role="alert">
+            <div class="flex items-center gap-2 font-jakarta text-sm font-semibold text-red-700">
+                <flux:icon icon="x-circle" variant="micro" class="size-4 shrink-0" />
                 {{ __('We could not verify this image as an original capture.') }}
             </div>
-            <ul class="mt-2 flex flex-col gap-1 text-xs text-red-600 dark:text-red-300/90">
+            <ul class="mt-2 flex flex-col gap-1 font-jakarta text-xs leading-[1.5] text-red-600">
                 @foreach ($reasons as $reason)
-                    <li class="flex items-start gap-2"><span class="mt-1 size-1 shrink-0 rounded-full bg-current"></span> {{ $reason }}</li>
+                    <li class="flex items-start gap-2"><span class="mt-1.5 size-1 shrink-0 rounded-full bg-current"></span> {{ $reason }}</li>
                 @endforeach
             </ul>
-            <p class="mt-2 text-xs text-red-600 dark:text-red-300/90">{{ __('Please retake the photo of your original signatures and upload again.') }}</p>
+            <p class="mt-2 font-jakarta text-xs text-red-600">{{ __('Retake the photo of your original signatures and upload again.') }}</p>
         </div>
     @endif
 
@@ -182,15 +176,17 @@ new #[Layout('components.layouts.auth')] class extends Component {
         <div>
             <label
                 for="signature-photo"
-                class="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-4 py-8 text-center transition hover:border-cu-purple dark:border-zinc-600 dark:hover:border-cu-purple"
+                class="group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ink/20 px-4 py-9 text-center transition hover:border-flame hover:bg-flame/5 focus-within:border-flame focus-within:ring-2 focus-within:ring-flame/30"
             >
                 @if ($photo && $photo->isPreviewable())
-                    <img src="{{ $photo->temporaryUrl() }}" alt="{{ __('Signature preview') }}" class="max-h-48 w-auto rounded-lg object-contain" />
-                    <span class="text-xs text-zinc-500">{{ __('Tap to choose a different photo') }}</span>
+                    <img src="{{ $photo->temporaryUrl() }}" alt="{{ __('Signature preview') }}" class="max-h-48 w-auto rounded-xl object-contain" />
+                    <span class="font-jakarta text-xs text-ink/50">{{ __('Choose a different photo') }}</span>
                 @else
-                    <flux:icon icon="arrow-up-tray" class="size-7 text-zinc-400" />
-                    <span class="text-sm font-medium">{{ __('Upload signature photo') }}</span>
-                    <span class="text-xs text-zinc-500">{{ __('JPG or PNG · max 10 MB') }}</span>
+                    <span class="flex size-11 items-center justify-center rounded-full bg-ink text-white transition-colors group-hover:bg-flame" aria-hidden="true">
+                        <flux:icon icon="arrow-up-tray" variant="micro" class="size-5" />
+                    </span>
+                    <span class="font-jakarta text-sm font-semibold text-ink">{{ __('Upload signature photo') }}</span>
+                    <span class="font-jakarta text-xs text-ink/50">{{ __('JPG or PNG · max 10 MB') }}</span>
                 @endif
                 {{-- Clearing the value on click lets the user re-pick the same
                      file after a rejection (the change event would not fire
@@ -205,25 +201,40 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 />
             </label>
 
-            <div wire:loading wire:target="photo" class="mt-2 flex items-center gap-2 text-xs text-zinc-500">
-                <flux:icon icon="arrow-path" variant="micro" class="size-3.5 animate-spin" /> {{ __('Uploading…') }}
+            <div wire:loading wire:target="photo" class="mt-2.5 flex items-center gap-2 font-jakarta text-xs text-ink/50">
+                <flux:icon icon="arrow-path" variant="micro" class="size-3.5 shrink-0 animate-spin" />
+                {{ __('Uploading…') }}
             </div>
 
             @error('photo')
-                <p class="mt-2 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                <p class="mt-2.5 font-jakarta text-xs text-red-600">{{ $message }}</p>
             @enderror
         </div>
 
-        <flux:button type="submit" variant="primary" class="w-full" wire:loading.attr="disabled" wire:target="enroll,photo">
+        <x-auth.submit wire:loading.attr="disabled" wire:target="enroll,photo">
+            {{-- The label stays put and the spinner joins it, rather than the label
+                 being swapped out for a bare spinner with nothing to read. --}}
+            <flux:icon
+                icon="arrow-path"
+                variant="micro"
+                class="size-4 shrink-0 animate-spin"
+                wire:loading
+                wire:target="enroll"
+            />
             <span wire:loading.remove wire:target="enroll">{{ __('Verify & continue') }}</span>
             <span wire:loading wire:target="enroll">{{ __('Verifying…') }}</span>
-        </flux:button>
+        </x-auth.submit>
     </form>
 
     <div class="text-center">
         <form method="POST" action="{{ route('logout') }}">
             @csrf
-            <flux:link as="button" type="submit" class="cursor-pointer text-sm">{{ __('Log out') }}</flux:link>
+            <button
+                type="submit"
+                class="cursor-pointer font-jakarta text-sm font-semibold text-ink/60 underline-offset-4 transition-colors hover:text-flame hover:underline"
+            >
+                {{ __('Log out') }}
+            </button>
         </form>
     </div>
 </div>
