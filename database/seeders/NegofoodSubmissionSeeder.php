@@ -242,7 +242,7 @@ class NegofoodSubmissionSeeder extends Seeder
         Carbon $timestamp,
     ): Document {
         $contents = File::get(database_path("seeders/assets/negofood/{$asset}"));
-        $path = "vendor{$vendor->id}/{$storedName}";
+        $path = "vendor_submissions/vendor{$vendor->id}/{$storedName}";
 
         Storage::disk('local')->put($path, $contents);
 

@@ -18,6 +18,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => EnsureUserHasRole::class,
         ]);
 
+        // Behind Render's TLS-terminating proxy, trust the forwarded headers so
+        // Laravel builds https:// URLs and validates signed links (e.g. email
+        // verification) against the correct scheme/host.
+        $middleware->trustProxies(at: '*');
+
         // The theme preference is written client-side as a plaintext cookie so
         // the layouts can read it to guard the initial <html> theme class.
         // Exclude it from cookie encryption, otherwise EncryptCookies fails to

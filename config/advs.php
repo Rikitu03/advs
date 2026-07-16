@@ -4,6 +4,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Document storage disk
+    |--------------------------------------------------------------------------
+    |
+    | Filesystem disk used for vendor-uploaded documents and enrolled reference
+    | signatures. Defaults to `local` (dev/testing) and is switched to `s3`
+    | (Supabase S3) in production so the web tier stays stateless and can scale
+    | horizontally. The Python/forensics layer still reads originals from the
+    | local disk until the pipeline is wired to fetch from S3.
+    */
+
+    'documents_disk' => env('DOCUMENTS_DISK', 'local'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Risk score composition (ADVS_System_Reference.md §5 Stage 5 / §6 / §9)
     |--------------------------------------------------------------------------
     |

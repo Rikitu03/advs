@@ -77,7 +77,7 @@ class PruneAbandonedRegistrations extends Command
                 // Defensive: an unenrolled row should have no stored signature,
                 // but remove one if present so nothing is left orphaned on disk.
                 if ($user->signature_path) {
-                    Storage::disk('local')->delete($user->signature_path);
+                    Storage::disk(config('advs.documents_disk'))->delete($user->signature_path);
                 }
 
                 $user->delete();

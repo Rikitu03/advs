@@ -82,14 +82,16 @@ new class extends Component {
                 @endforeach
             </div>
             <button type="button" wire:click="markAllRead" @disabled($unreadCount === 0)
+                    wire:target="markAllRead" wire:loading.attr="disabled"
                     class="inline-flex items-center gap-1.5 rounded-lg border border-cu-border bg-cu-surface px-3 py-1.5 text-sm font-medium text-cu-muted transition hover:border-cu-purple hover:bg-cu-purple/10 hover:text-cu-purple disabled:cursor-not-allowed disabled:opacity-40">
-                <flux:icon icon="check" class="size-4" />
+                <flux:icon icon="check" class="size-4" wire:loading.remove wire:target="markAllRead" />
+                <flux:icon icon="arrow-path" class="size-4 animate-spin" wire:loading wire:target="markAllRead" />
                 Mark all as read
             </button>
         </div>
 
         <div class="cu-animate-in overflow-hidden rounded-2xl border border-cu-border bg-cu-surface shadow-sm" style="animation-delay: 120ms">
-            <div class="divide-y divide-cu-border">
+            <div class="divide-y divide-cu-border transition-opacity duration-200" wire:loading.class="opacity-40" wire:target="setFilter, markAllRead, markRead">
                 @forelse ($rows as $notification)
                     <div wire:key="vendor-notification-{{ $notification['id'] }}" class="flex gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 {{ $notification['read'] ? '' : 'bg-cu-purple/5' }}">
                         <x-activity-icon :icon="$notification['icon']" :color="$notification['color']" />

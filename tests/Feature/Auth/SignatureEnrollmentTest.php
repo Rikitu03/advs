@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -90,6 +91,9 @@ class SignatureEnrollmentTest extends TestCase
         Notification::fake();
 
         $user = User::factory()->unenrolled()->unverified()->create();
+        // The vendor profile is completed before signature enrollment in the real
+        // flow; the reference is keyed by vendor id (vendor_signatures/vendor{id}).
+        $vendor = Vendor::factory()->for($user)->create();
 
         Volt::actingAs($user)
             ->test('auth.signature-enroll')
@@ -105,7 +109,7 @@ class SignatureEnrollmentTest extends TestCase
         $this->assertNotNull($user->signature_enrolled_at);
         $this->assertNotNull($user->signature_path);
         Storage::disk('local')->assertExists($user->signature_path);
-        $this->assertStringStartsWith("signatures/{$user->id}/", $user->signature_path);
+        $this->assertStringStartsWith("vendor_signatures/vendor{$vendor->id}/", $user->signature_path);
 
         // Email verification is the final step: enrolling the signature is what
         // triggers the verification link (it is not sent at registration).

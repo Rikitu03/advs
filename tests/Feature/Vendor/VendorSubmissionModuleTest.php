@@ -227,14 +227,14 @@ class VendorSubmissionModuleTest extends TestCase
         $businessPermit = Document::factory()->for($submission)->for($vendor)->create([
             'document_type_id' => $businessPermitId,
             'original_filename' => 'pasig-business-permit.pdf',
-            'file_path' => "vendor{$vendor->id}/business_permit00001.pdf",
+            'file_path' => "vendor_submissions/vendor{$vendor->id}/business_permit00001.pdf",
             'mime_type' => 'application/pdf',
         ]);
 
         $financialStatement = Document::factory()->for($submission)->for($vendor)->create([
             'document_type_id' => $financialStatementId,
             'original_filename' => 'audited-financial-statement.pdf',
-            'file_path' => "vendor{$vendor->id}/financial_statement00001.pdf",
+            'file_path' => "vendor_submissions/vendor{$vendor->id}/financial_statement00001.pdf",
             'mime_type' => 'application/pdf',
         ]);
 
@@ -275,7 +275,7 @@ class VendorSubmissionModuleTest extends TestCase
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
         $vendor = Vendor::factory()->for($user)->create();
         $businessPermitId = DB::table('document_types')->where('code', 'business_permit')->value('id');
-        $path = "vendor{$vendor->id}/business_permit00001.pdf";
+        $path = "vendor_submissions/vendor{$vendor->id}/business_permit00001.pdf";
 
         Storage::put($path, 'document contents');
 
@@ -304,7 +304,7 @@ class VendorSubmissionModuleTest extends TestCase
         Vendor::factory()->for($user)->create();
         $otherVendor = Vendor::factory()->create();
         $businessPermitId = DB::table('document_types')->where('code', 'business_permit')->value('id');
-        $path = "vendor{$otherVendor->id}/business_permit00001.pdf";
+        $path = "vendor_submissions/vendor{$otherVendor->id}/business_permit00001.pdf";
 
         Storage::put($path, 'document contents');
 

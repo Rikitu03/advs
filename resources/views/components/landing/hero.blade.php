@@ -52,11 +52,11 @@
         </div>
 
         <div class="relative mx-auto max-w-[560px] text-center xl:pt-[127px]">
-            <p class="font-jakarta text-base font-light text-ink md:text-lg">
+            <p class="font-jakarta text-base font-light text-ink select-none md:text-lg">
                 Built for teams who can&rsquo;t afford a mistake
             </p>
 
-            <h1 class="mt-3 font-jakarta text-[2.5rem] leading-[1.06] font-extrabold tracking-tight text-black sm:text-5xl xl:text-[3.75rem] xl:leading-[1.26]">
+            <h1 class="mt-3 cursor-default font-jakarta text-[2.5rem] leading-[1.06] font-extrabold tracking-tight text-black select-none sm:text-5xl xl:text-[3.75rem] xl:leading-[1.26]">
                 Fake documents don&rsquo;t <em class="italic">slip</em> through anymore.
             </h1>
 

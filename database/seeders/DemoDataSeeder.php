@@ -40,7 +40,6 @@ class DemoDataSeeder extends Seeder
 
         foreach ($profiles as [$company, $vendorStatus, $submissionStatus, $risk, $level, $flags]) {
             $user = User::factory()->role(User::ROLE_VENDOR)->create([
-                'signature_path' => 'signatures/demo-reference.jpg',
                 'signature_enrolled_at' => now()->subMonths(2),
                 'vendor_profile_completed_at' => now()->subMonths(2),
             ]);
@@ -50,6 +49,10 @@ class DemoDataSeeder extends Seeder
                 'status' => $vendorStatus,
                 'risk_score' => in_array($submissionStatus, [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED], true) ? $risk : 0,
             ]);
+
+            // Placeholder reference keyed by vendor id (vendor_signatures/vendor{id});
+            // no real image exists for demo data.
+            $user->forceFill(['signature_path' => "vendor_signatures/vendor{$vendor->id}/demo-reference.jpg"])->save();
 
             $decided = in_array($submissionStatus, [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED], true);
 

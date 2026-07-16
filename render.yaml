@@ -1,0 +1,142 @@
+# Render Blueprint — ADVS microservices deploy.
+#
+#   advs-web    : Laravel app (frontend + backend + built assets), Docker.
+#   advs-worker : queue worker (same image, different command).
+#   advs-redis  : Render Key Value (Redis) — queue backend, internal-only.
+#
+# External services live outside this blueprint:
+#   * MySQL       -> TiDB Cloud   (fill DB_* below)
+#   * File storage -> Supabase S3 (fill AWS_* below)
+#   * ML pipeline  -> FastAPI, separate platform (not wired yet)
+#
+# Every credential is `sync: false` — Render prompts for these in the dashboard
+# on first apply. NOTHING in this file contains a real secret. Fill each blank
+# value yourself in Render (Environment tab / Blueprint sync prompts).
+
+envVarGroups:
+  - name: advs-shared
+    envVars:
+      # --- App ---
+      - key: APP_NAME
+        value: ADVS
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: APP_KEY            # `php artisan key:generate --show`
+        sync: false
+      - key: APP_URL            # https://<your-web-service>.onrender.com
+        sync: false
+
+      # --- Database: TiDB Cloud (TLS) ---
+      - key: DB_CONNECTION
+        value: mysql
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_DATABASE
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: MYSQL_ATTR_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+
+      # --- Session / cache / queue ---
+      - key: SESSION_DRIVER
+        value: database
+      - key: SESSION_SECURE_COOKIE
+        value: "true"
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: redis
+      - key: REDIS_CLIENT
+        value: phpredis
+
+      # --- File storage: Supabase S3 ---
+      - key: FILESYSTEM_DISK    # default disk; documents use DOCUMENTS_DISK
+        value: local
+      - key: DOCUMENTS_DISK
+        value: s3
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_DEFAULT_REGION
+        sync: false
+      - key: AWS_BUCKET
+        sync: false
+      - key: AWS_ENDPOINT       # https://<project-ref>.supabase.co/storage/v1/s3
+        sync: false
+      - key: AWS_USE_PATH_STYLE_ENDPOINT
+        value: "true"
+
+      # --- Mail: generic SMTP ---
+      - key: MAIL_MAILER
+        value: smtp
+      - key: MAIL_HOST
+        sync: false
+      - key: MAIL_PORT
+        value: "587"
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: MAIL_SCHEME
+        value: tls
+      - key: MAIL_FROM_ADDRESS
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: ADVS
+
+services:
+  # Redis-compatible queue backend. `ipAllowList: []` keeps it private (only the
+  # web + worker reach it over Render's internal network). noeviction so queued
+  # jobs are never dropped under memory pressure — pick a plan that allows it.
+  - type: keyvalue
+    name: advs-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+  # Web service (Docker). serversideup serves on 8080; Render auto-detects it.
+  # NOTE: preDeployCommand requires a paid instance type. On the free tier,
+  # remove it and run `php artisan migrate --force` once from the Render Shell
+  # (or enable a boot-time `migrate --force --isolated` in the entrypoint).
+  - type: web
+    name: advs-web
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /up
+    preDeployCommand: php artisan migrate --force
+    envVars:
+      - fromGroup: advs-shared
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: advs-redis
+          property: connectionString
+
+  # Queue worker (same image). Scoped to non-pipeline queues; add
+  # `document-processing` here once the FastAPI pipeline is wired.
+  - type: worker
+    name: advs-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: php artisan queue:work redis --queue=default,mail --tries=3 --backoff=30 --sleep=3 --max-time=3600
+    envVars:
+      - fromGroup: advs-shared
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: advs-redis
+          property: connectionString

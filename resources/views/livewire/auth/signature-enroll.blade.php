@@ -85,13 +85,18 @@ new #[Layout('components.layouts.auth')] class extends Component {
 
         $user = Auth::user();
 
+        // The vendor profile is always completed before this step (the onboarding
+        // gate forwards business.create → signature.create), so keying the
+        // reference by vendor id mirrors vendor_submissions/vendor{id}.
+        $vendor = $user->vendor;
+
         try {
             // extension() derives the extension from the detected MIME type;
             // never trust the client-supplied filename for the stored path.
             $path = $this->photo->storeAs(
-                "signatures/{$user->id}",
+                "vendor_signatures/vendor{$vendor->id}",
                 'reference-'.now()->timestamp.'.'.$this->photo->extension(),
-                'local',
+                config('advs.documents_disk'),
             );
 
             $user->forceFill([

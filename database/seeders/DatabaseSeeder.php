@@ -36,17 +36,7 @@ class DatabaseSeeder extends Seeder
                 ],
             );
 
-            // Seeded vendors skip the onboarding gates so the demo account lands
-            // on the dashboard: a complete declared profile + an enrolled
-            // signature. (signature_path is a placeholder; no real reference
-            // image exists for seeded data.)
             if ($role === User::ROLE_VENDOR) {
-                $user->forceFill([
-                    'signature_path' => "signatures/{$user->id}/seeded-reference.jpg",
-                    'signature_enrolled_at' => now(),
-                    'vendor_profile_completed_at' => now(),
-                ])->save();
-
                 $vendor = Vendor::firstOrCreate(
                     ['user_id' => $user->id],
                     [
@@ -64,6 +54,16 @@ class DatabaseSeeder extends Seeder
                         'status' => Vendor::STATUS_PENDING,
                     ],
                 );
+
+                // Seeded vendors skip the onboarding gates so the demo account lands
+                // on the dashboard: a complete declared profile + an enrolled
+                // signature. (signature_path is a placeholder keyed by vendor id;
+                // no real reference image exists for seeded data.)
+                $user->forceFill([
+                    'signature_path' => "vendor_signatures/vendor{$vendor->id}/seeded-reference.jpg",
+                    'signature_enrolled_at' => now(),
+                    'vendor_profile_completed_at' => now(),
+                ])->save();
 
                 VendorRepresentative::firstOrCreate(
                     ['vendor_id' => $vendor->id],

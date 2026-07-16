@@ -46,9 +46,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
             $path = ltrim($document->file_path, '/');
 
-            abort_unless(Storage::exists($path), 404);
+            $disk = Storage::disk(config('advs.documents_disk'));
 
-            return Storage::response($path, $document->original_filename, [
+            abort_unless($disk->exists($path), 404);
+
+            return $disk->response($path, $document->original_filename, [
                 'Content-Type' => $document->mime_type,
             ]);
         })->name('vendor.documents.show');
@@ -73,9 +75,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('admin/documents/{document}', function (Document $document) {
             $path = ltrim($document->file_path, '/');
 
-            abort_unless(Storage::exists($path), 404);
+            $disk = Storage::disk(config('advs.documents_disk'));
 
-            return Storage::response($path, $document->original_filename, [
+            abort_unless($disk->exists($path), 404);
+
+            return $disk->response($path, $document->original_filename, [
                 'Content-Type' => $document->mime_type,
             ]);
         })->name('admin.documents.show');

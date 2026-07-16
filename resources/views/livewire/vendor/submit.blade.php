@@ -6,7 +6,6 @@ use App\Models\Submission;
 use App\Services\NotificationService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
@@ -62,22 +61,28 @@ new class extends Component
 
             $uploadedFile = $available->pull($matchIndex);
 
-            $storedPath = $uploadedFile->storeAs(
-                "vendor{$vendor->id}",
-                $this->storedFileName($name, $type, $index, $uploadedFile->extension()),
-                'local',
-            );
-
-            // Sniff the stored bytes — Livewire's TemporaryUploadedFile reports
-            // its MIME from the extension, so a disguised file (e.g. PHP named
-            // .pdf) would sail through a getMimeType() check (CLAUDE.md §5).
-            $mimeType = (string) (mime_content_type(Storage::disk('local')->path($storedPath)) ?: '');
+            // Sniff the real bytes BEFORE storing — Livewire's TemporaryUploadedFile
+            // reports its MIME from the extension, so a disguised file (e.g. PHP named
+            // .pdf) would sail through a getMimeType() check (CLAUDE.md §5). Reading
+            // from the temp file's real path keeps this disk-agnostic: the destination
+            // disk may be S3, which exposes no local ->path().
+            $realPath = $uploadedFile->getRealPath();
+            $mimeType = (string) ($realPath !== false ? (mime_content_type($realPath) ?: '') : '');
 
             if (! in_array($mimeType, self::ACCEPTED_MIME_TYPES, true)) {
-                Storage::disk('local')->delete($storedPath);
-
                 continue;
             }
+
+            // Capture the size before storeAs(): when the temp disk and destination
+            // are both local, storeAs() moves (deletes) the livewire-tmp file, after
+            // which getSize() would throw UnableToRetrieveMetadata.
+            $fileSizeBytes = (int) $uploadedFile->getSize();
+
+            $storedPath = $uploadedFile->storeAs(
+                "vendor_submissions/vendor{$vendor->id}",
+                $this->storedFileName($name, $type, $index, $uploadedFile->extension()),
+                config('advs.documents_disk'),
+            );
 
             $documents[] = [
                 'vendor_id' => $vendor->id,
@@ -85,11 +90,7 @@ new class extends Component
                 'original_filename' => $name,
                 'file_path' => $storedPath,
                 'mime_type' => $mimeType,
-                // Read the size from the stored copy, not $uploadedFile->getSize():
-                // storeAs() above moves (deletes) the livewire-tmp file when the temp
-                // disk and destination are both 'local', so the temp path is already
-                // gone here and getSize() would throw UnableToRetrieveMetadata.
-                'file_size_bytes' => (int) Storage::disk('local')->size($storedPath),
+                'file_size_bytes' => $fileSizeBytes,
                 'processing_status' => Document::STATUS_QUEUED,
             ];
         }

@@ -78,7 +78,7 @@ class PruneAbandonedRegistrationsTest extends TestCase
     {
         Storage::fake('local');
 
-        $path = 'signatures/999/reference.png';
+        $path = 'vendor_signatures/vendor999/reference.png';
         Storage::disk('local')->put($path, 'fake');
 
         // Unverified, unenrolled vendor that nonetheless has a stray signature

@@ -64,7 +64,7 @@ class VendorPortalTest extends TestCase
         Document::factory()->for($submission)->for($vendor)->create([
             'document_type_id' => $businessPermitId,
             'original_filename' => 'business_permit_2026.pdf',
-            'file_path' => "vendor{$vendor->id}/business_permit00001.pdf",
+            'file_path' => "vendor_submissions/vendor{$vendor->id}/business_permit00001.pdf",
             'mime_type' => 'application/pdf',
         ]);
 

@@ -1,0 +1,34 @@
+# VCS / CI
+.git
+.gitignore
+.github
+
+# Dependencies + build output (installed/built inside the image stages)
+node_modules
+vendor
+public/build
+public/hot
+
+# Local env + secrets (Render injects env at runtime)
+.env
+.env.*
+
+# Python ML pipeline — deployed separately (FastAPI), not part of this image
+python
+
+# Tests, docs, editor/tooling
+tests
+docs
+*.md
+.vscode
+.idea
+.fleet
+
+# Local SQLite + storage runtime artifacts
+database/database.sqlite
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/app/public/*
+storage/app/private/*
