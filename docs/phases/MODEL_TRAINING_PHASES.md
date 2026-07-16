@@ -57,7 +57,7 @@ The interview changes **what the classifier must recognize**, not the model zoo:
 | # | Model | Trains for | Consumed by (pipeline stage) | Weights file |
 |---|---|---|---|---|
 | 1 | **ResNet-50** | Document type / authenticity classification (multi-class incl. `fake`) | Stage 3 — `classify_document.py` | `resnet50_authenticity.h5` + `label_encoder.pkl` / `class_names.json` |
-| 2 | **YOLOv8** | Detect `signature` + `stamp` regions | Stage 4 — `signature_verify.py` / `stamp_verify.py` | `yolov8_document.pt` (and/or ONNX export) |
+| 2 | **YOLOv8** | Detect `signature` + `stamp_seal` + `logo` regions | Stage 4 — `signature_verify.py` / `stamp_verify.py` | `yolov8_document.pt` (and/or ONNX export) |
 | 3 | **Siamese CNN** (ResNet-50 backbone) | Signature verification (128-D embedding) | Stage 4a — `signature_verify.py` | `siamese_signature.h5` + `siamese_encoder.h5` + `signature_threshold.txt` |
 | 4 | **EfficientNet-B0** | Stamp/logo feature extraction + tamper texture | Stage 4b — `stamp_verify.py` | `efficientnet_stamp.h5` + `stamp_classifier.pkl` / `stamp_threshold.txt` |
 | 5 | **Tamper fusion** *(planned)* | Fuse the 5 Stage-T forensic signals into one authenticity score | Stage T — `tamper_analyze.py` | *(deterministic blend today; ML model is a future phase)* |
@@ -94,7 +94,7 @@ the DB `document_types` codes, and `issuer_scope` all agree.
   pointed a generator at a non-existent `business_registration`; the canonical code is `business_permit`).
 - Confirm each class's `issuer_scope` and `requires_expiry` match Phase P1's `DocumentTypeSeeder`.
 - Confirm the detection/signature/stamp layouts from [training_script.md](../../training_script.md):
-  `data/detection/{images,labels}` (YOLO txt, class 0=signature, 1=stamp), `data/signatures/raw/<vendor>`,
+  `data/detection/{images,labels}` (YOLO txt, class 0=signature, 1=stamp_seal, 2=logo), `data/signatures/raw/<vendor>`,
   `data/stamps/{genuine,forged}`.
 
 **Definition of Done:** a written class↔folder↔`issuer_scope` table that matches the DB seeder; no
@@ -146,19 +146,20 @@ without crashing. Validation accuracy recorded for the ML Model Management UI (s
 
 ---
 
-## Phase M3 — YOLOv8 signature/stamp detector
+## Phase M3 — YOLOv8 signature/stamp/logo detector
 
-**Goal:** Detect `signature` and `stamp` regions anywhere on a document (no ROI/homography needed).
+**Goal:** Detect `signature`, `stamp_seal`, and `logo` regions anywhere on a document (no ROI/homography needed).
 
 **Tasks:**
 - Dynamically write `data/detection/data.yaml`; train `yolov8n.pt`, 50 epochs, `imgsz=640`, `batch=16`,
   `patience=10`, GPU device 0 if available, `cache=True`.
 - Evaluate mAP@0.5 on the val split; export best to `yolov8_document.pt` (and ONNX
-  `yolov8_stamp_signature.onnx`, honoring the `onnx < 1.17` pin).
+  `yolov8_signature_stamp_logo.onnx`, honoring the `onnx < 1.17` pin).
 
 **Definition of Done:** mAP@0.5 printed and recorded; crops route correctly (signature → Stage 4a,
-stamp/logo → Stage 4b); the no-detection path returns a graceful JSON flag
-(`{"reason": "no_signature_detected"}` / `no_stamp_detected`) consumed by the pipeline track.
+stamp_seal/logo → Stage 4b); the no-detection path returns a graceful JSON flag
+(`{"reason": "no_signature_detected"}` / `no_stamp_detected` / `no_logo_detected`) consumed by the
+pipeline track.
 
 ---
 

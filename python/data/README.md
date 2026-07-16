@@ -21,7 +21,7 @@ data/
 │   │   └── fake/
 │   ├── detector_data/          # YOLOv8
 │   │   ├── images/                 *.jpg / *.png  (full document pages)
-│   │   └── labels/                 *.txt  (YOLO format: "<cls> cx cy w h", cls 0=signature 1=stamp)
+│   │   └── labels/                 *.txt  (YOLO format: "<cls> cx cy w h", cls 0=signature 1=stamp_seal 2=logo)
 │   ├── signature_data/         # Siamese — one subfolder PER VENDOR of genuine signatures:
 │   │   ├── vendor_001/             *.png
 │   │   └── vendor_002/

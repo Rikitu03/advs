@@ -6,7 +6,7 @@ You are an expert machine learning engineer. I need you to produce a **single, w
 - **Goal**: Automate vendor document accreditation by verifying document type, authenticity, signature, and stamp.
 - **Models to train**:
   1. ResNet‑50 for document type/authenticity classification (multi‑class).
-  2. YOLOv8 for signature and stamp detection on full document images.
+  2. YOLOv8 for signature, stamp/seal, and logo detection on full document images.
   3. Siamese CNN (using ResNet‑50 backbone) for signature verification.
   4. EfficientNet‑B0 feature extractor for stamp verification (with threshold optimisation).
 
@@ -19,7 +19,7 @@ project_root/
 │   │   └── val/     # same structure
 │   ├── detection/
 │   │   ├── images/        # .jpg/.png full document pages
-│   │   └── labels/        # YOLO format .txt files (class 0=signature, 1=stamp)
+│   │   └── labels/        # YOLO format .txt files (class 0=signature, 1=stamp_seal, 2=logo)
 │   ├── signatures/
 │   │   └── raw/           # subfolders per vendor ID, each containing genuine signature images
 │   └── stamps/
@@ -51,7 +51,7 @@ project_root/
 - Create a `data/detection/data.yaml` dynamically in the script (or from provided paths).
 - Train `yolov8n.pt` (nano) for 50 epochs, imgsz=640, batch=16, patience=10, device 0 if GPU, cache=True.
 - After training, evaluate on the validation set (the split will be handled by the dataset.yaml). Print mAP@0.5.
-- Export best model to ONNX: `models/yolov8_stamp_signature.onnx`.
+- Export best model to ONNX: `models/yolov8_signature_stamp_logo.onnx`.
 
 #### 3. Siamese CNN for Signature Verification
 - **Data preparation for Siamese**:

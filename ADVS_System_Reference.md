@@ -203,25 +203,25 @@ This section walks through exactly what happens from the moment a file enters th
 
 ---
 
-### Stage 4: Signature and Stamp Detection (YOLOv8)
+### Stage 4: Signature, Stamp/Seal, and Logo Detection (YOLOv8)
 
 **Input**: The original document image (or the preprocessed version, depending on configuration).
 
 **What happens**:
-1. The image is passed through a **YOLOv8 object detection model** trained to detect two object classes: `signature` and `stamp`.
+1. The image is passed through a **YOLOv8 object detection model** trained to detect three object classes: `signature`, `stamp_seal`, and `logo`.
 2. YOLOv8 processes the image in a single forward pass through its Backbone (C2f modules + SPPF), Neck (PAN-FPN multi-scale fusion), and decoupled detection Head.
 3. The model outputs **bounding box coordinates** with associated **confidence scores** for each detected region.
 4. Detected regions are **cropped** from the original image using the bounding box coordinates.
 5. **Signature crops** are forwarded to Stage 4a (Siamese CNN).
-6. **Stamp / logo / seal crops** are forwarded to Stage 4b (EfficientNet), together with the issuing city OCR extracted in Stage 2.
+6. **Stamp/seal and logo crops** are forwarded to Stage 4b (EfficientNet), together with the issuing city OCR extracted in Stage 2.
 
-**Document misalignment handling**: YOLOv8's multi-scale feature extraction inherently handles variations in position, scale, and rotation. There is no need for predefined ROI zones or homography-based alignment — the model locates signatures and stamps wherever they appear in the document.
+**Document misalignment handling**: YOLOv8's multi-scale feature extraction inherently handles variations in position, scale, and rotation. There is no need for predefined ROI zones or homography-based alignment — the model locates signatures, stamps/seals, and logos wherever they appear in the document.
 
 **Failure path — no signature detected**: If YOLOv8 finds no signature region (confidence below its detection threshold), the system records a flag: "No signature detected." The signature verification stage is skipped for this document, and the absence is recorded as a risk factor in the composite score.
 
-**Failure path — no stamp/logo detected**: Same logic. "No stamp/logo detected" is recorded as a flag. The stamp/logo authentication stage is skipped.
+**Failure path — no stamp/seal or logo detected**: Same logic, evaluated independently per class. "No stamp/logo detected" is recorded as a flag for whichever class (or both) is missing. The stamp/logo authentication stage is skipped for the missing class.
 
-**Failure path — multiple detections**: If YOLOv8 detects multiple signature or stamp regions, the system uses the detection with the highest confidence score as the primary region. Additional detections may be logged for officer review.
+**Failure path — multiple detections**: If YOLOv8 detects multiple regions of the same class, the system uses the detection with the highest confidence score as the primary region for that class. Additional detections may be logged for officer review.
 
 ---
 
@@ -252,7 +252,7 @@ This section walks through exactly what happens from the moment a file enters th
 
 ### Stage 4b: Stamp / Logo / Seal Authentication (EfficientNet)
 
-**Input**: Cropped stamp / logo / seal region from YOLOv8, **plus the city name extracted by OCR in Stage 2**.
+**Input**: Cropped `stamp_seal` and/or `logo` region(s) from YOLOv8, **plus the city name extracted by OCR in Stage 2**.
 
 > **Logo references are keyed by the document's issuer, not by the vendor.** Official stamps, logos, and seals belong to whoever **issues** the document. `document_types.issuer_scope` records which kind, and that drives how the reference is keyed:
 > - **`national`** (e.g. BIR Permit, SEC GIS) — one logo agency-wide; the reference is keyed by **document type alone** (the BIR logo is identical on every BIR document, in any city).

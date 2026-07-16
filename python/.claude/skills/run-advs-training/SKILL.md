@@ -4,7 +4,7 @@ description: Build, scaffold, train, smoke-test, and dry-run the ADVS model-trai
 ---
 
 ADVS trains four models (`training_script.md`): a ResNet-50 document classifier,
-a YOLOv8 signature/stamp detector, a Siamese signature verifier, and an
+a YOLOv8 signature/stamp/logo detector, a Siamese signature verifier, and an
 EfficientNet stamp verifier. Each model is **one self-contained script** in
 `python/scripts/` plus a matching self-contained notebook in `python/notebooks/`.
 Drive them with **`python/.claude/skills/run-advs-training/driver.py`**, which
@@ -88,7 +88,7 @@ python/env/Scripts/python.exe python/scripts/train_classifier.py --dry-run   # e
 | model | script | key outputs (→ `python/models/`) |
 |---|---|---|
 | ResNet-50 classifier | `scripts/train_classifier.py` | `resnet50_classifier.h5`, `class_names.json` |
-| YOLOv8 detector | `scripts/train_detector.py` | `yolov8_stamp_signature.onnx` |
+| YOLOv8 detector | `scripts/train_detector.py` | `yolov8_signature_stamp_logo.onnx` |
 | Siamese signature | `scripts/train_signature.py` | `siamese_signature.h5`, `siamese_encoder.h5`, `signature_threshold.txt` |
 | EfficientNet stamp | `scripts/train_stamp.py` | `efficientnet_feature_extractor.h5`, `stamp_classifier.pkl` |
 

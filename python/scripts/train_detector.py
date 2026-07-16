@@ -1,6 +1,6 @@
-"""ADVS - YOLOv8 signature + stamp + logo detector (model 2 of 4).
+"""ADVS - YOLOv8 signature + stamp/seal + logo detector (model 2 of 4).
 
-Detects three classes (0=signature, 1=stamp, 2=logo) on full document pages. Faithful to
+Detects three classes (0=signature, 1=stamp_seal, 2=logo) on full document pages. Faithful to
 training_script.md §2.
 
 Data layout (read-only):
@@ -42,7 +42,7 @@ SMOKE_OVERRIDES = {
     "batch": 2,
     "patience": 2,
 }
-NAMES = {0: "signature", 1: "stamp", 2: "logo"}
+NAMES = {0: "signature", 1: "stamp_seal", 2: "logo"}
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
@@ -100,7 +100,7 @@ def pick_device():
 
 
 def train(cfg: dict, data_root: Path, models_out: Path) -> None:
-    section("YOLOv8 signature + stamp + logo detection")
+    section("YOLOv8 signature + stamp/seal + logo detection")
     from ultralytics import YOLO
 
     yaml_path = models_out / "detector_data.yaml"
