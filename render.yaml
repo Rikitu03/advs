@@ -115,7 +115,6 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /up
-    preDeployCommand: php artisan migrate --force
     envVars:
       - fromGroup: advs-shared
       - key: REDIS_URL
