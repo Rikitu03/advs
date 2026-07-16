@@ -83,6 +83,7 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             DocumentTypeSeeder::class,
+            NegofoodSubmissionSeeder::class,
             SystemSettingSeeder::class,
             RetentionPolicySeeder::class,
             MlModelSeeder::class,

@@ -121,27 +121,7 @@ new #[Layout('components.layouts.auth')] class extends Component {
         :description="__('Step 2 of 4 — declare your business and representative information. This is what we cross-check your uploaded documents against.')"
     />
 
-    {{-- Step indicator --}}
-    <ol class="flex items-center gap-2 text-xs font-medium">
-        <li class="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-            <flux:icon icon="check-circle" variant="micro" class="size-4" /> {{ __('Account') }}
-        </li>
-        <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-        <li class="flex items-center gap-1.5 text-cu-purple">
-            <span class="flex size-4 items-center justify-center rounded-full bg-cu-purple text-[10px] text-white">2</span>
-            {{ __('Details') }}
-        </li>
-        <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-        <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-            <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">3</span>
-            {{ __('Signature') }}
-        </li>
-        <li class="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"></li>
-        <li class="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-            <span class="flex size-4 items-center justify-center rounded-full border border-current text-[10px]">4</span>
-            {{ __('Verify') }}
-        </li>
-    </ol>
+    <x-auth.steps current="business" />
 
     <form wire:submit="save" class="flex flex-col gap-6">
         {{-- Business information --}}

@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\Submission;
 use App\Models\User;
+use App\Models\Vendor;
+use App\Support\SubmissionPresenter;
+use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -10,11 +14,22 @@ class OfficerReviewTest extends TestCase
 {
     use RefreshDatabase;
 
+    private User $officer;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Created before seeding so DemoDataSeeder targets this officer with
+        // its review notifications.
+        $this->officer = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+    }
+
     public function test_compliance_officer_can_view_the_pending_submissions_queue(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
+        $this->actingAs($this->officer)
             ->get(route('admin.pending'))
             ->assertOk()
             ->assertSee('Pending Submissions')
@@ -30,28 +45,30 @@ class OfficerReviewTest extends TestCase
 
     public function test_officer_can_open_a_submission_drill_down(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
-            ->get(route('admin.submissions.show', 1042))
+        $submission = Submission::query()
+            ->where('status', Submission::STATUS_PENDING_REVIEW)
+            ->firstOrFail();
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
             ->assertOk()
-            ->assertSee('SUB-1042')
+            ->assertSee(SubmissionPresenter::reference($submission))
             ->assertSee('Risk score breakdown')
             ->assertSee('Officer decision');
     }
 
     public function test_unknown_submission_returns_not_found(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
-
-        $this->actingAs($user)->get(route('admin.submissions.show', 999999))->assertNotFound();
+        $this->actingAs($this->officer)->get(route('admin.submissions.show', 999999))->assertNotFound();
     }
 
     public function test_officer_can_view_the_archived_reports(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
+        $this->actingAs($this->officer)
             ->get(route('admin.archived'))
             ->assertOk()
             ->assertSee('Archived Reports')
@@ -60,9 +77,9 @@ class OfficerReviewTest extends TestCase
 
     public function test_officer_can_view_the_vendor_directory(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
+        $this->actingAs($this->officer)
             ->get(route('admin.vendors'))
             ->assertOk()
             ->assertSee('Vendor Profiles')
@@ -71,10 +88,12 @@ class OfficerReviewTest extends TestCase
 
     public function test_officer_can_open_a_vendor_profile(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
-            ->get(route('admin.vendors.show', 1))
+        $vendor = Vendor::where('company_name', 'Santos Trading Corp.')->firstOrFail();
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.vendors.show', $vendor->id))
             ->assertOk()
             ->assertSee('Santos Trading Corp.')
             ->assertSee('Reference biometrics')
@@ -83,29 +102,27 @@ class OfficerReviewTest extends TestCase
 
     public function test_unknown_vendor_returns_not_found(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
-
-        $this->actingAs($user)->get(route('admin.vendors.show', 999999))->assertNotFound();
+        $this->actingAs($this->officer)->get(route('admin.vendors.show', 999999))->assertNotFound();
     }
 
     public function test_officer_can_view_the_risk_logs(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
+        $this->actingAs($this->officer)
             ->get(route('admin.risk-logs'))
             ->assertOk()
             ->assertSee('Risk Logs')
-            ->assertSee('Signature mismatch — possible forgery')
-            ->assertSee('No stamp detected')
+            ->assertSee('Document tampering suspected')
+            ->assertSee('Signature verification unavailable')
             ->assertSee('Santos Trading Corp.');
     }
 
     public function test_officer_can_view_the_notifications(): void
     {
-        $user = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $this->seed(DemoDataSeeder::class);
 
-        $this->actingAs($user)
+        $this->actingAs($this->officer)
             ->get(route('admin.notifications'))
             ->assertOk()
             ->assertSee('Notifications')

@@ -1,6 +1,8 @@
 <?php
 
-use App\Support\VendorDemoData;
+use App\Models\Submission;
+use App\Support\SubmissionPresenter;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 new class extends Component {
@@ -9,9 +11,42 @@ new class extends Component {
      */
     public function with(): array
     {
+        $vendor = Auth::user()->vendor;
+        $typeNames = SubmissionPresenter::typeNames();
+
+        $submissions = $vendor === null
+            ? collect()
+            : $vendor->submissions()
+                ->with('documents')
+                ->latest()
+                ->get();
+
+        $statusLabel = fn (string $status): string => match ($status) {
+            Submission::STATUS_PROCESSING => 'Processing',
+            Submission::STATUS_PENDING_REVIEW => 'Pending Review',
+            Submission::STATUS_APPROVED => 'Approved',
+            Submission::STATUS_REJECTED => 'Rejected',
+            default => str($status)->headline()->toString(),
+        };
+
         return [
-            'kpis' => VendorDemoData::kpis(),
-            'submissions' => VendorDemoData::submissions()->take(3),
+            'kpis' => [
+                'total' => $submissions->count(),
+                'processing' => $submissions->whereIn('status', [Submission::STATUS_PROCESSING, Submission::STATUS_PENDING_REVIEW])->count(),
+                'approved' => $submissions->where('status', Submission::STATUS_APPROVED)->count(),
+                'rejected' => $submissions->where('status', Submission::STATUS_REJECTED)->count(),
+            ],
+            'submissions' => $submissions->take(3)->map(fn (Submission $submission): array => [
+                'ref' => SubmissionPresenter::reference($submission),
+                'document_type' => $submission->documents
+                    ->pluck('document_type_id')
+                    ->map(fn ($id) => $typeNames[$id] ?? 'Unassigned')
+                    ->unique()
+                    ->implode(', ') ?: '—',
+                'file_name' => $submission->documents->first()?->original_filename ?? '—',
+                'submitted_at' => $submission->created_at,
+                'status' => $statusLabel($submission->status),
+            ])->values(),
         ];
     }
 }; ?>
@@ -89,7 +124,7 @@ new class extends Component {
             </div>
 
             <div class="divide-y divide-cu-border">
-                @foreach ($submissions as $submission)
+                @forelse ($submissions as $submission)
                     <a href="{{ route('vendor.submissions') }}" wire:navigate class="group grid gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 md:grid-cols-[1fr_auto] md:items-center">
                         <div class="flex min-w-0 gap-3">
                             <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-purple/10 text-cu-purple">
@@ -106,7 +141,13 @@ new class extends Component {
                             <flux:icon icon="chevron-right" class="hidden size-4 text-cu-muted transition group-hover:translate-x-0.5 group-hover:text-cu-purple md:block" />
                         </div>
                     </a>
-                @endforeach
+                @empty
+                    <div class="flex flex-col items-center gap-2 px-5 py-12 text-center">
+                        <flux:icon icon="document-plus" class="size-8 text-cu-muted" />
+                        <p class="text-sm font-medium text-cu-text">No submissions yet</p>
+                        <p class="text-xs text-cu-muted">Submit your first accreditation documents to see them here.</p>
+                    </div>
+                @endforelse
             </div>
         </div>
     </div>

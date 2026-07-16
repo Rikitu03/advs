@@ -3,9 +3,9 @@
 namespace App\Actions;
 
 use App\Models\Document;
-use App\Models\Submission;
 use App\Models\ValidationResult;
 use App\Services\Document\RiskScoreService;
+use App\Services\Document\SubmissionFinalizer;
 use App\Services\Document\TamperDetectionService;
 
 /**
@@ -25,6 +25,7 @@ class ProcessDocumentAction
     public function __construct(
         private readonly TamperDetectionService $tamperService,
         private readonly RiskScoreService $riskService,
+        private readonly SubmissionFinalizer $finalizer,
     ) {}
 
     /**
@@ -72,6 +73,7 @@ class ProcessDocumentAction
             $result->flags ?? [],
             $verdict['flags'] ?? [],
             $risk['hard_override'] ? ['Document tampering suspected'] : [],
+            $this->missingStageFlags($risk['breakdown']),
         )));
 
         $result->fill([
@@ -83,32 +85,36 @@ class ProcessDocumentAction
 
         $document->update(['processing_status' => Document::STATUS_COMPLETED]);
 
-        $this->rollUpSubmission($document->submission);
+        $this->finalizer->finalize($document->submission);
 
         return $result;
     }
 
     /**
-     * Roll the submission's composite risk up from its documents (highest-risk
-     * document drives the review queue) and move it to PENDING_REVIEW.
+     * Human-readable flags for the ML components the risk blend scored as
+     * missing — in standby mode these are the stages whose models are not yet
+     * wired in, so the drill-down states plainly why the penalty was applied.
+     *
+     * @param  array<string, array<string, mixed>>  $breakdown
+     * @return list<string>
      */
-    private function rollUpSubmission(Submission $submission): void
+    private function missingStageFlags(array $breakdown): array
     {
-        $max = (float) $submission->documents()
-            ->join('validation_results', 'validation_results.document_id', '=', 'documents.id')
-            ->max('validation_results.document_risk_score');
+        $labels = [
+            'text' => 'Text validation unavailable',
+            'classification' => 'Classification unavailable',
+            'signature' => 'Signature verification unavailable',
+            'stamp' => 'Stamp verification unavailable',
+        ];
 
-        $high = (int) config('advs.risk.high_threshold');
-        $medium = (int) config('advs.risk.medium_threshold');
+        $flags = [];
 
-        $submission->update([
-            'composite_risk_score' => $max,
-            'risk_level' => match (true) {
-                $max >= $high => 'high',
-                $max >= $medium => 'medium',
-                default => 'low',
-            },
-            'status' => Submission::STATUS_PENDING_REVIEW,
-        ]);
+        foreach ($labels as $component => $label) {
+            if (($breakdown[$component]['missing'] ?? false) === true) {
+                $flags[] = $label;
+            }
+        }
+
+        return $flags;
     }
 }

@@ -1,6 +1,6 @@
 <?php
 
-use App\Support\DemoStore;
+use App\Models\Vendor;
 use Illuminate\Support\Collection;
 use Livewire\Volt\Component;
 
@@ -15,14 +15,30 @@ new class extends Component {
     }
 
     /**
+     * Vendor directory (§4 Vendor Profiles).
+     *
      * @return Collection<int, array<string, mixed>>
      */
     public function filtered(): Collection
     {
         $term = mb_strtolower(trim($this->search));
 
-        return DemoStore::vendors()
-            ->when($this->status !== 'all', fn (Collection $rows) => $rows->where('status', $this->status))
+        return Vendor::query()
+            ->with('user')
+            ->withCount('submissions')
+            ->when($this->status !== 'all', fn ($query) => $query->where('status', $this->status))
+            ->orderBy('company_name')
+            ->get()
+            ->map(fn (Vendor $vendor): array => [
+                'id' => $vendor->id,
+                'company' => $vendor->company_name,
+                'contact' => $vendor->user?->name ?? '—',
+                'registration_number' => $vendor->registration_number ?? '',
+                'status' => $vendor->status,
+                'registered_at' => $vendor->created_at,
+                'submissions_count' => $vendor->submissions_count,
+                'enrolled' => $vendor->user?->hasEnrolledSignature() ?? false,
+            ])
             ->when($term !== '', fn (Collection $rows) => $rows->filter(
                 fn (array $v): bool => str_contains(
                     mb_strtolower("{$v['company']} {$v['contact']} {$v['registration_number']}"),
@@ -39,7 +55,7 @@ new class extends Component {
     {
         return [
             'rows' => $this->filtered(),
-            'total' => DemoStore::vendors()->count(),
+            'total' => Vendor::count(),
         ];
     }
 }; ?>
@@ -103,7 +119,7 @@ new class extends Component {
                                 <p class="truncate text-xs text-cu-muted">{{ $v['contact'] }}</p>
                             </div>
                         </div>
-                        <flux:badge size="sm" :color="\App\Support\DemoData::vendorStatusColor($v['status'])">{{ str($v['status'])->headline() }}</flux:badge>
+                        <flux:badge size="sm" :color="\App\Models\Vendor::statusColor($v['status'])">{{ str($v['status'])->headline() }}</flux:badge>
                     </div>
 
                     <dl class="grid grid-cols-2 gap-3 text-sm">

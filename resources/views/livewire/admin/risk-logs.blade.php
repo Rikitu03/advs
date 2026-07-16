@@ -1,11 +1,25 @@
 <?php
 
-use App\Support\DemoData;
-use App\Support\DemoStore;
+use App\Models\Submission;
+use App\Support\SubmissionPresenter;
 use Illuminate\Support\Collection;
 use Livewire\Volt\Component;
 
 new class extends Component {
+    /**
+     * Flag-type metadata for the Risk Logs tab (§4): label, icon, and tint.
+     *
+     * @var array<string, array{label: string, icon: string, color: string}>
+     */
+    private const FLAG_TYPES = [
+        'text_mismatch' => ['label' => 'Text mismatch', 'icon' => 'document-magnifying-glass', 'color' => 'sky'],
+        'low_classification' => ['label' => 'Low classification confidence', 'icon' => 'cpu-chip', 'color' => 'amber'],
+        'signature_mismatch' => ['label' => 'Signature mismatch', 'icon' => 'pencil-square', 'color' => 'rose'],
+        'stamp_mismatch' => ['label' => 'Stamp mismatch', 'icon' => 'shield-exclamation', 'color' => 'rose'],
+        'tampering' => ['label' => 'Tampering', 'icon' => 'exclamation-triangle', 'color' => 'rose'],
+        'other' => ['label' => 'Other', 'icon' => 'flag', 'color' => 'zinc'],
+    ];
+
     public string $search = '';
 
     public string $type = 'all';
@@ -30,25 +44,67 @@ new class extends Component {
     }
 
     /**
+     * Every flag raised across processed submissions, newest first (§4 Risk
+     * Logs) — derived live from the validation results so the log always
+     * agrees with each submission's drill-down view.
+     *
      * @return Collection<int, array<string, mixed>>
      */
-    public function filtered(): Collection
+    public function allLogs(): Collection
     {
-        $term = mb_strtolower(trim($this->search));
+        $typeNames = SubmissionPresenter::typeNames();
+        $logs = collect();
 
-        return DemoStore::riskLogs()
-            ->when($this->type !== 'all', fn (Collection $rows) => $rows->where('type', $this->type))
-            ->when($this->severity !== 'all', fn (Collection $rows) => $rows->where('severity', $this->severity))
-            ->when($this->range !== 'all', fn (Collection $rows) => $rows->filter(
-                fn (array $log): bool => abs($log['raised_at']->diffInHours(now())) <= (int) $this->range
-            ))
-            ->when($term !== '', fn (Collection $rows) => $rows->filter(
-                fn (array $log): bool => str_contains(
-                    mb_strtolower("{$log['ref']} {$log['company']} {$log['vendor']} {$log['title']} {$log['document_type']}"),
-                    $term,
-                )
-            ))
-            ->values();
+        Submission::query()
+            ->whereIn('status', [
+                Submission::STATUS_PENDING_REVIEW,
+                Submission::STATUS_APPROVED,
+                Submission::STATUS_REJECTED,
+            ])
+            ->with(['vendor.user', 'documents.validationResult'])
+            ->latest()
+            ->get()
+            ->each(function (Submission $submission) use (&$logs, $typeNames): void {
+                $summary = SubmissionPresenter::summary($submission, $typeNames);
+
+                foreach ($submission->documents as $document) {
+                    $result = $document->validationResult;
+
+                    foreach ($result?->flags ?? [] as $flag) {
+                        $logs->push([
+                            'type' => $this->categorize($flag),
+                            'severity' => $summary['risk_level'] === 'high' ? 'high' : 'medium',
+                            'title' => $flag,
+                            'detail' => $document->original_filename,
+                            'raised_at' => $result->updated_at ?? $submission->created_at,
+                            'submission_id' => $submission->id,
+                            'ref' => $summary['ref'],
+                            'vendor' => $summary['vendor'],
+                            'company' => $summary['company'],
+                            'document_type' => $summary['document_type'],
+                        ]);
+                    }
+                }
+            });
+
+        return $logs
+            ->sortByDesc('raised_at')
+            ->values()
+            ->map(fn (array $log, int $i): array => [...$log, 'id' => $i + 1]);
+    }
+
+    private function categorize(string $flag): string
+    {
+        $needle = mb_strtolower($flag);
+
+        return match (true) {
+            str_contains($needle, 'tamper') => 'tampering',
+            str_contains($needle, 'signature') => 'signature_mismatch',
+            str_contains($needle, 'stamp') || str_contains($needle, 'logo') => 'stamp_mismatch',
+            str_contains($needle, 'classif') => 'low_classification',
+            str_contains($needle, 'text') || str_contains($needle, 'ocr') || str_contains($needle, 'field') => 'text_mismatch',
+            default => 'other',
+        };
     }
 
     /**
@@ -56,10 +112,27 @@ new class extends Component {
      */
     public function with(): array
     {
+        $term = mb_strtolower(trim($this->search));
+        $all = $this->allLogs();
+
+        $rows = $all
+            ->when($this->type !== 'all', fn (Collection $logs) => $logs->where('type', $this->type))
+            ->when($this->severity !== 'all', fn (Collection $logs) => $logs->where('severity', $this->severity))
+            ->when($this->range !== 'all', fn (Collection $logs) => $logs->filter(
+                fn (array $log): bool => abs($log['raised_at']->diffInHours(now())) <= (int) $this->range
+            ))
+            ->when($term !== '', fn (Collection $logs) => $logs->filter(
+                fn (array $log): bool => str_contains(
+                    mb_strtolower("{$log['ref']} {$log['company']} {$log['vendor']} {$log['title']} {$log['document_type']}"),
+                    $term,
+                )
+            ))
+            ->values();
+
         return [
-            'rows' => $this->filtered(),
-            'total' => DemoStore::riskLogs()->count(),
-            'types' => DemoData::flagTypes(),
+            'rows' => $rows,
+            'total' => $all->count(),
+            'types' => self::FLAG_TYPES,
         ];
     }
 }; ?>

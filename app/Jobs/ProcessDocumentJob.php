@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Actions\ProcessDocumentAction;
 use App\Models\Document;
+use App\Services\Document\SubmissionFinalizer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -43,5 +44,11 @@ class ProcessDocumentJob implements ShouldQueue
             'document_id' => $this->document->id,
             'error' => $e->getMessage(),
         ]);
+
+        // A failed document is terminal too — without this, one bad file
+        // strands the whole submission in PROCESSING forever.
+        if ($this->document->submission !== null) {
+            app(SubmissionFinalizer::class)->finalize($this->document->submission);
+        }
     }
 }
