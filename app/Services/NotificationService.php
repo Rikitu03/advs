@@ -81,28 +81,38 @@ class NotificationService
     }
 
     /**
-     * Officer decision → vendor (approved / rejected wording per §7).
+     * Officer decision → vendor (approved / resubmission-requested wording per
+     * §7) + a record of the action for the officer team.
      */
     public function decisionMade(Submission $submission): void
     {
         $vendorUser = $submission->vendor?->user;
-
-        if ($vendorUser === null) {
-            return;
-        }
-
         $approved = $submission->status === Submission::STATUS_APPROVED;
         $reason = trim((string) $submission->review_comments);
 
-        Notification::create([
-            'user_id' => $vendorUser->id,
-            'type' => Notification::TYPE_DECISION_MADE,
-            'subject' => $approved ? 'Accreditation approved' : 'Accreditation rejected',
-            'body' => $approved
-                ? 'Your accreditation has been approved.'
-                : 'Your accreditation has been rejected.'.($reason !== '' ? " Reason: {$reason}" : ''),
-            'related_submission_id' => $submission->id,
-        ]);
+        if ($vendorUser !== null) {
+            Notification::create([
+                'user_id' => $vendorUser->id,
+                'type' => Notification::TYPE_DECISION_MADE,
+                'subject' => $approved ? 'Accreditation approved' : 'Resubmission requested',
+                'body' => $approved
+                    ? 'Your accreditation has been approved.'
+                    : 'Your submission requires resubmission — please correct the flagged documents and submit again.'.($reason !== '' ? " Reason: {$reason}" : ''),
+                'related_submission_id' => $submission->id,
+            ]);
+        }
+
+        $officerName = $submission->reviewer?->name ?? 'An officer';
+        $company = $submission->vendor?->company_name ?? 'a vendor';
+
+        $this->notifyOfficers(
+            Notification::TYPE_DECISION_MADE,
+            $approved ? 'Submission approved' : 'Resubmission requested',
+            $approved
+                ? sprintf('%s approved the submission from %s.', $officerName, $company)
+                : sprintf('%s requested resubmission from %s.', $officerName, $company).($reason !== '' ? " Reason: {$reason}" : ''),
+            $submission,
+        );
     }
 
     private function notifyOfficers(string $type, string $subject, string $body, Submission $submission): void

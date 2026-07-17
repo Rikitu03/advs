@@ -11,11 +11,11 @@ use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 /**
- * Records a compliance officer's final approve/reject call on a submission
- * (ADVS_System_Reference.md §5 Stage 6): persists the decision, cascades the
- * vendor's accreditation status, writes the audit-trail entry, and notifies
- * the vendor (§7). The ML pipeline never decides — this service is only ever
- * invoked from an authenticated officer/admin action.
+ * Records a compliance officer's final call on a submission — approve, or
+ * request resubmission (ADVS_System_Reference.md §5 Stage 6): persists the
+ * decision, cascades the vendor's accreditation status, writes the audit-trail
+ * entry, and notifies the vendor (§7). The ML pipeline never decides — this
+ * service is only ever invoked from an authenticated officer/admin action.
  */
 class OfficerDecisionService
 {
@@ -23,7 +23,7 @@ class OfficerDecisionService
 
     public function decide(Submission $submission, User $officer, string $decision, string $comments = ''): Submission
     {
-        if (! in_array($decision, [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED], true)) {
+        if (! in_array($decision, [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED], true)) {
             throw new InvalidArgumentException("Invalid officer decision [{$decision}].");
         }
 
@@ -49,7 +49,7 @@ class OfficerDecisionService
                 'user_id' => $officer->id,
                 'action' => $decision === Submission::STATUS_APPROVED
                     ? 'submission.approved'
-                    : 'submission.rejected',
+                    : 'submission.resubmission_requested',
                 'entity_type' => Submission::class,
                 'entity_id' => $locked->id,
                 'details' => [

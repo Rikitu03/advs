@@ -51,7 +51,7 @@ new class extends Component {
     private function archivedQuery(): \Illuminate\Database\Eloquent\Builder
     {
         return Submission::query()
-            ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED]);
+            ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED]);
     }
 
     /**
@@ -101,7 +101,7 @@ new class extends Component {
             </label>
             <div class="flex flex-wrap items-center gap-3">
                 <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1">
-                    @foreach (['all' => 'All', 'approved' => 'Approved', 'rejected' => 'Rejected'] as $value => $text)
+                    @foreach (['all' => 'All', 'approved' => 'Approved', 'resubmission_requested' => 'Resubmission Requested'] as $value => $text)
                         <button type="button" wire:click="setDecision('{{ $value }}')"
                                 class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $decision === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
                     @endforeach
@@ -145,7 +145,7 @@ new class extends Component {
                                         </span>
                                     @else
                                         <span class="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300">
-                                            <flux:icon icon="x-circle" variant="micro" class="size-3.5" /> Rejected
+                                            <flux:icon icon="arrow-path" variant="micro" class="size-3.5" /> Resubmission Requested
                                         </span>
                                     @endif
                                 </td>

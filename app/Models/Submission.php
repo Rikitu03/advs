@@ -30,7 +30,7 @@ class Submission extends Model
 
     public const STATUS_APPROVED = 'approved';
 
-    public const STATUS_REJECTED = 'rejected';
+    public const STATUS_RESUBMISSION_REQUESTED = 'resubmission_requested';
 
     /**
      * @var list<string>

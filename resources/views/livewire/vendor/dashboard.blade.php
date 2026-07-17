@@ -25,7 +25,7 @@ new class extends Component {
             Submission::STATUS_PROCESSING => 'Processing',
             Submission::STATUS_PENDING_REVIEW => 'Pending Review',
             Submission::STATUS_APPROVED => 'Approved',
-            Submission::STATUS_REJECTED => 'Rejected',
+            Submission::STATUS_RESUBMISSION_REQUESTED => 'Resubmission Requested',
             default => str($status)->headline()->toString(),
         };
 
@@ -34,7 +34,7 @@ new class extends Component {
                 'total' => $submissions->count(),
                 'processing' => $submissions->whereIn('status', [Submission::STATUS_PROCESSING, Submission::STATUS_PENDING_REVIEW])->count(),
                 'approved' => $submissions->where('status', Submission::STATUS_APPROVED)->count(),
-                'rejected' => $submissions->where('status', Submission::STATUS_REJECTED)->count(),
+                'resubmission' => $submissions->where('status', Submission::STATUS_RESUBMISSION_REQUESTED)->count(),
             ],
             'submissions' => $submissions->take(3)->map(fn (Submission $submission): array => [
                 'ref' => SubmissionPresenter::reference($submission),
@@ -94,7 +94,7 @@ new class extends Component {
                 ['Total submissions', $kpis['total'], 'folder-open', 'bg-cu-purple/10 text-cu-purple', 'Documents sent for validation'],
                 ['In progress', $kpis['processing'], 'arrow-path', 'bg-cu-blue/10 text-sky-700', 'Processing or review'],
                 ['Approved', $kpis['approved'], 'check-badge', 'bg-cu-yellow/20 text-yellow-700', 'Accepted documents'],
-                ['Rejected', $kpis['rejected'], 'x-circle', 'bg-cu-pink/10 text-rose-600', 'Needs resubmission'],
+                ['For Resubmission', $kpis['resubmission'], 'arrow-path', 'bg-cu-pink/10 text-rose-600', 'Correct and submit again'],
             ] as [$label, $value, $icon, $accent, $hint])
                 <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5 shadow-sm">
                     <div class="flex items-start justify-between gap-3">

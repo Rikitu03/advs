@@ -58,15 +58,15 @@ class NegofoodSubmissionSeeder extends Seeder
         $typeIds = DB::table('document_types')->pluck('id', 'code');
         $vendorUserId = $vendor->user_id;
 
-        $rejected = $this->seedRejected($vendor, $officer, $typeIds);
+        $resubmission = $this->seedResubmissionRequested($vendor, $officer, $typeIds);
         $approved = $this->seedApproved($vendor, $officer, $typeIds);
         $pending = $this->seedPending($vendor, $typeIds);
 
         $vendor->update(['status' => Vendor::STATUS_UNDER_REVIEW]);
 
-        $this->notify($vendorUserId, Notification::TYPE_DECISION_MADE, 'Submission rejected',
-            'Your financial statement submission was rejected. Review the officer comments before resubmitting.',
-            $rejected->id, $rejected->reviewed_at);
+        $this->notify($vendorUserId, Notification::TYPE_DECISION_MADE, 'Resubmission requested',
+            'Your financial statement submission requires resubmission. Review the officer comments before resubmitting.',
+            $resubmission->id, $resubmission->reviewed_at);
         $this->notify($vendorUserId, Notification::TYPE_DECISION_MADE, 'Submission approved',
             'Your BIR Certificate of Registration was approved and added to your vendor record.',
             $approved->id, $approved->reviewed_at);
@@ -80,7 +80,13 @@ class NegofoodSubmissionSeeder extends Seeder
         if ($officer !== null) {
             $this->notify($officer->id, Notification::TYPE_HIGH_RISK_ALERT, 'High-risk submission',
                 sprintf('High-risk submission detected (score: 84/100) from %s.', $vendor->company_name),
-                $rejected->id, $rejected->created_at);
+                $resubmission->id, $resubmission->created_at);
+            $this->notify($officer->id, Notification::TYPE_DECISION_MADE, 'Resubmission requested',
+                sprintf('%s requested resubmission from %s. Reason: %s', $officer->name, $vendor->company_name, $resubmission->review_comments),
+                $resubmission->id, $resubmission->reviewed_at);
+            $this->notify($officer->id, Notification::TYPE_DECISION_MADE, 'Submission approved',
+                sprintf('%s approved the submission from %s.', $officer->name, $vendor->company_name),
+                $approved->id, $approved->reviewed_at);
             $this->notify($officer->id, Notification::TYPE_GENERAL, 'Submission ready for review',
                 sprintf('Submission from %s is ready for review.', $vendor->company_name),
                 $pending->id, $pending->created_at->copy()->addMinutes(2));
@@ -192,13 +198,13 @@ class NegofoodSubmissionSeeder extends Seeder
     /**
      * @param  Collection<string, int>  $typeIds
      */
-    private function seedRejected(Vendor $vendor, ?User $officer, $typeIds): Submission
+    private function seedResubmissionRequested(Vendor $vendor, ?User $officer, $typeIds): Submission
     {
         $submittedAt = now()->subDays(18);
 
         $submission = Submission::create([
             'vendor_id' => $vendor->id,
-            'status' => Submission::STATUS_REJECTED,
+            'status' => Submission::STATUS_RESUBMISSION_REQUESTED,
             'composite_risk_score' => 84.0,
             'risk_level' => 'high',
             'reviewed_by' => $officer?->id,

@@ -205,7 +205,7 @@ new class extends Component {
                                         @php($label = \Illuminate\Support\Str::of($s['status'])->replace('_', ' ')->headline())
                                         @if ($s['status'] === 'approved')
                                             <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{{ $label }}</span>
-                                        @elseif ($s['status'] === 'rejected')
+                                        @elseif ($s['status'] === 'resubmission_requested')
                                             <span class="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300">{{ $label }}</span>
                                         @else
                                             <span class="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">{{ $label }}</span>

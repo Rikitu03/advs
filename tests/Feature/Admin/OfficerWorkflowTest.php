@@ -8,7 +8,9 @@ use App\Models\Submission;
 use App\Models\User;
 use App\Models\ValidationResult;
 use App\Models\Vendor;
+use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
@@ -117,27 +119,106 @@ class OfficerWorkflowTest extends TestCase
             'type' => Notification::TYPE_DECISION_MADE,
             'related_submission_id' => $submission->id,
         ]);
+
+        // The deciding officer (and the rest of the officer team) is notified too.
+        $officerNotification = Notification::where('user_id', $this->officer->id)
+            ->where('type', Notification::TYPE_DECISION_MADE)
+            ->where('related_submission_id', $submission->id)
+            ->firstOrFail();
+        $this->assertSame('Submission approved', $officerNotification->subject);
+        $this->assertStringContainsString($this->officer->name, $officerNotification->body);
+        $this->assertStringContainsString('Garcia Textiles', $officerNotification->body);
     }
 
-    public function test_officer_can_reject_a_submission_with_a_reason(): void
+    public function test_risk_breakdown_can_be_filtered_by_document_type(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $birTypeId = (int) DB::table('document_types')->where('name', 'BIR Certificate of Registration')->value('id');
+        $permitTypeId = (int) DB::table('document_types')->where('name', 'Business Permit')->value('id');
+
+        $submission = $this->makePendingSubmission('Santos Trading Corp.', 55.0, 'medium');
+        $vendor = $submission->vendor;
+
+        // Replace the helper's untyped document with one per document type.
+        $submission->documents()->delete();
+
+        $bir = Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $birTypeId,
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $bir->id,
+            'submission_id' => $submission->id,
+            'classification_label' => 'BIR Certificate of Registration',
+            'classification_confidence' => 0.97,
+            'document_risk_score' => 20.0,
+        ]);
+
+        $permit = Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $permitTypeId,
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $permit->id,
+            'submission_id' => $submission->id,
+            'classification_label' => 'Business Permit',
+            'classification_confidence' => 0.71,
+            'document_risk_score' => 90.0,
+        ]);
+
+        $this->actingAs($this->officer);
+
+        // Default ('All') shows the highest-risk document — the Business Permit.
+        $component = Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->assertSet('componentFilter', 'all')
+            ->assertSee('Classified as Business Permit')
+            ->assertSee('71% conf.');
+
+        // Filtering to the BIR type swaps in that document's component scores.
+        $component->call('setComponentFilter', 'type-'.$birTypeId)
+            ->assertSee('Classified as BIR Certificate of Registration')
+            ->assertSee('97% conf.')
+            ->assertDontSee('Classified as Business Permit');
+
+        // Unknown filter keys are refused.
+        $component->call('setComponentFilter', 'type-999999')->assertStatus(400);
+    }
+
+    public function test_officer_can_request_resubmission_with_a_reason(): void
     {
         $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
 
         $this->actingAs($this->officer);
 
         Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
-            ->call('startDecision', 'reject')
+            ->call('startDecision', 'resubmit')
             ->set('comments', 'Forged stamp suspected.')
             ->call('submitDecision')
-            ->assertSee('Rejected');
+            ->assertSee('Resubmission requested');
 
         $fresh = $submission->fresh();
-        $this->assertSame(Submission::STATUS_REJECTED, $fresh->status);
+        $this->assertSame(Submission::STATUS_RESUBMISSION_REQUESTED, $fresh->status);
         $this->assertSame(Vendor::STATUS_REJECTED, $submission->vendor->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $this->officer->id,
+            'action' => 'submission.resubmission_requested',
+            'entity_id' => $submission->id,
+        ]);
 
         $notification = Notification::where('user_id', $submission->vendor->user_id)->firstOrFail();
-        $this->assertStringContainsString('rejected', $notification->body);
+        $this->assertSame('Resubmission requested', $notification->subject);
+        $this->assertStringContainsString('resubmission', $notification->body);
         $this->assertStringContainsString('Forged stamp suspected.', $notification->body);
+
+        $officerNotification = Notification::where('user_id', $this->officer->id)
+            ->where('type', Notification::TYPE_DECISION_MADE)
+            ->where('related_submission_id', $submission->id)
+            ->firstOrFail();
+        $this->assertSame('Resubmission requested', $officerNotification->subject);
+        $this->assertStringContainsString($this->officer->name, $officerNotification->body);
+        $this->assertStringContainsString('Tan Imports', $officerNotification->body);
+        $this->assertStringContainsString('Forged stamp suspected.', $officerNotification->body);
     }
 
     public function test_a_decided_submission_cannot_be_decided_again(): void
@@ -150,7 +231,7 @@ class OfficerWorkflowTest extends TestCase
             ->call('startDecision', 'approve')
             ->call('submitDecision');
 
-        $component->call('startDecision', 'reject')
+        $component->call('startDecision', 'resubmit')
             ->call('submitDecision')
             ->assertStatus(400);
 
@@ -179,15 +260,15 @@ class OfficerWorkflowTest extends TestCase
     public function test_archived_reports_filter_by_decision(): void
     {
         $approved = $this->makePendingSubmission('Garcia Textiles', 15.0, 'low');
-        $rejected = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
+        $resubmission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
 
         $approved->update(['status' => Submission::STATUS_APPROVED, 'reviewed_by' => $this->officer->id, 'reviewed_at' => now()]);
-        $rejected->update(['status' => Submission::STATUS_REJECTED, 'reviewed_by' => $this->officer->id, 'reviewed_at' => now()]);
+        $resubmission->update(['status' => Submission::STATUS_RESUBMISSION_REQUESTED, 'reviewed_by' => $this->officer->id, 'reviewed_at' => now()]);
 
         $this->actingAs($this->officer);
 
         Volt::test('admin.archived')
-            ->call('setDecision', 'rejected')
+            ->call('setDecision', 'resubmission_requested')
             ->assertSee('Tan Imports')
             ->assertDontSee('Garcia Textiles');
     }
