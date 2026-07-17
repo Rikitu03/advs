@@ -63,9 +63,9 @@ class VendorDemoData
                 'id' => 2001,
                 'ref' => 'SUB-2001',
                 'submitted_at' => Carbon::now()->subDays(18),
-                'status' => 'Rejected',
-                'status_tone' => 'rejected',
-                'note' => 'A clearer scan is required before this submission can be accepted.',
+                'status' => 'Resubmission Requested',
+                'status_tone' => 'resubmission_requested',
+                'note' => 'A clearer scan is required — please resubmit before this submission can be accepted.',
                 'documents' => [
                     ['type' => 'Financial Statement', 'file_name' => 'audited_financial_statement_2025.pdf', 'size' => '3.8 MB'],
                     ['type' => 'Business Permit', 'file_name' => 'business_permit_2025.pdf', 'size' => '2.1 MB'],
@@ -85,7 +85,7 @@ class VendorDemoData
             'total' => $submissions->count(),
             'processing' => $submissions->whereIn('status', ['Processing', 'Pending Review'])->count(),
             'approved' => $submissions->where('status', 'Approved')->count(),
-            'rejected' => $submissions->where('status', 'Rejected')->count(),
+            'resubmission' => $submissions->where('status', 'Resubmission Requested')->count(),
         ];
     }
 
@@ -127,7 +127,7 @@ class VendorDemoData
                 'icon' => 'x-circle',
                 'color' => 'rose',
                 'title' => 'Resubmission requested',
-                'body' => 'Your financial statement scan was rejected because several required fields were unreadable.',
+                'body' => 'Your financial statement scan requires resubmission because several required fields were unreadable.',
                 'at' => Carbon::now()->subDays(18),
                 'read' => true,
             ],

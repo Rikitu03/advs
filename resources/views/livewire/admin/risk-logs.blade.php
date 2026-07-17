@@ -59,7 +59,7 @@ new class extends Component {
             ->whereIn('status', [
                 Submission::STATUS_PENDING_REVIEW,
                 Submission::STATUS_APPROVED,
-                Submission::STATUS_REJECTED,
+                Submission::STATUS_RESUBMISSION_REQUESTED,
             ])
             ->with(['vendor.user', 'documents.validationResult'])
             ->latest()

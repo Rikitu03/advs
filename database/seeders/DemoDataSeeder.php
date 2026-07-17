@@ -32,7 +32,7 @@ class DemoDataSeeder extends Seeder
             ['Cruz Logistics Inc.', Vendor::STATUS_UNDER_REVIEW, Submission::STATUS_PENDING_REVIEW, 47.5, 'medium', ['Text validation unavailable']],
             ['Mendoza Pharma', Vendor::STATUS_UNDER_REVIEW, Submission::STATUS_PENDING_REVIEW, 12.0, 'low', []],
             ['Garcia Textiles', Vendor::STATUS_APPROVED, Submission::STATUS_APPROVED, 18.0, 'low', []],
-            ['Tan Imports', Vendor::STATUS_REJECTED, Submission::STATUS_REJECTED, 84.0, 'high', ['Document tampering suspected', 'Stamp verification unavailable']],
+            ['Tan Imports', Vendor::STATUS_REJECTED, Submission::STATUS_RESUBMISSION_REQUESTED, 84.0, 'high', ['Document tampering suspected', 'Stamp verification unavailable']],
         ];
 
         $officer = User::query()->where('role', User::ROLE_COMPLIANCE_OFFICER)->first()
@@ -48,10 +48,10 @@ class DemoDataSeeder extends Seeder
             $vendor = Vendor::factory()->for($user)->create([
                 'company_name' => $company,
                 'status' => $vendorStatus,
-                'risk_score' => in_array($submissionStatus, [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED], true) ? $risk : 0,
+                'risk_score' => in_array($submissionStatus, [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED], true) ? $risk : 0,
             ]);
 
-            $decided = in_array($submissionStatus, [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED], true);
+            $decided = in_array($submissionStatus, [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED], true);
 
             $submission = Submission::factory()->for($vendor)->create([
                 'status' => $submissionStatus,
@@ -59,8 +59,8 @@ class DemoDataSeeder extends Seeder
                 'risk_level' => $level,
                 'reviewed_by' => $decided ? $officer->id : null,
                 'reviewed_at' => $decided ? now()->subDays(rand(1, 10)) : null,
-                'review_comments' => $decided && $submissionStatus === Submission::STATUS_REJECTED
-                    ? 'Forensic flags could not be cleared on manual review.'
+                'review_comments' => $decided && $submissionStatus === Submission::STATUS_RESUBMISSION_REQUESTED
+                    ? 'Forensic flags could not be cleared on manual review. Please resubmit corrected documents.'
                     : null,
                 'created_at' => now()->subDays(rand(1, 14)),
             ]);

@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Submission;
+use App\Models\ValidationResult;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -49,7 +50,7 @@ class SubmissionPresenter
             'status' => $submission->status,
             'decision' => match ($submission->status) {
                 Submission::STATUS_APPROVED => 'approved',
-                Submission::STATUS_REJECTED => 'rejected',
+                Submission::STATUS_RESUBMISSION_REQUESTED => 'resubmission_requested',
                 default => null,
             },
             'reviewed_by' => $submission->reviewer?->name,
@@ -71,9 +72,10 @@ class SubmissionPresenter
 
         $summary = self::summary($submission);
 
-        $primary = $submission->documents
+        $byRisk = $submission->documents
             ->sortByDesc(fn ($document) => (float) ($document->validationResult?->document_risk_score ?? -1))
-            ->first();
+            ->values();
+        $primary = $byRisk->first();
         $result = $primary?->validationResult;
         $thresholds = config('advs.thresholds');
 
@@ -93,10 +95,44 @@ class SubmissionPresenter
 
         $summary['risk_driver'] = self::riskDriver($summary['flags']);
 
+        // §6 drill-down filter: one component set per document type present in
+        // the submission, plus 'all' (the highest-risk document overall).
+        $filters = [['key' => 'all', 'label' => 'All']];
+        $sets = ['all' => self::components($result, $thresholds)];
+
+        $byRisk
+            ->groupBy(fn ($document) => $document->document_type_id ?? 0)
+            ->map(fn ($group, $typeId): array => [
+                'key' => $typeId === 0 ? 'unassigned' : 'type-'.$typeId,
+                'label' => $typeId === 0 ? 'Unassigned' : ($typeNames[$typeId] ?? 'Unassigned'),
+                'result' => $group->first()?->validationResult,
+            ])
+            ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
+            ->each(function (array $type) use (&$filters, &$sets, $thresholds): void {
+                $filters[] = ['key' => $type['key'], 'label' => $type['label']];
+                $sets[$type['key']] = self::components($type['result'], $thresholds);
+            });
+
+        $summary['component_filters'] = $filters;
+        $summary['component_sets'] = $sets;
+        $summary['components'] = $sets['all'];
+
+        return $summary;
+    }
+
+    /**
+     * Component-breakdown rows for one validation result (§6). A null result
+     * renders every stage as "not yet available".
+     *
+     * @param  array<string, float|string>  $thresholds
+     * @return array<string, array<string, mixed>>
+     */
+    private static function components(?ValidationResult $result, array $thresholds): array
+    {
         $signatureSimilarity = $result?->signature_score !== null ? (int) round($result->signature_score * 100) : null;
         $stampSimilarity = $result?->stamp_score !== null ? (int) round($result->stamp_score * 100) : null;
 
-        $summary['components'] = [
+        return [
             'text' => [
                 'score' => $result?->text_validation_score !== null ? (int) round($result->text_validation_score * 100) : null,
                 'pass' => $result?->text_validation_score !== null
@@ -137,8 +173,6 @@ class SubmissionPresenter
                 },
             ],
         ];
-
-        return $summary;
     }
 
     /**

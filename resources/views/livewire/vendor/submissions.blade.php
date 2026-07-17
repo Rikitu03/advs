@@ -98,7 +98,7 @@ new class extends Component
             Submission::STATUS_PROCESSING => 'Processing',
             Submission::STATUS_PENDING_REVIEW => 'Pending Review',
             Submission::STATUS_APPROVED => 'Approved',
-            Submission::STATUS_REJECTED => 'Rejected',
+            Submission::STATUS_RESUBMISSION_REQUESTED => 'Resubmission Requested',
             default => str($status)->headline()->toString(),
         };
     }
@@ -108,7 +108,7 @@ new class extends Component
         return match ($status) {
             Submission::STATUS_PROCESSING => 35,
             Submission::STATUS_PENDING_REVIEW => 70,
-            Submission::STATUS_APPROVED, Submission::STATUS_REJECTED => 100,
+            Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED => 100,
             default => 0,
         };
     }
@@ -119,7 +119,7 @@ new class extends Component
             'Processing' => Submission::STATUS_PROCESSING,
             'Pending Review' => Submission::STATUS_PENDING_REVIEW,
             'Approved' => Submission::STATUS_APPROVED,
-            'Rejected' => Submission::STATUS_REJECTED,
+            'Resubmission Requested' => Submission::STATUS_RESUBMISSION_REQUESTED,
             default => 'demo',
         };
     }
@@ -167,7 +167,7 @@ new class extends Component
             Submission::STATUS_PROCESSING => 'Your documents are queued for automated validation.',
             Submission::STATUS_PENDING_REVIEW => 'Your completed submission is waiting for compliance officer review.',
             Submission::STATUS_APPROVED => 'Your submission has been approved.',
-            Submission::STATUS_REJECTED => 'Your submission was rejected. Review the officer comments before submitting again.',
+            Submission::STATUS_RESUBMISSION_REQUESTED => 'Resubmission requested. Review the officer comments, correct the flagged documents, and submit again.',
             default => 'Submission status is being updated.',
         };
     }
@@ -206,7 +206,7 @@ new class extends Component
         <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-4 shadow-sm" style="animation-delay: 80ms">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1">
-                    @foreach (['all' => 'All', 'processing' => 'Processing', 'pending_review' => 'Pending Review', 'approved' => 'Approved', 'rejected' => 'Rejected'] as $value => $label)
+                    @foreach (['all' => 'All', 'processing' => 'Processing', 'pending_review' => 'Pending Review', 'approved' => 'Approved', 'resubmission_requested' => 'Resubmission Requested'] as $value => $label)
                         <button type="button" wire:click="setFilter('{{ $value }}')"
                                 class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $filter === $value ? 'bg-cu-purple text-white shadow-sm' : 'text-cu-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-cu-text' }}">
                             {{ $label }}

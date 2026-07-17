@@ -22,7 +22,7 @@ new class extends Component {
             ->map(fn (Submission $submission): array => SubmissionPresenter::summary($submission, $typeNames));
 
         $decided = Submission::query()
-            ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_REJECTED])
+            ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED])
             ->selectRaw("count(*) as total, sum(case when status = 'approved' then 1 else 0 end) as approved")
             ->first();
 
@@ -58,7 +58,7 @@ new class extends Component {
             ->map(function (AuditLog $log): array {
                 [$icon, $color] = match (true) {
                     str_ends_with($log->action, '.approved') => ['check-circle', 'emerald'],
-                    str_ends_with($log->action, '.rejected') => ['x-circle', 'rose'],
+                    str_ends_with($log->action, '.resubmission_requested') => ['arrow-path', 'rose'],
                     str_starts_with($log->action, 'ml_model.') => ['cpu-chip', 'sky'],
                     default => ['bolt', 'amber'],
                 };

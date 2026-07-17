@@ -39,11 +39,11 @@ class NegofoodSubmissionSeederTest extends TestCase
 
         $pending = $vendor->submissions()->where('status', Submission::STATUS_PENDING_REVIEW)->first();
         $approved = $vendor->submissions()->where('status', Submission::STATUS_APPROVED)->first();
-        $rejected = $vendor->submissions()->where('status', Submission::STATUS_REJECTED)->first();
+        $resubmission = $vendor->submissions()->where('status', Submission::STATUS_RESUBMISSION_REQUESTED)->first();
 
         $this->assertNotNull($pending);
         $this->assertNotNull($approved);
-        $this->assertNotNull($rejected);
+        $this->assertNotNull($resubmission);
 
         // The showcase submission: one batch bundling all three document types,
         // shaped like a real standby-pipeline run (medium composite risk).
@@ -62,12 +62,12 @@ class NegofoodSubmissionSeederTest extends TestCase
             $this->assertNotEmpty($document->validationResult->flags);
         });
 
-        // Decided history carries a reviewer and, for the rejection, comments.
+        // Decided history carries a reviewer and, for the resubmission request, comments.
         $this->assertNotNull($approved->reviewed_by);
         $this->assertNotNull($approved->reviewed_at);
-        $this->assertNotNull($rejected->reviewed_by);
-        $this->assertNotNull($rejected->review_comments);
-        $this->assertSame('high', $rejected->risk_level);
+        $this->assertNotNull($resubmission->reviewed_by);
+        $this->assertNotNull($resubmission->review_comments);
+        $this->assertSame('high', $resubmission->risk_level);
     }
 
     public function test_seeded_documents_are_backed_by_real_stored_files(): void
@@ -95,8 +95,8 @@ class NegofoodSubmissionSeederTest extends TestCase
 
         $vendorUser = User::query()->where('email', 'vendor@advs.test')->firstOrFail();
         $officer = User::query()->where('role', User::ROLE_COMPLIANCE_OFFICER)->orderBy('id')->firstOrFail();
-        $rejected = $this->negofoodVendor()->submissions()
-            ->where('status', Submission::STATUS_REJECTED)->firstOrFail();
+        $resubmission = $this->negofoodVendor()->submissions()
+            ->where('status', Submission::STATUS_RESUBMISSION_REQUESTED)->firstOrFail();
 
         $vendorTypes = Notification::query()->where('user_id', $vendorUser->id)->pluck('type');
         $this->assertContains(Notification::TYPE_SUBMISSION_RECEIVED, $vendorTypes);
@@ -107,8 +107,17 @@ class NegofoodSubmissionSeederTest extends TestCase
             Notification::query()
                 ->where('user_id', $officer->id)
                 ->where('type', Notification::TYPE_HIGH_RISK_ALERT)
-                ->where('related_submission_id', $rejected->id)
+                ->where('related_submission_id', $resubmission->id)
                 ->exists(),
+        );
+
+        // Officers also carry a record of the decisions themselves.
+        $this->assertSame(
+            2,
+            Notification::query()
+                ->where('user_id', $officer->id)
+                ->where('type', Notification::TYPE_DECISION_MADE)
+                ->count(),
         );
     }
 

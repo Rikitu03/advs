@@ -21,7 +21,7 @@ class DemoDataSeederTest extends TestCase
         $this->assertSame(5, Vendor::count());
         $this->assertSame(3, Submission::where('status', Submission::STATUS_PENDING_REVIEW)->count());
         $this->assertSame(1, Submission::where('status', Submission::STATUS_APPROVED)->count());
-        $this->assertSame(1, Submission::where('status', Submission::STATUS_REJECTED)->count());
+        $this->assertSame(1, Submission::where('status', Submission::STATUS_RESUBMISSION_REQUESTED)->count());
 
         // Every document carries a scored validation result, and officers have alerts.
         $this->assertSame(10, ValidationResult::count());
