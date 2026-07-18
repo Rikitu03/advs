@@ -51,7 +51,7 @@ import bir_dataset_generator as bir  # noqa: E402
 
 PY_ROOT = Path(__file__).resolve().parents[1]            # .../python
 TEMPLATE_PATH = PY_ROOT / "data" / "template" / "business_permits" / "Business Permit (Digos).png"
-LOGO_PATH = PY_ROOT / "logo" / "logo_digos.png"
+LOGO_PATH = PY_ROOT / "data" / "logo" / "logo_digos.png"
 SIGNATURE_PATH = PY_ROOT / "data" / "stamps" / "BIR_OFFICER_STAMP.png"  # blue-ink signature asset
 FONT_DIR = PY_ROOT / "data" / "fonts"
 BOXES_JSON = PY_ROOT / "json_data" / "business_permit_boxes_digos.json"

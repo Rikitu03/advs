@@ -1,0 +1,20 @@
+# Keep the image to inference essentials: api/, forensics/, scripts/, models/.
+env/
+venv/
+data/
+notebooks/
+tests/
+tmp/
+json_data/
+backup_models/
+models/tuning/
+.claude/
+.smoke_data/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.log
+.env.api
+DEVELOPMENT_PHASES.md
+Dockerfile
+.dockerignore

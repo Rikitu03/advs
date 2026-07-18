@@ -2,13 +2,17 @@
 
 Verifies whether two signatures belong to the same vendor. ResNet-50 backbone ->
 128-D L2-normalised embedding (twin) -> L1 distance -> sigmoid match probability.
-Synthetic forgeries are fabricated from genuine samples (elastic + rotation +
-noise) because the dataset only ships genuine signatures. Faithful to
-training_script.md §3.
+Images are RGB and go through ``resnet50.preprocess_input`` — the SAME
+preprocessing the ADVS API uses at serve time (api/routers/signature.py), so
+embeddings and the EER threshold transfer 1:1. Forged pairs use REAL skilled
+forgeries when a vendor ships them (e.g. CEDAR: ``<vendor>/forged/*.png``);
+otherwise synthetic forgeries are fabricated from genuine samples (elastic +
+rotation + noise). Faithful to training_script.md §3.
 
 Data layout (read-only):
-    <data-root>/training/signature_data/<vendor>/*.png    (genuine signatures)
-    <data-root>/validation/signature_data/<vendor>/*.png
+    <data-root>/training/signature_data/<vendor>/*.png           (genuine signatures)
+    <data-root>/training/signature_data/<vendor>/forged/*.png    (optional real forgeries)
+    <data-root>/validation/signature_data/<vendor>/*.png         (same shape)
 
 Outputs (under <models-out>):
     siamese_signature.h5, siamese_encoder.h5, signature_threshold.txt (EER)
@@ -77,7 +81,12 @@ def validate_structure(train_dir: Path, val_dir: Path) -> dict:
     vv = vendor_dirs(val_dir)
     if not tv:
         raise TrainError(f"No vendor subfolders under {train_dir}.")
-    return {"train_vendors": len(tv), "val_vendors": len(vv)}
+    with_real_forgeries = sum(1 for v in tv if (train_dir / v / "forged").is_dir())
+    return {
+        "train_vendors": len(tv),
+        "val_vendors": len(vv),
+        "train_vendors_with_real_forgeries": with_real_forgeries,
+    }
 
 
 def make_synthetic_forgery(img, seed: int):
@@ -99,25 +108,34 @@ def make_synthetic_forgery(img, seed: int):
     return np.clip(warped.astype("float32") + noise, 0, 255).astype("uint8")
 
 
-def load_vendors(root: Path, size: int) -> dict:
+def load_images(folder: Path, size: int) -> list:
+    """RGB uint8 arrays, resized — RGB to match the API's PIL serve path."""
     import cv2
 
-    out: dict[str, list] = {}
+    imgs = []
+    if not folder.is_dir():
+        return imgs
+    for ip in sorted(folder.iterdir()):
+        if ip.suffix.lower() not in IMG_EXTS:
+            continue
+        arr = cv2.imread(str(ip))
+        if arr is not None:
+            imgs.append(cv2.resize(cv2.cvtColor(arr, cv2.COLOR_BGR2RGB), (size, size)))
+    return imgs
+
+
+def load_vendors(root: Path, size: int) -> dict:
+    """vendor -> {"genuine": [...], "forged": [...]} (forged = real skilled
+    forgeries from the optional ``<vendor>/forged/`` subfolder, may be empty)."""
+    out: dict[str, dict] = {}
     for vdir in sorted(d for d in root.iterdir() if d.is_dir()):
-        imgs = []
-        for ip in sorted(vdir.iterdir()):
-            if ip.suffix.lower() not in IMG_EXTS:
-                continue
-            arr = cv2.imread(str(ip))
-            if arr is not None:
-                imgs.append(cv2.resize(arr, (size, size)))
-        if len(imgs) >= 2:
-            out[vdir.name] = imgs
+        genuine = load_images(vdir, size)
+        if len(genuine) >= 2:
+            out[vdir.name] = {"genuine": genuine, "forged": load_images(vdir / "forged", size)}
     return out
 
 
 def build_encoder(cfg: dict):
-    import tensorflow as tf
     from tensorflow.keras import layers, models
     from tensorflow.keras.applications import ResNet50
 
@@ -126,8 +144,19 @@ def build_encoder(cfg: dict):
                         input_shape=(size, size, 3))
     inp = layers.Input(shape=(size, size, 3))
     x = layers.Dense(cfg["embedding_dim"], activation=None)(backbone(inp))
-    x = layers.Lambda(lambda t: tf.math.l2_normalize(t, axis=1), name="l2norm")(x)
+    # UnitNormalization == L2-normalise. A real layer, NOT a Lambda: Keras 3
+    # cannot pickle a lambda that closes over the lazily-imported tf module,
+    # and the API's plain load_model() refuses Lambdas under default safe_mode.
+    x = layers.UnitNormalization(axis=-1, name="l2norm")(x)
     return models.Model(inp, x, name="siamese_encoder")
+
+
+def l1_distance(tensors):
+    """Module-level named function (no closure) so Keras can serialise the
+    twin model's Lambda layer into siamese_signature.h5."""
+    import tensorflow as tf
+
+    return tf.math.abs(tensors[0] - tensors[1])
 
 
 def equal_error_rate_threshold(distances, labels) -> float:
@@ -154,6 +183,7 @@ def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
     import numpy as np
     import tensorflow as tf
     from tensorflow.keras import layers, models
+    from tensorflow.keras.applications.resnet50 import preprocess_input
 
     size = cfg["image_size"]
     rng = np.random.default_rng(cfg["seed"])
@@ -162,27 +192,37 @@ def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
     val_vendors = load_vendors(val_dir, size)
     if len(train_vendors) < 1:
         raise TrainError("Need >= 1 training vendor with >= 2 genuine signatures.")
-    log(f"vendors -> {len(train_vendors)} train / {len(val_vendors)} val")
+    n_real = sum(1 for d in train_vendors.values() if d["forged"])
+    log(f"vendors -> {len(train_vendors)} train ({n_real} with real forgeries) / {len(val_vendors)} val")
 
     def make_pairs(vendors: dict, n_per_vendor: int):
         pa, pb, labels = [], [], []
-        for imgs in vendors.values():
+        for data in vendors.values():
+            imgs = data["genuine"]
+            real_forged = data["forged"]
             for k in range(n_per_vendor):
                 if k % 2 == 0:  # genuine pair
                     i, j = rng.choice(len(imgs), size=2, replace=len(imgs) < 2)
                     pa.append(imgs[i]); pb.append(imgs[j]); labels.append(1)
-                else:           # forged pair
+                else:           # forged pair — real skilled forgery when available
                     i = int(rng.integers(len(imgs)))
-                    forged = make_synthetic_forgery(imgs[i], seed=int(rng.integers(1 << 30)))
+                    if real_forged:
+                        forged = real_forged[int(rng.integers(len(real_forged)))]
+                    else:
+                        forged = make_synthetic_forgery(imgs[i], seed=int(rng.integers(1 << 30)))
                     pa.append(imgs[i]); pb.append(forged); labels.append(0)
-        a = np.asarray(pa, dtype="float32") / 255.0
-        b = np.asarray(pb, dtype="float32") / 255.0
+        # resnet50.preprocess_input == the API's serve-time preprocessing
+        # (api/routers/signature.py) — keep them identical or the EER
+        # threshold does not transfer.
+        a = preprocess_input(np.asarray(pa, dtype="float32"))
+        b = preprocess_input(np.asarray(pb, dtype="float32"))
         return a, b, np.asarray(labels, dtype="float32")
 
     encoder = build_encoder(cfg)
     in_a = layers.Input(shape=(size, size, 3))
     in_b = layers.Input(shape=(size, size, 3))
-    distance = layers.Lambda(lambda t: tf.math.abs(t[0] - t[1]), name="l1_distance")(
+    distance = layers.Lambda(l1_distance, name="l1_distance",
+                             output_shape=(cfg["embedding_dim"],))(
         [encoder(in_a), encoder(in_b)]
     )
     out = layers.Dense(1, activation="sigmoid")(distance)
@@ -212,7 +252,8 @@ def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
     log(f"Saved siamese_signature.h5, siamese_encoder.h5, signature_threshold.txt (EER={threshold:.4f})")
 
     section("Inference sanity check")
-    emb = encoder.predict(np.random.rand(1, size, size, 3).astype("float32"), verbose=0)
+    probe = preprocess_input(np.random.rand(1, size, size, 3).astype("float32") * 255.0)
+    emb = encoder.predict(probe, verbose=0)
     log(f"encoder -> embedding dim {emb.shape[1]}")
 
 
