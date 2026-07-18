@@ -1,0 +1,36 @@
+# ADVS ML API — inference-only dependencies for the FastAPI service (python/api).
+#
+# Training dependencies stay in requirements.txt; this file is what the
+# Dockerfile installs so the deployed image carries no trainers, tuners, or
+# synthetic-data generators. Local dev installs this INTO the existing venv
+# (python/env/Scripts/python.exe -m pip install -r requirements-api.txt).
+
+# --- web service ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9       # multipart file uploads
+pydantic-settings>=2.4        # env-driven Settings (model paths, thresholds)
+httpx>=0.27                   # fastapi TestClient transport (tests + health probes)
+
+# --- numerics / imaging (match requirements.txt pins) ---
+numpy>=1.26,<2.1
+pillow>=10.0
+opencv-python-headless>=4.9
+
+# --- Stage 2: OCR ---
+pytesseract>=0.3.10           # needs the tesseract binary (apt: tesseract-ocr)
+pdf2image>=1.17               # needs Poppler (apt: poppler-utils)
+
+# --- Stage 3: ResNet-50 classifier (.keras / .h5) ---
+# tensorflow-cpu: the service is CPU-only on HF free tier; 2.16 is the first
+# release with Python 3.12 wheels (see requirements.txt note).
+tensorflow-cpu==2.16.*
+
+# --- Stage 4: YOLOv8 detector (pulls in torch/torchvision) ---
+# In Docker, install torch CPU wheels first to avoid the CUDA download:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+ultralytics>=8.1
+
+# --- Stage T: forensics (metadata reads) ---
+pikepdf>=8.0
+piexif>=1.1
