@@ -76,9 +76,36 @@ return [
         ],
 
         // Python invocation (Process facade) — mirrors the other Stage runners.
+        // Retained for the standalone Stage-T CLI; the document pipeline now runs
+        // forensics inside the ML API's /v1/validate (see the 'ml' block below).
         'python_bin' => env('ADVS_PYTHON_BIN', 'python3'),
         'script' => 'scripts/tamper_analyze.py',
         'timeout' => (int) env('TAMPER_TIMEOUT', 120),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | ML API — the FastAPI document-validation service (python/api)
+    |--------------------------------------------------------------------------
+    |
+    | The pipeline (classify / OCR / detect / signature / stamp / forensics) is
+    | reached in ONE call to POST {base_url}/v1/validate, authenticated with a
+    | bearer token that must match the service's API_TOKEN (python/.env.api).
+    | Env-driven so dev points at a local uvicorn and prod at a Hugging Face
+    | Space without code changes. See app/Services/Document/MlPipelineService.
+    */
+
+    'ml' => [
+        'base_url' => rtrim((string) env('ML_API_URL', 'http://127.0.0.1:7860'), '/'),
+        'token' => env('ML_API_TOKEN'),
+
+        // ML inference on CPU is slow; give the request room, fail forward after.
+        'timeout' => (int) env('ML_API_TIMEOUT', 180),
+        'connect_timeout' => (int) env('ML_API_CONNECT_TIMEOUT', 10),
+        'retries' => (int) env('ML_API_RETRIES', 2),
+
+        // OCR field template the API applies (bir | none).
+        'template' => env('ML_API_TEMPLATE', 'bir'),
     ],
 
 ];

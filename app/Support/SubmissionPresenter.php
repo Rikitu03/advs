@@ -88,10 +88,14 @@ class SubmissionPresenter
             'pages' => max(1, (int) ($document->page_number ?? 1)),
             'size' => self::formatBytes((int) $document->file_size_bytes),
             'status' => $document->processing_status,
+            'mime' => $document->mime_type,
+            'kind' => self::previewKind($document->mime_type),
         ])->values()->all();
 
         $summary['ocr_excerpt'] = $result?->ocr_extracted_text
             ?? 'OCR stage not yet available — no extracted text for this submission.';
+
+        $summary['flags_by_document'] = self::flagGroups($submission, $typeNames);
 
         $summary['risk_driver'] = self::riskDriver($summary['flags']);
 
@@ -184,14 +188,92 @@ class SubmissionPresenter
     {
         return $submission->documents
             ->flatMap(fn ($document): array => $document->validationResult?->flags ?? [])
+            ->map(self::humanizeFlag(...))
             ->unique()
             ->values()
             ->all();
     }
 
+    /**
+     * Flags grouped by the document that raised them, in file order. Documents
+     * with no flags are omitted; flag tokens are humanised (see humanizeFlag()).
+     *
+     * @param  Collection<int|string, string>  $typeNames
+     * @return list<array{document: string, type: string, flags: list<string>}>
+     */
+    private static function flagGroups(Submission $submission, Collection $typeNames): array
+    {
+        return $submission->documents
+            ->map(fn ($document): array => [
+                'document' => $document->original_filename,
+                'type' => $typeNames[$document->document_type_id] ?? 'Unassigned',
+                'flags' => collect($document->validationResult?->flags ?? [])
+                    ->map(self::humanizeFlag(...))
+                    ->unique()
+                    ->values()
+                    ->all(),
+            ])
+            ->filter(fn (array $group): bool => $group['flags'] !== [])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Turns a machine flag token into an officer-readable phrase. Tokens already
+     * written as prose (they contain a space) are left untouched.
+     *
+     * - "missing_required_fields:form_no,tin" → "Missing required fields: Form No, TIN"
+     * - "no_signature_detected"               → "No signature detected"
+     */
+    private static function humanizeFlag(string $flag): string
+    {
+        if (str_contains($flag, ' ')) {
+            return $flag;
+        }
+
+        if (str_starts_with($flag, 'missing_required_fields:')) {
+            $fields = array_filter(
+                explode(',', substr($flag, strlen('missing_required_fields:'))),
+                fn (string $field): bool => trim($field) !== '',
+            );
+
+            return 'Missing required fields: '.implode(', ', array_map(self::humanizeFieldName(...), $fields));
+        }
+
+        return ucfirst(str_replace('_', ' ', $flag));
+    }
+
+    /**
+     * Humanises a snake_case field key, preserving domain acronyms (TIN, RDO).
+     */
+    private static function humanizeFieldName(string $field): string
+    {
+        $acronyms = ['tin' => 'TIN', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID'];
+
+        $words = array_map(
+            fn (string $word): string => $acronyms[$word] ?? ucfirst($word),
+            explode('_', trim($field)),
+        );
+
+        return implode(' ', $words);
+    }
+
     public static function reference(Submission $submission): string
     {
         return sprintf('SUB-%05d', $submission->id);
+    }
+
+    /**
+     * Which in-browser preview a stored file supports: 'image' and 'pdf' render
+     * inline; anything else ('other') falls back to a download prompt.
+     */
+    private static function previewKind(?string $mime): string
+    {
+        return match (true) {
+            $mime !== null && str_starts_with($mime, 'image/') => 'image',
+            $mime === 'application/pdf' => 'pdf',
+            default => 'other',
+        };
     }
 
     /**

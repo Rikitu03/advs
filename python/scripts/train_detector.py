@@ -42,7 +42,7 @@ SMOKE_OVERRIDES = {
     "batch": 2,
     "patience": 2,
 }
-NAMES = {0: "signature", 1: "stamp", 2: "logo"}
+NAMES = {0: "logo", 1: "signature", 2: "stamp_seal"}
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
@@ -130,7 +130,7 @@ def train(cfg: dict, data_root: Path, models_out: Path) -> None:
         shutil.copy(str(exported), str(onnx_path))
     log(f"Exported {onnx_path}")
     if onnx_path.exists():
-        log("inference sanity check -> yolov8_signature_stamp_logo.onnx present")
+         log("inference sanity check -> yolov8_signature_stamp_logo.onnx present")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

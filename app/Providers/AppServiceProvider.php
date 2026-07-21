@@ -9,6 +9,7 @@ use App\Policies\RetentionPolicyPolicy;
 use App\Policies\SystemSettingPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -36,5 +37,14 @@ class AppServiceProvider extends ServiceProvider
 
         // Data retention policies are admin-only configuration records.
         Gate::policy(RetentionPolicy::class, RetentionPolicyPolicy::class);
+
+        // "Preload once": emit Vite preload hints only for visitors who haven't
+        // warmed their cache yet. Returning visitors (assets_warm cookie present)
+        // already have the entry chunks cached, so suppress the redundant hints.
+        // The cookie is set client-side after load (partials/head) and exempted
+        // from encryption in bootstrap/app.php, exactly like the `theme` cookie.
+        Vite::usePreloadTagAttributes(
+            fn (): array|false => request()->cookie('assets_warm') ? false : []
+        );
     }
 }

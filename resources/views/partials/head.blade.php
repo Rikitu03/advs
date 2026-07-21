@@ -72,3 +72,14 @@
 </noscript>
 
 @vite(['resources/css/app.css', 'resources/js/app.js'])
+
+@unless (request()->cookie('assets_warm'))
+    {{-- Once the build assets have loaded and are cached, mark this browser
+         "warm" so returning visits skip the now-redundant Vite preload hints
+         (see AppServiceProvider + bootstrap/app.php). Plaintext like `theme`. --}}
+    <script>
+        window.addEventListener('load', function () {
+            document.cookie = 'assets_warm=1;path=/;max-age=2592000;SameSite=Lax';
+        });
+    </script>
+@endunless

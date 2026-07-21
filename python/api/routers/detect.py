@@ -19,6 +19,17 @@ router = APIRouter()
 
 DETECTABLE = ("signature", "stamp", "logo")
 
+# The trained detector names its stamp class "stamp_seal", but the rest of the
+# pipeline (validate.py Stage 4b, Laravel's MlPipelineService) keys stamp/logo
+# verification off the canonical "stamp" label. Normalise at the detection
+# boundary so a single vocabulary flows downstream and a real stamp isn't
+# silently dropped.
+LABEL_ALIASES = {"stamp_seal": "stamp"}
+
+
+def _canonical(label: str) -> str:
+    return LABEL_ALIASES.get(label, label)
+
 
 def run_detection(model, image: Image.Image, settings: Settings) -> dict:
     """Detect regions on one PIL page; no detection is a flag, never an error."""
@@ -33,13 +44,13 @@ def run_detection(model, image: Image.Image, settings: Settings) -> dict:
         names = result.names
         for box in result.boxes:
             detections.append({
-                "label": str(names[int(box.cls)]),
+                "label": _canonical(str(names[int(box.cls)])),
                 "confidence": float(box.conf),
                 "box": [float(v) for v in box.xyxy[0].tolist()],
             })
 
     found = {d["label"] for d in detections}
-    known = {str(n) for n in getattr(model, "names", {}).values()}
+    known = {_canonical(str(n)) for n in getattr(model, "names", {}).values()}
     flags = [
         f"no_{label}_detected"
         for label in DETECTABLE

@@ -13,6 +13,7 @@ here.
 
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -39,6 +40,21 @@ router = APIRouter()
 
 def _skipped(reason: str) -> dict:
     return {"skipped": True, "reason": reason}
+
+
+def _parse_forensics(raw: str | None) -> dict:
+    """Optional admin-tuned forensics config (weights / tamper_threshold) from the
+    caller, merged into the Stage-T context so operator overrides apply here too.
+    Malformed JSON is ignored — forensics fail forward to the script defaults."""
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {key: parsed[key] for key in ("weights", "tamper_threshold") if parsed.get(key) is not None}
 
 
 def _crop(page: Image.Image, box: list[float]) -> Image.Image:
@@ -69,12 +85,14 @@ async def validate(
     issue_date: str | None = Form(None),
     signature_reference: str | None = Form(None),
     stamp_reference: str | None = Form(None),
+    forensics: str | None = Form(None),
 ) -> dict:
     settings: Settings = request.app.state.settings
     registry: ModelRegistry = request.app.state.registry
 
     sig_reference = emb.parse_reference(signature_reference, "signature_reference") if signature_reference else None
     logo_reference = emb.parse_reference(stamp_reference, "stamp_reference") if stamp_reference else None
+    forensics_ctx = _parse_forensics(forensics)
 
     stages: dict[str, dict] = {}
     flags: list[str] = []
@@ -195,7 +213,8 @@ async def validate(
         # ── Stage T: forensic tampering — always runs, on the ORIGINAL ─────
         try:
             verdict = run_tamper_stage(
-                original, page_paths, {**ocr_context, "issue_date": issue_date}
+                original, page_paths,
+                {**ocr_context, "issue_date": issue_date, **forensics_ctx},
             )
             stages["tamper"] = verdict
             flags.extend(verdict.get("flags", []))

@@ -18,11 +18,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => EnsureUserHasRole::class,
         ]);
 
-        // The theme preference is written client-side as a plaintext cookie so
-        // the layouts can read it to guard the initial <html> theme class.
-        // Exclude it from cookie encryption, otherwise EncryptCookies fails to
-        // decrypt it and request()->cookie('theme') reads null.
-        $middleware->encryptCookies(except: ['theme']);
+        // Both cookies are written client-side as plaintext and read back
+        // server-side, so they must skip cookie encryption — otherwise
+        // EncryptCookies fails to decrypt them and request()->cookie() reads null.
+        //   theme       — layouts read it to guard the initial <html> theme class.
+        //   assets_warm — AppServiceProvider reads it to skip already-cached Vite
+        //                 preload hints for returning visitors (partials/head).
+        $middleware->encryptCookies(except: ['theme', 'assets_warm']);
 
         // Gate every web route. Order matters: a registered vendor declares
         // business/owner details first, then enrolls a signature, before reaching

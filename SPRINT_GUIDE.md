@@ -115,6 +115,7 @@ Required scripts:
 | `python/scripts/stamp_verify.py` | Member 2 | YOLO stamp crop plus EfficientNet issuer-logo comparison |
 | `python/scripts/enroll_reference.py` | Member 2 | Generate/store issuer logo reference vector after officer approval |
 
+
 ### Core JSON Output Shapes
 
 Preprocess:
