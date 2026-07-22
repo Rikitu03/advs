@@ -475,3 +475,34 @@ def test_validate_rejects_malformed_reference(client, jpeg_bytes):
         data={"signature_reference": "not-a-json-array"},
     )
     assert response.status_code == 422
+
+
+def test_validate_ignores_malformed_forensics(client, jpeg_bytes):
+    """Bad forensics JSON fails forward (ignored), not a 422 — Stage T still runs."""
+    response = client.post(
+        "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"forensics": "not-json"},
+    )
+    assert response.status_code == 200
+    assert "tamper_score" in response.json()["stages"]["tamper"]
+
+
+def test_validate_forwards_forensics_threshold_to_tamper(client, jpeg_bytes):
+    """The forensics form field's tamper_threshold reaches Stage T's pass gate,
+    proving Laravel's admin-tuned forensics config is honoured server-side."""
+    baseline = client.post(
+        "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes)
+    ).json()["stages"]["tamper"]
+    authenticity = baseline["tamper_authenticity"]
+    if baseline["hard_flag"] or not 0.02 < authenticity < 0.98:
+        pytest.skip("synthetic page can't cleanly straddle the tamper gate")
+
+    def passed(threshold: float) -> bool:
+        return client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"forensics": json.dumps({"tamper_threshold": threshold})},
+        ).json()["stages"]["tamper"]["tamper_passed"]
+
+    # Same document → same authenticity; only the forwarded gate should move.
+    assert passed(authenticity - 0.02) is True
+    assert passed(authenticity + 0.02) is False

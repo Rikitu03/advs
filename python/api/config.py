@@ -63,7 +63,7 @@ class Settings(BaseSettings):
 
     @property
     def detector_path(self) -> Path:
-        return self.detector_model_path or self.model_dir / "yolov8_best.pt"
+        return self.detector_model_path or self.model_dir / "yolov8_nano_moredata_best.pt"
 
     @property
     def siamese_path(self) -> Path:

@@ -5,10 +5,10 @@ namespace Tests\Feature\Document;
 use App\Actions\ProcessDocumentAction;
 use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
-use App\Models\ValidationResult;
-use App\Services\Document\TamperDetectionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ProcessDocumentActionTest extends TestCase
@@ -16,18 +16,68 @@ class ProcessDocumentActionTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Mock Stage T's Python call to a canned verdict; let persist() run for real.
-     *
-     * @param  array<string, mixed>  $verdict
+     * A document with a real file behind the 'local' disk so MlPipelineService can
+     * attach it before the (faked) HTTP call.
      */
-    private function fakeForensics(array $verdict): void
+    private function document(): Document
     {
-        $this->mock(TamperDetectionService::class, function ($mock) use ($verdict) {
-            $mock->shouldReceive('analyze')->once()->andReturn($verdict);
-            $mock->shouldReceive('persist')->once()->passthru();
-        });
+        Storage::fake('local');
+        $document = Document::factory()->create();
+        Storage::disk('local')->put($document->file_path, 'fake-document-bytes');
+
+        return $document;
     }
 
+    /**
+     * Fake the ML API's /v1/validate to a canned fail-forward body.
+     *
+     * @param  array<string, mixed>  $stages
+     * @param  list<string>  $flags
+     */
+    private function fakeMl(array $stages, array $flags = []): void
+    {
+        Http::fake([
+            '*/v1/validate' => Http::response(['stages' => $stages, 'flags' => $flags], 200),
+        ]);
+    }
+
+    /**
+     * A clean, fully-verified /v1/validate stage set; override any stage.
+     *
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function cleanStages(array $overrides = []): array
+    {
+        return array_replace([
+            'classification' => ['label' => 'BIR Permit', 'confidence' => 0.95, 'passed_threshold' => true],
+            'ocr' => ['page_count' => 1, 'pages' => [[
+                'text' => 'BUREAU OF INTERNAL REVENUE',
+                'words' => [],
+                'fields' => [],
+                'quality' => [
+                    'mean_confidence' => 92.0,
+                    'text_validation_score' => 1.0,
+                    'required_matched' => 3,
+                    'required_total' => 3,
+                    'flags' => [],
+                ],
+            ]]],
+            'detection' => ['detections' => [
+                ['label' => 'signature', 'confidence' => 0.9, 'box' => [10, 20, 30, 40]],
+                ['label' => 'stamp', 'confidence' => 0.8, 'box' => [50, 60, 70, 80]],
+            ], 'flags' => []],
+            'signature' => ['match' => true, 'distance' => 0.7, 'similarity' => 0.588,
+                'threshold' => 1.243976, 'embedding' => []],
+            'stamp' => ['document_type' => 'bir_permit', 'city' => '', 'match' => true,
+                'similarity_score' => 0.95, 'threshold' => 0.85, 'reason' => null],
+            'tamper' => $this->cleanVerdict(),
+        ], $overrides);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function cleanVerdict(): array
     {
         return [
@@ -41,18 +91,26 @@ class ProcessDocumentActionTest extends TestCase
         ];
     }
 
-    public function test_pipeline_runs_stage_t_and_completes_with_low_risk(): void
+    public function test_pipeline_maps_stages_and_completes_with_low_risk(): void
     {
-        $this->fakeForensics($this->cleanVerdict());
-        $document = Document::factory()->create();
-        ValidationResult::factory()->create(['document_id' => $document->id, 'submission_id' => $document->submission_id]);
+        $document = $this->document();
+        $this->fakeMl($this->cleanStages());
 
         $result = app(ProcessDocumentAction::class)->execute($document->fresh());
 
         $this->assertSame(Document::STATUS_COMPLETED, $document->fresh()->processing_status);
+
+        // Component columns were mapped from the API response.
+        $this->assertSame('BIR Permit', $result->classification_label);
+        $this->assertEqualsWithDelta(0.95, $result->classification_confidence, 0.001);
+        $this->assertTrue($result->signature_detected);
+        $this->assertTrue($result->stamp_detected);
+        // signature_score is the calibrated authenticity (NOT raw similarity 0.588):
+        // 1 - 0.7/(2*1.243976) ≈ 0.719.
+        $this->assertEqualsWithDelta(0.719, $result->signature_score, 0.005);
+
         $this->assertNotNull($result->document_risk_score);
         $this->assertLessThan(31, $result->document_risk_score);
-
         $this->assertDatabaseHas('tamper_analyses', ['document_id' => $document->id]);
 
         $submission = $document->submission->fresh();
@@ -63,7 +121,9 @@ class ProcessDocumentActionTest extends TestCase
 
     public function test_high_confidence_tamper_hard_overrides_submission_to_high(): void
     {
-        $this->fakeForensics([
+        $document = $this->document();
+        // Every ML component is clean — only the tamper signal should drive the band.
+        $this->fakeMl($this->cleanStages(['tamper' => [
             'tamper_score' => 0.62,
             'tamper_authenticity' => 0.30,
             'tamper_confidence' => 0.90, // >= hard threshold
@@ -71,11 +131,7 @@ class ProcessDocumentActionTest extends TestCase
             'tamper_passed' => false,
             'flags' => ['Copy-move: 48 cloned keypoints'],
             'techniques' => ['copy_move' => ['score' => 0.15, 'pass' => false, 'flags' => ['Copy-move: 48 cloned keypoints']]],
-        ]);
-
-        // Every ML component is clean — only the tamper signal should drive the band.
-        $document = Document::factory()->create();
-        ValidationResult::factory()->create(['document_id' => $document->id, 'submission_id' => $document->submission_id]);
+        ]]));
 
         $result = app(ProcessDocumentAction::class)->execute($document->fresh());
 
@@ -85,28 +141,39 @@ class ProcessDocumentActionTest extends TestCase
         $this->assertSame('high', $document->submission->fresh()->risk_level);
     }
 
-    public function test_missing_ml_components_raise_risk_via_penalty(): void
+    public function test_skipped_ml_components_raise_risk_via_penalty(): void
     {
-        $this->fakeForensics($this->cleanVerdict());
-        $document = Document::factory()->create();
-        ValidationResult::factory()->create([
-            'document_id' => $document->id,
-            'submission_id' => $document->submission_id,
-            'signature_detected' => false,
-            'signature_score' => null,
-            'stamp_detected' => false,
-            'stamp_score' => null,
-        ]);
+        $document = $this->document();
+        $this->fakeMl($this->cleanStages([
+            'signature' => ['skipped' => true, 'reason' => 'no_signature_detected'],
+            'stamp' => ['skipped' => true, 'reason' => 'no_stamp_detected'],
+        ]));
 
         $result = app(ProcessDocumentAction::class)->execute($document->fresh());
 
         // Two missing components → 2 × 15 penalty points on top of the blend.
+        $this->assertFalse($result->signature_detected);
+        $this->assertFalse($result->stamp_detected);
         $this->assertGreaterThanOrEqual(30, $result->document_risk_score);
+    }
+
+    public function test_ml_api_failure_fails_forward_and_still_finalizes(): void
+    {
+        $document = $this->document();
+        Http::fake(['*/v1/validate' => Http::response('', 500)]);
+
+        $result = app(ProcessDocumentAction::class)->execute($document->fresh());
+
+        $this->assertSame(Document::STATUS_COMPLETED, $document->fresh()->processing_status);
+        $this->assertContains('ML pipeline unavailable', $result->flags);
+        // No component scores + no forensic verdict → nothing persisted for Stage T.
+        $this->assertDatabaseMissing('tamper_analyses', ['document_id' => $document->id]);
+        $this->assertNotNull($result->document_risk_score);
     }
 
     public function test_job_marks_document_failed_on_failure(): void
     {
-        $document = Document::factory()->create(['processing_status' => Document::STATUS_FORENSICS]);
+        $document = Document::factory()->create(['processing_status' => Document::STATUS_VERIFYING]);
 
         (new ProcessDocumentJob($document))->failed(new \RuntimeException('boom'));
 

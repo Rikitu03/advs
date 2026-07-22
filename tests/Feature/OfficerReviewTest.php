@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Document;
 use App\Models\Submission;
 use App\Models\User;
+use App\Models\ValidationResult;
 use App\Models\Vendor;
 use App\Support\SubmissionPresenter;
 use Database\Seeders\DemoDataSeeder;
@@ -101,6 +102,66 @@ class OfficerReviewTest extends TestCase
             ->assertSee('Business Permit')
             ->assertSee('304.8 KB')
             ->assertDontSee('other-vendor-financial-statement.pdf');
+    }
+
+    public function test_drill_down_groups_humanised_flags_by_document(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $birTypeId = (int) DB::table('document_types')->where('name', 'BIR Certificate of Registration')->value('id');
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $flagged = Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'northern-star-bir-certificate.png',
+            'document_type_id' => $birTypeId,
+        ]);
+        ValidationResult::factory()->for($flagged)->create([
+            'flags' => ['missing_required_fields:form_no,tin,rdo_code', 'no_signature_detected'],
+        ]);
+
+        // A clean document must not create an empty group in the panel.
+        $clean = Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'clean-business-permit.jpg',
+            'document_type_id' => $birTypeId,
+        ]);
+        ValidationResult::factory()->for($clean)->create(['flags' => []]);
+
+        $detail = SubmissionPresenter::detail($submission->fresh());
+
+        $this->assertCount(1, $detail['flags_by_document']);
+        $this->assertSame('northern-star-bir-certificate.png', $detail['flags_by_document'][0]['document']);
+        $this->assertSame(
+            ['Missing required fields: Form No, TIN, RDO Code', 'No signature detected'],
+            $detail['flags_by_document'][0]['flags'],
+        );
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('Missing required fields: Form No, TIN, RDO Code')
+            ->assertSee('No signature detected');
+    }
+
+    public function test_drill_down_marks_each_document_with_a_preview_kind(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'permit.png',
+            'mime_type' => 'image/png',
+        ]);
+        Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'registration.pdf',
+            'mime_type' => 'application/pdf',
+        ]);
+
+        $documents = collect(SubmissionPresenter::detail($submission->fresh())['documents'])->keyBy('name');
+
+        $this->assertSame('image', $documents['permit.png']['kind']);
+        $this->assertSame('pdf', $documents['registration.pdf']['kind']);
     }
 
     public function test_officer_document_link_streams_the_vendors_stored_file(): void
