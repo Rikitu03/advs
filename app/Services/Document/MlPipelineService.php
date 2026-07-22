@@ -47,7 +47,7 @@ class MlPipelineService
         );
 
         $form = array_filter([
-            'template' => $ml['template'] ?? 'bir',
+            'template' => $this->ocrTemplateFor($type['code'] ?? null),
             'document_type' => $type['code'] ?? null,
             'city' => $city,
             'signature_reference' => $this->resolveSignatureReference($document),
@@ -217,6 +217,21 @@ class MlPipelineService
     private function float(mixed $value): ?float
     {
         return $value === null ? null : (float) $value;
+    }
+
+    /**
+     * The OCR field template the API applies for a document type. The three
+     * vendor-submittable types map to their own field template; anything else
+     * (IDs, contracts, …) falls back to the configured default (see config/advs.php).
+     */
+    private function ocrTemplateFor(?string $code): string
+    {
+        return match ($code) {
+            'bir_certificate' => 'bir',
+            'business_permit' => 'business_permit',
+            'dti_registration' => 'dti',
+            default => (string) (config('advs.ml.template') ?? 'bir'),
+        };
     }
 
     /**

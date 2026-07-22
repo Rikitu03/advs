@@ -28,7 +28,11 @@ DEFAULT_MAD_Z = 3.5
 # (MAD≈0) still flags a genuinely different field instead of dividing by zero.
 MAD_FLOOR_FRAC = 0.05
 # Ignore very short tokens — single glyphs / punctuation have unreliable metrics.
-MIN_TEXT_LEN = 2
+MIN_TEXT_LEN = 3
+# Outliers whose metric value sits within this relative tolerance of another
+# outlier form a consistent group — a second legitimate type size (title,
+# heading, form number), not a re-typed field. Only isolated outliers count.
+GROUP_TOLERANCE = 0.20
 # Words must clear this OCR confidence to be trusted as baseline samples.
 MIN_CONF = 40.0
 # Each outlier field costs this much authenticity.
@@ -75,13 +79,29 @@ def analyze(words: list[dict[str, Any]] | None, mad_z: float = DEFAULT_MAD_Z) ->
     h_mad = max(_median_abs_deviation(heights, h_med), MAD_FLOOR_FRAC * h_med)
     w_mad = max(_median_abs_deviation(char_ws, w_med), MAD_FLOOR_FRAC * w_med)
 
-    outliers = []
+    candidates = []
     for s in samples:
         hz = _robust_z(s["height"], h_med, h_mad)
         wz = _robust_z(s["char_w"], w_med, w_mad)
         if hz >= mad_z or wz >= mad_z:
             metric = "height" if hz >= wz else "spacing"
-            outliers.append({"text": s["text"], "metric": metric, "height_z": round(hz, 2), "char_w_z": round(wz, 2)})
+            value = s["height"] if metric == "height" else s["char_w"]
+            candidates.append({"text": s["text"], "metric": metric, "_value": value,
+                               "height_z": round(hz, 2), "char_w_z": round(wz, 2)})
+
+    # Documents legitimately mix type sizes (titles, headings, stamps of form
+    # numbers). A group of deviating words that agree with each other is a
+    # second font, not tampering — only typographically ISOLATED outliers are
+    # evidence of a re-typed field.
+    outliers = []
+    for cand in candidates:
+        peers = [
+            o for o in candidates
+            if o is not cand and o["metric"] == cand["metric"]
+            and abs(o["_value"] - cand["_value"]) <= GROUP_TOLERANCE * cand["_value"]
+        ]
+        if not peers:
+            outliers.append({k: v for k, v in cand.items() if k != "_value"})
 
     score = max(0.0, 1.0 - PER_OUTLIER_PENALTY * len(outliers))
     if outliers:

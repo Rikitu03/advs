@@ -44,7 +44,7 @@ class VendorPortalTest extends TestCase
             ->assertSee('Pending Review')
             ->assertSee('Business Permit')
             ->assertSee('BIR Permit')
-            ->assertSee('Financial Statement')
+            ->assertSee('DTI Registration')
             ->assertSee('PDF, PNG, JPG')
             ->assertDontSee('Upload ready files')
             ->assertDontSee('Retry');

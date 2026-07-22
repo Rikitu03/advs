@@ -18,7 +18,10 @@ from ..uploads import ocr_cfg, save_upload
 
 router = APIRouter()
 
-TEMPLATES = ("bir", "none")
+# Field templates the OCR stage can apply. The three document templates come from
+# ocr_dryrun.TEMPLATES (bir / business_permit / dti); "none" skips field
+# extraction (a type with no structured template, e.g. an ID or contract).
+TEMPLATES = ("bir", "business_permit", "dti", "none")
 
 
 def resolve_engine(settings: Settings) -> str:
@@ -44,6 +47,9 @@ def run_ocr_stage(original: Path, settings: Settings, template: str = "bir") -> 
     except od.OcrError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Select the per-document-type field template (None => no field extraction).
+    tmpl = od.TEMPLATES.get(template)
+
     pages = []
     for image in images:
         preprocessed = od.preprocess(image, cfg)
@@ -51,15 +57,18 @@ def run_ocr_stage(original: Path, settings: Settings, template: str = "bir") -> 
         text = od.clean_text(ocr["raw_text"])
 
         fields = None
-        if template == "bir":
-            fields = od.extract_fields(text, ocr["token_conf"])
-            fields = od.refine_fields_with_positions(fields, ocr["words"], ocr["token_conf"])
+        keywords = None
+        if tmpl is not None:
+            keywords = tmpl["keywords"]
+            fields = od.extract_fields(text, ocr["token_conf"], tmpl["field_specs"])
+            if tmpl["positional"] is not None:
+                fields = tmpl["positional"](fields, ocr["words"], ocr["token_conf"])
 
         pages.append({
             "text": text,
             "words": ocr["words"],
             "fields": fields,
-            "quality": od.score_quality(text, fields or {}, ocr, cfg),
+            "quality": od.score_quality(text, fields or {}, ocr, cfg, keywords),
         })
 
     return {"page_count": len(pages), "pages": pages}

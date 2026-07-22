@@ -185,6 +185,51 @@ class OfficerWorkflowTest extends TestCase
         $component->call('setComponentFilter', 'type-999999')->assertStatus(400);
     }
 
+    public function test_ocr_text_panel_can_be_filtered_by_document(): void
+    {
+        $submission = $this->makePendingSubmission('Reyes Manufacturing', 40.0, 'medium');
+        $vendor = $submission->vendor;
+
+        // Replace the helper's untyped document with two distinct-text documents.
+        $submission->documents()->delete();
+
+        $bir = Document::factory()->for($submission)->for($vendor)->create([
+            'original_filename' => 'bir-certificate.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $bir->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE CERTIFICATE',
+        ]);
+
+        $permit = Document::factory()->for($submission)->for($vendor)->create([
+            'original_filename' => 'business-permit.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $permit->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'CITY OF DIGOS BUSINESS PERMIT',
+        ]);
+
+        $this->actingAs($this->officer);
+
+        // Default selection is the first document in file order.
+        $component = Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->assertSet('ocrDocumentFilter', (string) $bir->id)
+            ->assertSee('BUREAU OF INTERNAL REVENUE CERTIFICATE')
+            ->assertDontSee('CITY OF DIGOS BUSINESS PERMIT');
+
+        // Filtering to the other document swaps in its own OCR text.
+        $component->call('setOcrDocumentFilter', (string) $permit->id)
+            ->assertSee('CITY OF DIGOS BUSINESS PERMIT')
+            ->assertDontSee('BUREAU OF INTERNAL REVENUE CERTIFICATE');
+
+        // Unknown document ids are refused.
+        $component->call('setOcrDocumentFilter', '999999')->assertStatus(400);
+    }
+
     public function test_officer_can_request_resubmission_with_a_reason(): void
     {
         $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');

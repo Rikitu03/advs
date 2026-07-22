@@ -92,8 +92,7 @@ class SubmissionPresenter
             'kind' => self::previewKind($document->mime_type),
         ])->values()->all();
 
-        $summary['ocr_excerpt'] = $result?->ocr_extracted_text
-            ?? 'OCR stage not yet available — no extracted text for this submission.';
+        [$summary['ocr_filters'], $summary['ocr_by_document']] = self::ocrByDocument($submission);
 
         $summary['flags_by_document'] = self::flagGroups($submission, $typeNames);
 
@@ -219,6 +218,28 @@ class SubmissionPresenter
     }
 
     /**
+     * Per-document OCR text for the drill-down's filter tabs, in file order —
+     * one tab per document (keyed by document id), since raw OCR text is
+     * intrinsically per-file, not per-type.
+     *
+     * @return array{0: list<array{key: string, label: string}>, 1: array<string, string>}
+     */
+    private static function ocrByDocument(Submission $submission): array
+    {
+        $filters = [];
+        $texts = [];
+
+        foreach ($submission->documents as $document) {
+            $key = (string) $document->id;
+            $filters[] = ['key' => $key, 'label' => $document->original_filename];
+            $texts[$key] = $document->validationResult?->ocr_extracted_text
+                ?? 'OCR stage not yet available — no extracted text for this document.';
+        }
+
+        return [$filters, $texts];
+    }
+
+    /**
      * Turns a machine flag token into an officer-readable phrase. Tokens already
      * written as prose (they contain a space) are left untouched.
      *
@@ -244,15 +265,28 @@ class SubmissionPresenter
     }
 
     /**
-     * Humanises a snake_case field key, preserving domain acronyms (TIN, RDO).
+     * Humanises a snake_case field key, preserving domain acronyms (TIN, RDO, OCN,
+     * TRN). A few keys don't tokenise cleanly and get a whole-key label instead.
      */
     private static function humanizeFieldName(string $field): string
     {
-        $acronyms = ['tin' => 'TIN', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID'];
+        $field = trim($field);
+
+        $overrides = [
+            'trn_no' => 'TRN',
+            'tax_types' => 'Registered Activities',
+        ];
+
+        if (isset($overrides[$field])) {
+            return $overrides[$field];
+        }
+
+        $acronyms = ['tin' => 'TIN', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID',
+            'ocn' => 'OCN', 'trn' => 'TRN', 'psic' => 'PSIC'];
 
         $words = array_map(
             fn (string $word): string => $acronyms[$word] ?? ucfirst($word),
-            explode('_', trim($field)),
+            explode('_', $field),
         );
 
         return implode(' ', $words);

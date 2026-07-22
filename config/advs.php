@@ -104,7 +104,9 @@ return [
         'connect_timeout' => (int) env('ML_API_CONNECT_TIMEOUT', 10),
         'retries' => (int) env('ML_API_RETRIES', 2),
 
-        // OCR field template the API applies (bir | none).
+        // Fallback OCR field template for document types with no dedicated
+        // template (bir | business_permit | dti | none). The three vendor-
+        // submittable types are routed per-type in MlPipelineService::ocrTemplateFor().
         'template' => env('ML_API_TEMPLATE', 'bir'),
     ],
 

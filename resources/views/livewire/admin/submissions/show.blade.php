@@ -6,7 +6,8 @@ use App\Support\SubmissionPresenter;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     /** The submission id under review (from the {submission} route parameter). */
     public int $submissionId;
 
@@ -25,6 +26,9 @@ new class extends Component {
     /** Active risk-score breakdown filter: 'all' or a key from component_filters. */
     public string $componentFilter = 'all';
 
+    /** Active OCR-text filter: a document id (key) from ocr_filters. */
+    public string $ocrDocumentFilter = '';
+
     public function mount(string $submission): void
     {
         $model = Submission::query()
@@ -39,6 +43,7 @@ new class extends Component {
 
         $this->submissionId = $model->id;
         $this->record = SubmissionPresenter::detail($model);
+        $this->ocrDocumentFilter = $this->record['ocr_filters'][0]['key'] ?? '';
     }
 
     public function setComponentFilter(string $key): void
@@ -46,6 +51,13 @@ new class extends Component {
         abort_unless(array_key_exists($key, $this->record['component_sets']), 400);
 
         $this->componentFilter = $key;
+    }
+
+    public function setOcrDocumentFilter(string $key): void
+    {
+        abort_unless(array_key_exists($key, $this->record['ocr_by_document']), 400);
+
+        $this->ocrDocumentFilter = $key;
     }
 
     public function startDecision(string $mode): void
@@ -314,11 +326,27 @@ new class extends Component {
         <div class="flex flex-col gap-6">
             {{-- OCR text --}}
             <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 240ms">
-                <div class="flex items-center justify-between">
-                    <h2 class="text-base font-semibold text-cu-text">OCR extracted text</h2>
-                    <flux:badge size="sm" color="zinc">PyTesseract</flux:badge>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-base font-semibold text-cu-text">OCR extracted text</h2>
+                        <flux:badge size="sm" color="zinc">PyTesseract</flux:badge>
+                    </div>
+                    @if (count($s['ocr_filters']) > 1)
+                        <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1" wire:loading.class="opacity-60" wire:target="setOcrDocumentFilter">
+                            @foreach ($s['ocr_filters'] as $filter)
+                                <button type="button" wire:click="setOcrDocumentFilter('{{ $filter['key'] }}')"
+                                        title="{{ $filter['label'] }}"
+                                        class="max-w-48 truncate rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $ocrDocumentFilter === $filter['key'] ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $filter['label'] }}</button>
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
-                <pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-cu-border bg-cu-bg p-4 font-mono text-xs leading-relaxed text-cu-muted">{{ $s['ocr_excerpt'] }}</pre>
+
+                @if (count($s['ocr_filters']) === 0)
+                    <p class="mt-3 text-sm text-cu-muted">No documents to display OCR text for.</p>
+                @else
+                    <pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-cu-border bg-cu-bg p-4 font-mono text-xs leading-relaxed text-cu-muted" wire:loading.class="opacity-40" wire:target="setOcrDocumentFilter">{{ $s['ocr_by_document'][$ocrDocumentFilter] ?? '' }}</pre>
+                @endif
             </div>
 
             {{-- Flags + documents --}}

@@ -118,8 +118,21 @@ def test_region_and_district_tolerate_missing_no_token() -> None:
     assert f["rdo_code"]["value"] == "113"
 
 
-def test_revenue_region_is_required() -> None:
-    assert _stamp_fields()["revenue_region_no"]["required"] is True
+def test_revenue_region_is_optional() -> None:
+    # Revenue Region / District / Form No. are BIR-genuine fields still extracted
+    # for the report + stamp-recovery merge, but they are NOT part of the required
+    # keyword set the officer expects (that set is locked in the test below), so a
+    # missing region must no longer penalise the text-validation score.
+    assert _stamp_fields()["revenue_region_no"]["required"] is False
+
+
+def test_bir_required_set_is_the_expected_keyword_list() -> None:
+    required = {spec["key"] for spec in ocr_dryrun.FIELD_SPECS if spec["required"]}
+    assert required == {
+        "tin", "registered_name", "registration_date", "ocn",
+        "registered_address", "tax_types", "trade_name",
+        "line_of_business", "date_issued",
+    }
 
 
 def test_revenue_region_not_fabricated_when_caption_illegible() -> None:
@@ -600,6 +613,141 @@ def test_extract_registered_name_text_fallback_still_matches_clean_header() -> N
     name = ocr_dryrun.extract_fields(SAMPLE_OCR_TEXT, {})["registered_name"]["value"].upper()
     assert "GOVERNANCE" in name
     assert "REGISTRATION DATE" not in name
+
+
+# --- per-document-type templates: Business Permit -----------------------------
+
+# Captured OCR (Otsu+2x) for a synthetic LGU Business Permit. The fill value is
+# printed on the line ABOVE its caption ("<value>" then "NAME OF PROPRIETOR"),
+# the reverse of the BIR form, so extraction reads the previous line.
+BUSINESS_PERMIT_OCR_TEXT = """\
+Republic of the Philippines
+Province of Davao del Sur
+CITY OF DIGOS
+BUSINESS PERMIT
+UR SEPTIC DEAN PERRY
+NAME OF PROPRIETOR
+DYBU LIBERTY CITY CONSTRUCTION INC.
+TRADE NAME
+4057A MOONSTONE DRIVE, ALITAGTAG, 2832 ROMBLON
+BUSINESS LOCATION
+GENERAL SERVICES
+KIND OF BUSINESS
+Issued this 26th day of AUGUST , 2012, at Digos City, Davao del Sur, Philippines.
+"""
+
+
+def _business_permit_fields() -> dict:
+    return ocr_dryrun.extract_fields(
+        BUSINESS_PERMIT_OCR_TEXT, {}, ocr_dryrun.BUSINESS_PERMIT_FIELD_SPECS
+    )
+
+
+def test_business_permit_reads_value_above_its_caption() -> None:
+    f = _business_permit_fields()
+    assert f["name_of_proprietor"]["value"] == "UR SEPTIC DEAN PERRY"
+    # _normalise_value strips the trailing separator period, as it does for every field.
+    assert f["trade_name"]["value"] == "DYBU LIBERTY CITY CONSTRUCTION INC"
+    assert f["business_location"]["value"] == "4057A MOONSTONE DRIVE, ALITAGTAG, 2832 ROMBLON"
+    assert f["kind_of_business"]["value"] == "GENERAL SERVICES"
+
+
+def test_business_permit_city_issued_from_header() -> None:
+    assert _business_permit_fields()["city_issued"]["value"] == "DIGOS"
+
+
+def test_business_permit_issued_date_from_issued_this_clause() -> None:
+    value = _business_permit_fields()["date_issued"]["value"]
+    assert value is not None
+    assert "AUGUST" in value.upper() and "2012" in value
+
+
+def test_business_permit_required_set_is_the_expected_keyword_list() -> None:
+    required = {spec["key"] for spec in ocr_dryrun.BUSINESS_PERMIT_FIELD_SPECS if spec["required"]}
+    assert required == {
+        "city_issued", "name_of_proprietor", "trade_name",
+        "business_location", "kind_of_business", "date_issued",
+    }
+
+
+def test_business_permit_has_no_bir_fields() -> None:
+    # The whole point: a permit must NOT be scored against BIR's TIN / Revenue
+    # Region etc., so those keys are absent from its template entirely.
+    keys = {spec["key"] for spec in ocr_dryrun.BUSINESS_PERMIT_FIELD_SPECS}
+    assert "tin" not in keys
+    assert "revenue_region_no" not in keys
+
+
+# --- per-document-type templates: DTI Business Name Registration --------------
+
+# Captured OCR (Otsu+2x) for a synthetic DTI Business Name certificate. Fields are
+# sentence-embedded ("This certifies that <name>", "issued to <owner>",
+# "valid from <date> to <date>", "Certificate No. <no>", "TRN: <trn>").
+DTI_OCR_TEXT = """\
+DEPARTMENT OF
+TRADE & INDUSTRY
+PHILIPPINES
+This certifies that
+MABUHAY CARINDERIA
+3444 BROWN STREET, BARANGAY HAGONOY, MANILA CITY
+is a business name registered in this office pursuant to the provisions of Act 3883, as
+amended by Act 4147 and Republic Act No. 863, and in compliance with the applicable
+rules and regulations prescribed by the Department of Trade and Industry. This
+certificate issued to
+AMBER BARKER
+is valid from 02/05/2026 to 02/05/2031 subject to continuing compliance
+Business Name Registration
+Certificate No. BN 1760595
+TRN: DTI-2026-35374211
+"""
+
+
+def _dti_fields() -> dict:
+    return ocr_dryrun.extract_fields(DTI_OCR_TEXT, {}, ocr_dryrun.DTI_FIELD_SPECS)
+
+
+def test_dti_business_name_and_address_from_certifies_block() -> None:
+    f = _dti_fields()
+    assert f["business_name"]["value"] == "MABUHAY CARINDERIA"
+    assert f["business_address"]["value"] == "3444 BROWN STREET, BARANGAY HAGONOY, MANILA CITY"
+
+
+def test_dti_owner_from_issued_to_clause() -> None:
+    assert _dti_fields()["owner_representative_name"]["value"] == "AMBER BARKER"
+
+
+def test_dti_valid_and_expiry_dates_from_valid_from_to_clause() -> None:
+    f = _dti_fields()
+    assert f["date_issued"]["value"] == "02/05/2026"
+    assert f["expiry_date"]["value"] == "02/05/2031"
+
+
+def test_dti_certificate_number_and_trn() -> None:
+    f = _dti_fields()
+    assert f["certificate_no"]["value"] == "BN 1760595"
+    assert f["trn_no"]["value"] == "DTI-2026-35374211"
+
+
+def test_dti_required_set_is_the_expected_keyword_list() -> None:
+    required = {spec["key"] for spec in ocr_dryrun.DTI_FIELD_SPECS if spec["required"]}
+    assert required == {
+        "business_name", "business_address", "owner_representative_name",
+        "date_issued", "expiry_date", "certificate_no", "trn_no",
+    }
+
+
+# --- template registry --------------------------------------------------------
+
+def test_templates_registry_exposes_the_three_supported_templates() -> None:
+    assert set(ocr_dryrun.TEMPLATES) == {"bir", "business_permit", "dti"}
+    assert ocr_dryrun.TEMPLATES["bir"]["field_specs"] is ocr_dryrun.FIELD_SPECS
+    assert ocr_dryrun.TEMPLATES["business_permit"]["field_specs"] is ocr_dryrun.BUSINESS_PERMIT_FIELD_SPECS
+    assert ocr_dryrun.TEMPLATES["dti"]["field_specs"] is ocr_dryrun.DTI_FIELD_SPECS
+
+
+def test_extract_fields_defaults_to_bir_specs() -> None:
+    # Backward compatibility: the 2-arg call the whole BIR suite uses is unchanged.
+    assert ocr_dryrun.extract_fields(SAMPLE_OCR_TEXT, {})["tin"]["value"] == "009-028-463-000"
 
 
 if __name__ == "__main__":  # runnable without pytest: `python tests/test_ocr_dryrun.py`

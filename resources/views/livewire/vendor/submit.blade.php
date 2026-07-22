@@ -126,7 +126,7 @@ new class extends Component
         $aliases = match ($type) {
             'BIR Permit' => ['bir_certificate', 'bir_permit', 'BIR Certificate of Registration', 'BIR Permit'],
             'Business Permit' => ['business_permit', 'Business Permit'],
-            'Financial Statement' => ['financial_statement', 'Financial Statement'],
+            'DTI Registration' => ['dti_registration', 'DTI Business Name Registration', 'DTI Registration'],
             default => [$type],
         };
 
@@ -493,7 +493,7 @@ new class extends Component
                                             <option value="">Select type</option>
                                             <option>Business Permit</option>
                                             <option>BIR Permit</option>
-                                            <option>Financial Statement</option>
+                                            <option>DTI Registration</option>
                                         </select>
 
                                         <span class="w-28 shrink-0 rounded-full px-2.5 py-1 text-center text-xs font-medium" :class="statusClasses(file)" x-text="statusLabel(file)"></span>
@@ -540,7 +540,7 @@ new class extends Component
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="check-circle" color="sky" />
-                            <p class="text-cu-muted">Assign Business Permit, BIR Permit, or Financial Statement per file.</p>
+                            <p class="text-cu-muted">Assign Business Permit, BIR Permit, or DTI Registration per file.</p>
                         </div>
                     </div>
                 </div>

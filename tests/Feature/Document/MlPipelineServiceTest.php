@@ -9,6 +9,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -126,6 +127,60 @@ class MlPipelineServiceTest extends TestCase
         $this->expectException(RuntimeException::class);
 
         $this->service()->validate($this->document());
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function templatePerTypeProvider(): array
+    {
+        return [
+            'BIR certificate → bir' => ['bir_certificate', 'bir'],
+            'Business Permit → business_permit' => ['business_permit', 'business_permit'],
+            'DTI registration → dti' => ['dti_registration', 'dti'],
+        ];
+    }
+
+    #[DataProvider('templatePerTypeProvider')]
+    public function test_validate_sends_the_ocr_template_matching_the_document_type(string $code, string $template): void
+    {
+        $typeId = DB::table('document_types')->insertGetId([
+            'name' => $code, 'code' => $code, 'issuer_scope' => 'national',
+            'is_required' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $document = $this->document(['document_type_id' => $typeId]);
+        Http::fake(['*/v1/validate' => Http::response(['stages' => [], 'flags' => []], 200)]);
+
+        $this->service()->validate($document);
+
+        Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === $template);
+    }
+
+    public function test_validate_falls_back_to_the_configured_template_for_an_unmapped_type(): void
+    {
+        config()->set('advs.ml.template', 'bir');
+        $typeId = DB::table('document_types')->insertGetId([
+            'name' => 'Sanitary Permit', 'code' => 'sanitary_permit', 'issuer_scope' => 'lgu',
+            'is_required' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $document = $this->document(['document_type_id' => $typeId]);
+        Http::fake(['*/v1/validate' => Http::response(['stages' => [], 'flags' => []], 200)]);
+
+        $this->service()->validate($document);
+
+        Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === 'bir');
+    }
+
+    /**
+     * Read one multipart form-data field's value out of a raw request body.
+     */
+    private function multipartField(string $body, string $name): ?string
+    {
+        // Guzzle inserts a Content-Length header between the disposition and the
+        // value, so skip any intervening part headers to the blank-line separator.
+        return preg_match('/name="'.preg_quote($name, '/').'".*?\r\n\r\n(.*?)\r\n/s', $body, $m) === 1
+            ? $m[1]
+            : null;
     }
 
     public function test_validate_sends_issuer_references_for_a_national_type(): void

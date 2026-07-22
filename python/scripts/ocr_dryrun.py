@@ -131,12 +131,14 @@ class OcrError(RuntimeError):
 # ---------------------------------------------------------------------------
 FIELD_SPECS: list[dict] = [
     {"key": "form_no", "name": "Form No.", "scope": "global",
-     "regex": r"\b(2303)\b", "required": True},
+     # Still extracted for the report, but NOT part of the officer's required
+     # keyword set, so a missing Form No. no longer penalises text-validation.
+     "regex": r"\b(2303)\b", "required": False},
     {"key": "ocn", "name": "OCN", "scope": "global",
      # OCN prints ABOVE its caption and is digit-heavy (e.g. 1RC0001016814), so
      # match the format directly. A label scan returns the line after "OCN",
      # which is "CERTIFICATE OF REGISTRATION" -> the old regex grabbed that.
-     "regex": r"\b(\d[A-Z]{1,3}\d{7,})\b", "required": False},
+     "regex": r"\b(\d[A-Z]{1,3}\d{7,})\b", "required": True},
     {"key": "tin", "name": "TIN", "scope": "global",
      "regex": r"(\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3,4})",
      "required": True},
@@ -153,19 +155,21 @@ FIELD_SPECS: list[dict] = [
      # the region code can carry a trailing letter (e.g. 09B), so a digits-only
      # regex would drop the "B". Value sits on the caption's own stamp row, so
      # same_line keeps it from falling through to the district line below.
-     "same_line": True, "required": True},
+     # Extracted + merged from the seal pass, but not a required keyword.
+     "same_line": True, "required": False},
     {"key": "rdo_code", "name": "Revenue District No. (RDO)", "scope": "line",
      "labels": ["REVENUE DISTRICT NO", "REVENUE DISTRICT", "RDO"], "regex": r"(\d{1,3})",
      # value is column-aligned on the caption's own row; without same_line the
      # scan falls to the next line and grabs the "1" from the OCN (1RC0001016814).
      # "REVENUE DISTRICT" (no "NO") tolerates OCR dropping the noisy caption token.
-     "same_line": True, "required": True},
+     # Extracted for the report, but not a required keyword.
+     "same_line": True, "required": False},
     {"key": "line_of_business", "name": "Line of Business / PSIC", "scope": "line",
-     "labels": ["LINE OF BUSINESS", "INDUSTRY"], "required": False},
+     "labels": ["LINE OF BUSINESS", "INDUSTRY"], "required": True},
     {"key": "trade_name", "name": "Trade Name", "scope": "line",
-     "labels": ["TRADE NAME"], "required": False},
-    {"key": "tax_types", "name": "Tax Type(s)", "scope": "line",
-     "labels": ["TAX TYPE", "REGISTERED ACTIVITIES"], "required": False},
+     "labels": ["TRADE NAME"], "required": True},
+    {"key": "tax_types", "name": "Registered Activity(ies)", "scope": "line",
+     "labels": ["REGISTERED ACTIVITIES", "REGISTERED ACTIVITY", "TAX TYPE"], "required": True},
     {"key": "revenue_district_officer", "name": "Revenue District Officer", "scope": "line",
      "labels": ["REVENUE DISTRICT OFFICER", "DISTRICT OFFICER"], "required": False},
     {"key": "date_issued", "name": "Date Issued", "scope": "global",
@@ -176,7 +180,7 @@ FIELD_SPECS: list[dict] = [
      "regex": r"\b((?:JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|"
               r"JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|"
               r"DEC(?:EMBER)?)\.?\s+\d{1,2},?\s+(?:19|20)\d{2})\b",
-     "required": False},
+     "required": True},
 ]
 
 # Keywords that should appear anywhere in a genuine Form 2303 (a quick template
@@ -191,6 +195,75 @@ TEMPLATE_KEYWORDS = [
 # dataset generator's FIELD_BOXES). Derived from FIELD_SPECS so the two never
 # drift: a box drawn for keyword "tin" maps straight to the "tin" field.
 KEYWORD_LIST = [spec["key"] for spec in FIELD_SPECS]
+
+
+# ---------------------------------------------------------------------------
+# LGU Business Permit (Mayor's Permit) field template.
+#
+# Unlike the BIR form, the fill VALUE prints on the line ABOVE its caption
+# (a permit "write-on-the-line, label-underneath" layout), so the label fields
+# use ``value_above`` and read the previous non-empty line. City + issue date are
+# sentence/header text matched globally. Field keys mirror
+# business_permit_dataset_generator.py so the synthetic data and the template
+# never drift.
+# ---------------------------------------------------------------------------
+BUSINESS_PERMIT_FIELD_SPECS: list[dict] = [
+    {"key": "city_issued", "name": "City Issued", "scope": "global",
+     # The issuing city prints in the header as "CITY OF <NAME>". Keep the
+     # separator to spaces/tabs (not \s, which would run the match across the
+     # newline into the following caption lines).
+     "regex": r"CITY OF ([A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*)", "required": True},
+    {"key": "name_of_proprietor", "name": "Name of Proprietor", "scope": "line",
+     "labels": ["NAME OF PROPRIETOR", "PROPRIETOR"], "value_above": True, "required": True},
+    {"key": "trade_name", "name": "Trade Name", "scope": "line",
+     "labels": ["TRADE NAME"], "value_above": True, "required": True},
+    {"key": "business_location", "name": "Business Address / Location", "scope": "line",
+     "labels": ["BUSINESS LOCATION", "BUSINESS ADDRESS", "LOCATION"],
+     "value_above": True, "required": True},
+    {"key": "kind_of_business", "name": "Kind of Business", "scope": "line",
+     "labels": ["KIND OF BUSINESS", "NATURE OF BUSINESS"], "value_above": True, "required": True},
+    {"key": "date_issued", "name": "Issued Date", "scope": "global",
+     # "Issued this 26th day of AUGUST , 2012, at ..." — capture day + month + year.
+     "regex": r"(?i)issued this\s+(\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2})",
+     "required": True},
+]
+
+BUSINESS_PERMIT_KEYWORDS = [
+    "BUSINESS PERMIT", "PROPRIETOR", "TRADE NAME", "KIND OF BUSINESS", "CITY OF",
+]
+
+
+# ---------------------------------------------------------------------------
+# DTI Business Name Registration certificate field template.
+#
+# The certificate is prose, not a form: the business name/address sit in the
+# "This certifies that ..." block, the owner after "certificate issued to", the
+# validity as "valid from <date> to <date>", and the certificate/TRN on their own
+# captioned lines. Field keys mirror dti_registration_dataset_generator.py.
+# ---------------------------------------------------------------------------
+DTI_FIELD_SPECS: list[dict] = [
+    {"key": "business_name", "name": "Business Name", "scope": "line",
+     "custom": "dti_business_name", "required": True},
+    {"key": "business_address", "name": "Business Address", "scope": "line",
+     "custom": "dti_business_address", "required": True},
+    {"key": "owner_representative_name", "name": "Owner / Representative Name", "scope": "line",
+     "labels": ["ISSUED TO"], "required": True},
+    {"key": "date_issued", "name": "Valid Date", "scope": "global",
+     "regex": r"(?i)valid from\s+(\d{1,2}/\d{1,2}/\d{2,4})", "required": True},
+    {"key": "expiry_date", "name": "Expiration Date", "scope": "global",
+     "regex": r"(?i)valid from\s+\d{1,2}/\d{1,2}/\d{2,4}\s+to\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+     "required": True},
+    {"key": "certificate_no", "name": "Certificate Number", "scope": "line",
+     "labels": ["CERTIFICATE NO", "CERTIFICATE NUMBER"],
+     "regex": r"((?:BN\s*)?\d{5,})", "same_line": True, "required": True},
+    {"key": "trn_no", "name": "TRN", "scope": "line",
+     "labels": ["TRN"], "regex": r"(DTI-\d{4}-\d+|[A-Z0-9-]{6,})",
+     "same_line": True, "required": True},
+]
+
+DTI_KEYWORDS = [
+    "DEPARTMENT OF TRADE", "BUSINESS NAME", "CERTIFICATE", "TRN",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +541,47 @@ def _find_by_label(lines: list[str], labels: list[str], allow_next_line: bool = 
     return None
 
 
+def _find_by_label_above(lines: list[str], labels: list[str]):
+    """Return the nearest non-empty line ABOVE the first matching caption.
+
+    LGU business permits print the fill value on the line above its printed
+    caption ("<value>" then "NAME OF PROPRIETOR"), the reverse of the BIR form, so
+    the value is read from the previous non-empty line rather than after the label.
+    """
+    for i, line in enumerate(lines):
+        upper = line.upper()
+        if any(label in upper for label in labels):
+            for j in range(i - 1, -1, -1):
+                prev = lines[j].strip()
+                if prev:
+                    return prev
+            return ""
+    return None
+
+
+def _dti_certified_block(lines: list[str]) -> list[str]:
+    """The value lines inside a DTI "This certifies that ..." block: the business
+    name followed by its address, stopping at the boilerplate that follows."""
+    for i, line in enumerate(lines):
+        if "CERTIFIES THAT" in line.upper():
+            block: list[str] = []
+            for cont in lines[i + 1:]:
+                if re.search(r"IS A BUSINESS NAME REGISTERED|PURSUANT|IN COMPLIANCE",
+                             cont.upper()):
+                    break
+                if cont.strip():
+                    block.append(cont.strip())
+                if len(block) >= 2:
+                    break
+            return block
+    return []
+
+
+def _dti_certified_line(lines: list[str], index: int) -> str | None:
+    block = _dti_certified_block(lines)
+    return block[index] if index < len(block) else None
+
+
 _TIN_TOKEN = re.compile(r"\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3,4}")
 _DATE_TOKEN = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}")
 
@@ -511,20 +625,31 @@ def _extract_registered_name(lines: list[str]) -> str | None:
     return None
 
 
-def extract_fields(text: str, token_conf: dict) -> dict:
+def extract_fields(text: str, token_conf: dict, specs: list[dict] | None = None) -> dict:
+    """Extract structured fields for a template. ``specs`` selects the field
+    template (defaults to the BIR ``FIELD_SPECS``); see ``TEMPLATES``."""
+    specs = specs if specs is not None else FIELD_SPECS
     lines = text.splitlines()
     out: dict = {}
-    for spec in FIELD_SPECS:
+    for spec in specs:
         raw_value = None
-        if spec.get("custom") == "header_table_name":
+        custom = spec.get("custom")
+        if custom == "header_table_name":
             raw_value = _extract_registered_name(lines)
+        elif custom == "dti_business_name":
+            raw_value = _dti_certified_line(lines, 0)
+        elif custom == "dti_business_address":
+            raw_value = _dti_certified_line(lines, 1)
         elif spec["scope"] == "global":
             m = re.search(spec["regex"], text)
             raw_value = m.group(1) if m else None
         else:  # line scope
-            region = _find_by_label(
-                lines, spec["labels"], allow_next_line=not spec.get("same_line", False)
-            )
+            if spec.get("value_above"):
+                region = _find_by_label_above(lines, spec["labels"])
+            else:
+                region = _find_by_label(
+                    lines, spec["labels"], allow_next_line=not spec.get("same_line", False)
+                )
             if region is not None and spec.get("regex"):
                 m = re.search(spec["regex"], region)
                 raw_value = m.group(1) if m else region
@@ -685,9 +810,38 @@ def refine_fields_with_positions(fields: dict, words: list[dict], token_conf: di
 
 
 # ---------------------------------------------------------------------------
+# Per-document-type template registry.
+#
+# Stage 2 selects a template by the document's type (Laravel maps document_type
+# code -> template name). Each entry carries its field specs, the sanity-keyword
+# list for the quality report, and the optional positional refiner (the two-column
+# Form 2303 box logic is BIR-only; the permit/DTI templates are label-scan only).
+# ---------------------------------------------------------------------------
+TEMPLATES: dict[str, dict] = {
+    "bir": {
+        "field_specs": FIELD_SPECS,
+        "keywords": TEMPLATE_KEYWORDS,
+        "positional": refine_fields_with_positions,
+    },
+    "business_permit": {
+        "field_specs": BUSINESS_PERMIT_FIELD_SPECS,
+        "keywords": BUSINESS_PERMIT_KEYWORDS,
+        "positional": None,
+    },
+    "dti": {
+        "field_specs": DTI_FIELD_SPECS,
+        "keywords": DTI_KEYWORDS,
+        "positional": None,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Quality scoring (fail-forward, mirrors Stage 2 output)
 # ---------------------------------------------------------------------------
-def score_quality(text: str, fields: dict, ocr: dict, cfg: dict) -> dict:
+def score_quality(text: str, fields: dict, ocr: dict, cfg: dict,
+                  keywords: list[str] | None = None) -> dict:
+    keywords = keywords if keywords is not None else TEMPLATE_KEYWORDS
     confs = ocr["confidences"]
     word_count = len(confs)
     low = [c for c in confs if c < cfg["low_conf_floor"]]
@@ -702,7 +856,7 @@ def score_quality(text: str, fields: dict, ocr: dict, cfg: dict) -> dict:
         round(len(matched_required) / len(expected), 3) if expected else 0.0
     )
     upper = text.upper()
-    keywords_found = [kw for kw in TEMPLATE_KEYWORDS if kw in upper]
+    keywords_found = [kw for kw in keywords if kw in upper]
 
     flags = []
     if word_count < cfg["min_words_for_text"]:
@@ -724,7 +878,7 @@ def score_quality(text: str, fields: dict, ocr: dict, cfg: dict) -> dict:
         "required_matched": len(matched_required),
         "missing_required": missing_required,
         "template_keywords_found": keywords_found,
-        "template_keywords_total": len(TEMPLATE_KEYWORDS),
+        "template_keywords_total": len(keywords),
         "text_validation_score": text_validation_score,
         "passes_text_validation": text_validation_score >= cfg["text_validation_threshold"],
         "flags": flags,

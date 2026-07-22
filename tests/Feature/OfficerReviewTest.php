@@ -144,6 +144,68 @@ class OfficerReviewTest extends TestCase
             ->assertSee('No signature detected');
     }
 
+    public function test_flag_humaniser_renders_per_type_field_acronyms(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'flags' => ['missing_required_fields:ocn,trn_no,certificate_no,business_name,tax_types'],
+        ]);
+
+        $this->assertSame(
+            ['Missing required fields: OCN, TRN, Certificate No, Business Name, Registered Activities'],
+            SubmissionPresenter::flags($submission->fresh()),
+        );
+    }
+
+    public function test_drill_down_provides_per_document_ocr_text_with_filters(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $bir = Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'bir-certificate.png',
+        ]);
+        ValidationResult::factory()->for($bir)->create([
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+        ]);
+
+        $permit = Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'business-permit.png',
+        ]);
+        ValidationResult::factory()->for($permit)->create([
+            'ocr_extracted_text' => 'CITY OF DIGOS BUSINESS PERMIT',
+        ]);
+
+        $detail = SubmissionPresenter::detail($submission->fresh());
+
+        $this->assertSame(
+            [
+                ['key' => (string) $bir->id, 'label' => 'bir-certificate.png'],
+                ['key' => (string) $permit->id, 'label' => 'business-permit.png'],
+            ],
+            $detail['ocr_filters'],
+        );
+        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $bir->id]);
+        $this->assertSame('CITY OF DIGOS BUSINESS PERMIT', $detail['ocr_by_document'][(string) $permit->id]);
+    }
+
+    public function test_drill_down_ocr_text_falls_back_when_ocr_not_yet_available(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create(['ocr_extracted_text' => null]);
+
+        $detail = SubmissionPresenter::detail($submission->fresh());
+
+        $this->assertSame(
+            'OCR stage not yet available — no extracted text for this document.',
+            $detail['ocr_by_document'][(string) $document->id],
+        );
+    }
+
     public function test_drill_down_marks_each_document_with_a_preview_kind(): void
     {
         $vendor = Vendor::factory()->create();

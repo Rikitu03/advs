@@ -81,8 +81,12 @@ class _StubKerasModel:
 
     input_shape = (None, 64, 64, 3)
 
+    def __init__(self):
+        self.last_batch = None
+
     def predict(self, batch, verbose=0):
         assert batch.shape == (1, 64, 64, 3)
+        self.last_batch = np.array(batch, copy=True)
         return np.array([[0.15, 0.85]])
 
 
@@ -134,8 +138,6 @@ def test_missing_weights_yield_503_with_configured_path(client, jpeg_bytes, rout
 # classify (stubbed model — no TF weights involved)
 # --------------------------------------------------------------------------- #
 def test_classify_contract_with_stub_model(tmp_path, jpeg_bytes):
-    pytest.importorskip("tensorflow")  # run_classification uses resnet50 preprocess_input
-
     app = create_app(_settings(tmp_path))
     with TestClient(app) as client:
         registry = app.state.registry
@@ -153,6 +155,31 @@ def test_classify_contract_with_stub_model(tmp_path, jpeg_bytes):
     assert body["passed_threshold"] is True
     assert body["threshold"] == pytest.approx(0.70)
     assert set(body["probabilities"]) == {"bir_certificate", "fake"}
+
+
+def test_classify_feeds_raw_pixels_not_double_preprocessed(tmp_path, jpeg_bytes):
+    """Regression: train_classifier.py embeds resnet50.preprocess_input INSIDE
+    the saved graph, so the API must feed raw 0-255 RGB. Applying ImageNet
+    preprocessing again flipped genuine documents to 'fake' in production."""
+    from PIL import Image
+
+    stub = _StubKerasModel()
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = {
+            "model": stub, "class_names": ["bir_certificate", "fake"],
+        }
+        response = client.post("/v1/classify", headers=AUTH, files=_upload(jpeg_bytes))
+
+    assert response.status_code == 200
+    expected = np.asarray(
+        Image.open(io.BytesIO(jpeg_bytes)).convert("RGB").resize((64, 64)),
+        dtype=np.float32,
+    )
+    # Raw pixels: exact resize values, still in 0-255 (ImageNet mean-centering
+    # would shift channels negative and swap RGB->BGR).
+    assert stub.last_batch is not None
+    np.testing.assert_allclose(stub.last_batch[0], expected)
 
 
 def test_classify_rejects_unreadable_image(tmp_path):
@@ -235,6 +262,32 @@ def test_ocr_rejects_unknown_template(client, jpeg_bytes):
         "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes), data={"template": "sec"}
     )
     assert response.status_code == 422
+
+
+def test_ocr_accepts_business_permit_and_dti_templates(client, jpeg_bytes):
+    # The per-type templates are valid now: they pass template validation and
+    # proceed to OCR (200 with an engine, 503 without) — never 422 like "sec".
+    for template in ("business_permit", "dti"):
+        response = client.post(
+            "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes), data={"template": template}
+        )
+        assert response.status_code != 422, template
+
+
+def test_ocr_business_permit_template_selects_permit_fields(client, jpeg_bytes):
+    if not _tesseract_available():
+        pytest.skip("Tesseract engine not installed")
+
+    body = client.post(
+        "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"template": "business_permit"},
+    ).json()
+    fields = body["pages"][0]["fields"]
+    # The tiny blank fixture matches nothing, but the field KEYS reflect which
+    # template was applied — proving the router routed by template, not BIR-always.
+    assert fields is not None
+    assert {"name_of_proprietor", "trade_name", "kind_of_business", "city_issued"} <= set(fields)
+    assert "tin" not in fields  # would be present under the BIR template
 
 
 # --------------------------------------------------------------------------- #

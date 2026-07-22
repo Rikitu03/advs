@@ -17,9 +17,13 @@ router = APIRouter()
 
 
 def run_classification(entry: dict, image: Image.Image, threshold: float) -> dict:
-    """Classify one PIL page with the registry's classifier entry."""
+    """Classify one PIL page with the registry's classifier entry.
+
+    The model expects RAW 0-255 RGB input: train_classifier.py embeds
+    ``resnet50.preprocess_input`` inside the saved graph, so applying it
+    again here would double-preprocess and corrupt predictions.
+    """
     import numpy as np
-    from tensorflow.keras.applications.resnet50 import preprocess_input
 
     model = entry["model"]
     class_names = entry["class_names"]
@@ -32,7 +36,6 @@ def run_classification(entry: dict, image: Image.Image, threshold: float) -> dic
     batch = np.expand_dims(
         np.asarray(image.convert("RGB").resize(target_size), dtype=np.float32), axis=0
     )
-    batch = preprocess_input(batch)
 
     probabilities = model.predict(batch, verbose=0)[0]
     index = int(np.argmax(probabilities))

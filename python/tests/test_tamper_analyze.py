@@ -68,6 +68,17 @@ def test_font_consistency_clean_document_passes():
     assert result["flags"] == []
 
 
+def test_font_consistency_excuses_header_font_group():
+    """Titles/headings are a second legitimate type size: a GROUP of words that
+    deviate from the body baseline but agree with each other must not flag
+    (regression: genuine BIR headers scored the technique to 0.0)."""
+    words = [_word(f"word{i}", 10 + i * 60, 200, 50, 30) for i in range(12)]
+    words += [_word("CERTIFICATE", 10, 20, 220, 60), _word("REGISTRATION", 240, 20, 240, 62)]
+    result = font_consistency.analyze(words)
+    assert result["flags"] == []
+    assert result["pass"] is True
+
+
 def test_font_consistency_skips_when_too_few_words():
     result = font_consistency.analyze([_word("A", 0, 0, 10, 10)])
     assert result.get("skipped") is True
@@ -180,6 +191,21 @@ def test_aggregate_blends_and_flags_tampering():
     assert 0.0 < verdict["tamper_score"] < 1.0
     assert verdict["tamper_confidence"] == pytest.approx(0.8, abs=1e-6)  # strongest = 1 - 0.2
     assert set(verdict["flags"]) == {"ela", "clone"}
+
+
+def test_aggregate_heuristic_techniques_cannot_hard_flag_alone():
+    """font/cross_reference stay in the weighted blend but must not solo-force
+    the High-Risk hard override (regression: font false positives on genuine
+    documents drove tamper_confidence to 1.0)."""
+    techniques = {
+        "ela": {"score": 1.0, "threshold": 0.85, "pass": True, "flags": [], "detail": ""},
+        "font": {"score": 0.0, "threshold": 0.999, "pass": False, "flags": ["font"], "detail": ""},
+        "cross_reference": {"score": 0.0, "threshold": 0.999, "pass": False, "flags": ["xref"], "detail": ""},
+    }
+    verdict = aggregate(techniques)
+    assert verdict["hard_flag"] is False
+    assert verdict["tamper_confidence"] == pytest.approx(0.0)
+    assert verdict["tamper_score"] > 0.0  # still contributes to the blend
 
 
 def test_aggregate_excludes_skipped_weight():
