@@ -105,6 +105,42 @@ class MlPipelineServiceTest extends TestCase
         $this->assertContains('unreferenced_logo', $mapped['flags']);
     }
 
+    /**
+     * A region YOLOv8 actually found (signature_bbox populated) but the vendor has
+     * no enrolled reference yet must be distinguishable from a genuine detection
+     * miss — it should flag as a missing reference, not "no signature detected".
+     */
+    public function test_skipped_signature_with_no_reference_flags_distinctly_from_a_detection_miss(): void
+    {
+        $stages = [
+            'detection' => ['detections' => [
+                ['label' => 'signature', 'confidence' => 0.9, 'box' => [10, 20, 30, 40]],
+            ], 'flags' => []],
+            'signature' => ['skipped' => true, 'reason' => 'no_reference_embedding'],
+        ];
+
+        $mapped = $this->service()->mapStages($stages);
+
+        $this->assertSame([10, 20, 30, 40], $mapped['columns']['signature_bbox']);
+        $this->assertFalse($mapped['columns']['signature_detected']);
+        $this->assertContains('no_signature_reference', $mapped['flags']);
+        $this->assertNotContains('no_signature_detected', $mapped['flags']);
+    }
+
+    public function test_skipped_signature_with_a_genuine_detection_miss_does_not_flag_no_reference(): void
+    {
+        $stages = [
+            'detection' => ['detections' => [], 'flags' => ['no_signature_detected']],
+            'signature' => ['skipped' => true, 'reason' => 'no_signature_detected'],
+        ];
+
+        $mapped = $this->service()->mapStages($stages);
+
+        $this->assertNull($mapped['columns']['signature_bbox']);
+        $this->assertFalse($mapped['columns']['signature_detected']);
+        $this->assertNotContains('no_signature_reference', $mapped['flags']);
+    }
+
     // ── validate(): transport + reference gathering ───────────────────────────
 
     public function test_validate_returns_stages_and_flags(): void

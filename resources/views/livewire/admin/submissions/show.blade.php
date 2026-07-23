@@ -111,8 +111,10 @@ new class extends Component
 
         // Normalised component-breakdown rows (ADVS_System_Reference.md §6).
         // A null score means the stage is not yet live (standby pipeline).
-        $sigDetected = $c['signature']['detected'];
-        $stampDetected = $c['stamp']['detected'];
+        // 'verified' = comparison ran; 'detected' = YOLOv8 found the region even
+        // if verification couldn't run (e.g. no reference enrolled yet).
+        $sigVerified = $c['signature']['verified'];
+        $stampVerified = $c['stamp']['verified'];
 
         $breakdown = [
             [
@@ -129,13 +131,17 @@ new class extends Component
             ],
             [
                 'key' => 'signature', 'label' => 'Signature Match (Siamese CNN)', 'icon' => 'finger-print',
-                'score' => $sigDetected ? $c['signature']['similarity'].'% sim.' : 'Not detected',
+                'score' => $sigVerified
+                    ? $c['signature']['similarity'].'% sim.'
+                    : ($c['signature']['detected'] ? 'Unverified' : 'Not detected'),
                 'threshold' => round($thresholds['signature'] * 100).'%',
                 'pass' => $c['signature']['pass'], 'detail' => $c['signature']['detail'], 'expandable' => true,
             ],
             [
                 'key' => 'stamp', 'label' => 'Stamp Match (EfficientNet)', 'icon' => 'check-badge',
-                'score' => $stampDetected ? $c['stamp']['similarity'].'% sim.' : 'Not detected',
+                'score' => $stampVerified
+                    ? $c['stamp']['similarity'].'% sim.'
+                    : ($c['stamp']['detected'] ? 'Unverified' : 'Not detected'),
                 'threshold' => round($thresholds['stamp'] * 100).'%',
                 'pass' => $c['stamp']['pass'], 'detail' => $c['stamp']['detail'], 'expandable' => true,
             ],

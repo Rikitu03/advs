@@ -153,26 +153,34 @@ class SubmissionPresenter
                     : 'Stage not yet available.',
             ],
             'signature' => [
-                'detected' => (bool) ($result?->signature_detected ?? false),
+                // 'detected' = YOLOv8 found the region (signature_bbox); 'verified' =
+                // the Siamese comparison actually ran. These differ whenever a region
+                // was found but no vendor reference is enrolled yet — don't blame the
+                // detector for a missing-reference condition (see MlPipelineService).
+                'detected' => $result !== null && $result->signature_bbox !== null,
+                'verified' => (bool) ($result?->signature_detected ?? false),
                 'similarity' => $signatureSimilarity,
                 'distance' => $result?->signature_distance !== null ? round($result->signature_distance, 3) : '—',
                 'distance_threshold' => 'empirical',
                 'pass' => (bool) ($result?->signature_passed ?? false),
                 'detail' => match (true) {
                     $result === null || $result->signature_detected === null => 'Stage not yet available.',
-                    ! $result->signature_detected => 'No signature region detected.',
-                    default => 'Compared against the reference enrolled at registration.',
+                    $result->signature_bbox === null => 'No signature region detected.',
+                    $result->signature_passed !== null => 'Compared against the reference enrolled at registration.',
+                    default => 'Signature region detected, but no reference is enrolled for this vendor yet.',
                 },
             ],
             'stamp' => [
-                'detected' => (bool) ($result?->stamp_detected ?? false),
+                'detected' => $result !== null && $result->stamp_bbox !== null,
+                'verified' => (bool) ($result?->stamp_detected ?? false),
                 'similarity' => $stampSimilarity,
                 'cosine' => $result?->stamp_similarity !== null ? round($result->stamp_similarity, 3) : '—',
                 'pass' => (bool) ($result?->stamp_passed ?? false),
                 'detail' => match (true) {
                     $result === null || $result->stamp_detected === null => 'Stage not yet available.',
-                    ! $result->stamp_detected => 'No stamp/logo region detected.',
-                    default => 'Compared against the issuer reference logo.',
+                    $result->stamp_bbox === null => 'No stamp/logo region detected.',
+                    $result->stamp_passed !== null => 'Compared against the issuer reference logo.',
+                    default => 'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
                 },
             ],
         ];

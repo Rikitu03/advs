@@ -278,7 +278,7 @@ new class extends Component
                 }
 
                 if (file.status === 'uploading') {
-                    return 'bg-cu-blue/10 text-sky-700 dark:text-sky-300';
+                    return 'bg-cu-blue/10 text-cu-blue';
                 }
 
                 if (file.type === '') {
@@ -392,7 +392,7 @@ new class extends Component
                         @dragleave.prevent="dragActive = false"
                         @drop.prevent="dragActive = false; readFiles($event.dataTransfer.files)"
                     >
-                        <button type="button" @click="$refs.upload.click()" class="mx-auto flex size-12 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700 ring-1 ring-cu-blue/20 transition hover:bg-cu-blue/20">
+                        <button type="button" @click="$refs.upload.click()" class="mx-auto flex size-12 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue ring-1 ring-cu-blue/20 transition hover:bg-cu-blue/20">
                             <flux:icon icon="arrow-up-tray" class="size-5" />
                         </button>
                         <h3 class="mt-3 text-base font-semibold text-cu-text">Drop files here or click to upload</h3>
@@ -413,7 +413,7 @@ new class extends Component
                         >
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div class="flex items-center gap-3">
-                                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700">
+                                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue">
                                         <flux:icon icon="arrow-up-tray" class="size-5" />
                                     </span>
                                     <div>

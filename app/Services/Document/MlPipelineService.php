@@ -137,6 +137,12 @@ class MlPipelineService
             }
         } elseif ($signature !== null) {
             $columns['signature_detected'] = false;
+            if (($signature['reason'] ?? null) === 'no_reference_embedding') {
+                // Distinct from a genuine detection miss: the region may well have
+                // been found (signature_bbox above) — there's just no vendor
+                // reference to compare it against yet.
+                $flags[] = 'no_signature_reference';
+            }
         }
 
         // ── Stage 4b issuer logo ───────────────────────────────────────────────

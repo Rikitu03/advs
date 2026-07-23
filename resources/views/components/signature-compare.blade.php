@@ -2,15 +2,22 @@
 
 @php
     $detected = $data['detected'] ?? false;
+    $verified = $data['verified'] ?? false;
     $pass = $data['pass'] ?? false;
     $queryRing = $pass ? 'border-emerald-500/40' : 'border-rose-500/40';
     $queryInk = $pass ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300';
 @endphp
 
-@unless ($detected)
+@unless ($verified)
     <div class="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
         <flux:icon icon="exclamation-triangle" class="size-5 shrink-0 text-amber-700 dark:text-amber-300" />
-        <p class="text-sm text-cu-text">No signature region was detected by YOLOv8, so no comparison could be run. A missing-component penalty was applied.</p>
+        <p class="text-sm text-cu-text">
+            @if ($detected)
+                A signature region was detected, but no reference is enrolled for this vendor yet, so no comparison could be run. A missing-component penalty was applied.
+            @else
+                No signature region was detected by YOLOv8, so no comparison could be run. A missing-component penalty was applied.
+            @endif
+        </p>
     </div>
 @else
     <div class="flex flex-col gap-4">

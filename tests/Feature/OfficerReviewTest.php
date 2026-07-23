@@ -159,6 +159,84 @@ class OfficerReviewTest extends TestCase
         );
     }
 
+    /**
+     * A region YOLOv8 actually found, but with no vendor reference enrolled yet
+     * (or no issuer reference logo yet), must not be reported to the officer as
+     * "no region detected" — that blames the detector for a missing-enrollment
+     * condition it has nothing to do with.
+     */
+    public function test_drill_down_distinguishes_a_detected_but_unreferenced_region_from_a_true_detection_miss(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => false,
+            'signature_bbox' => [10, 20, 30, 40],
+            'signature_passed' => null,
+            'signature_score' => null,
+            'stamp_detected' => false,
+            'stamp_bbox' => [50, 60, 70, 80],
+            'stamp_passed' => null,
+            'stamp_score' => null,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertTrue($components['signature']['detected']);
+        $this->assertFalse($components['signature']['verified']);
+        $this->assertSame(
+            'Signature region detected, but no reference is enrolled for this vendor yet.',
+            $components['signature']['detail'],
+        );
+
+        $this->assertTrue($components['stamp']['detected']);
+        $this->assertFalse($components['stamp']['verified']);
+        $this->assertSame(
+            'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
+            $components['stamp']['detail'],
+        );
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertDontSee('No signature region was detected by YOLOv8')
+            ->assertDontSee('No stamp region was detected by YOLOv8')
+            ->assertSee('no reference is enrolled for this vendor yet')
+            ->assertSee('no reference logo is on file for this issuer yet');
+    }
+
+    /**
+     * A genuine detection miss (no bbox at all) must keep its original, accurate
+     * "no region detected" wording — only the misattributed case changes.
+     */
+    public function test_drill_down_keeps_the_original_message_for_a_true_detection_miss(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => false,
+            'signature_bbox' => null,
+            'signature_passed' => null,
+            'signature_score' => null,
+            'stamp_detected' => false,
+            'stamp_bbox' => null,
+            'stamp_passed' => null,
+            'stamp_score' => null,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertFalse($components['signature']['detected']);
+        $this->assertSame('No signature region detected.', $components['signature']['detail']);
+
+        $this->assertFalse($components['stamp']['detected']);
+        $this->assertSame('No stamp/logo region detected.', $components['stamp']['detail']);
+    }
+
     public function test_drill_down_provides_per_document_ocr_text_with_filters(): void
     {
         $vendor = Vendor::factory()->create();
