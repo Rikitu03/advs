@@ -57,6 +57,19 @@ envVarGroups:
         value: redis
       - key: REDIS_CLIENT
         value: phpredis
+      # Redis Cloud (external) queue backend. Fill host/port/password in the
+      # Render dashboard from the database's "Public endpoint" + Security section.
+      # If the database has TLS enabled, prefix REDIS_HOST with `tls://`
+      # (e.g. tls://redis-12345.<...>.redis-cloud.com). Leave REDIS_URL unset —
+      # it would override these discrete values.
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_USERNAME
+        value: default
+      - key: REDIS_PASSWORD
+        sync: false
 
       # --- File storage: Supabase S3 ---
       - key: FILESYSTEM_DISK    # default disk; documents use DOCUMENTS_DISK
@@ -95,14 +108,8 @@ envVarGroups:
         value: ADVS
 
 services:
-  # Redis-compatible queue backend. `ipAllowList: []` keeps it private (only the
-  # web + worker reach it over Render's internal network). noeviction so queued
-  # jobs are never dropped under memory pressure — pick a plan that allows it.
-  - type: keyvalue
-    name: advs-redis
-    plan: starter
-    ipAllowList: []
-    maxmemoryPolicy: noeviction
+  # Queue backend is external Redis Cloud (cloud.redis.io) — configured via the
+  # REDIS_* vars in the advs-shared group. No internal keyvalue service here.
 
   # Web service (Docker). serversideup serves on 8080; Render auto-detects it.
   # NOTE: preDeployCommand requires a paid instance type. On the free tier,
@@ -117,11 +124,6 @@ services:
     healthCheckPath: /up
     envVars:
       - fromGroup: advs-shared
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: advs-redis
-          property: connectionString
 
   # Queue worker (same image). Scoped to non-pipeline queues; add
   # `document-processing` here once the FastAPI pipeline is wired.
@@ -134,8 +136,3 @@ services:
     dockerCommand: php artisan queue:work redis --queue=default,mail --tries=3 --backoff=30 --sleep=3 --max-time=3600
     envVars:
       - fromGroup: advs-shared
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: advs-redis
-          property: connectionString
