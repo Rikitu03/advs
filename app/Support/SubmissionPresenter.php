@@ -92,7 +92,11 @@ class SubmissionPresenter
             'kind' => self::previewKind($document->mime_type),
         ])->values()->all();
 
-        [$summary['ocr_filters'], $summary['ocr_by_document']] = self::ocrByDocument($submission);
+        [
+            $summary['ocr_filters'],
+            $summary['ocr_by_document'],
+            $summary['ocr_fields_by_document'],
+        ] = self::ocrByDocument($submission);
 
         $summary['flags_by_document'] = self::flagGroups($submission, $typeNames);
 
@@ -163,6 +167,7 @@ class SubmissionPresenter
                 'distance' => $result?->signature_distance !== null ? round($result->signature_distance, 3) : '—',
                 'distance_threshold' => 'empirical',
                 'pass' => (bool) ($result?->signature_passed ?? false),
+                'crop' => self::cropData($result, $result?->signature_bbox),
                 'detail' => match (true) {
                     $result === null || $result->signature_detected === null => 'Stage not yet available.',
                     $result->signature_bbox === null => 'No signature region detected.',
@@ -176,6 +181,7 @@ class SubmissionPresenter
                 'similarity' => $stampSimilarity,
                 'cosine' => $result?->stamp_similarity !== null ? round($result->stamp_similarity, 3) : '—',
                 'pass' => (bool) ($result?->stamp_passed ?? false),
+                'crop' => self::cropData($result, $result?->stamp_bbox),
                 'detail' => match (true) {
                     $result === null || $result->stamp_detected === null => 'Stage not yet available.',
                     $result->stamp_bbox === null => 'No stamp/logo region detected.',
@@ -183,6 +189,30 @@ class SubmissionPresenter
                     default => 'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
                 },
             ],
+        ];
+    }
+
+    /**
+     * Cropped-region preview data for a detected signature/stamp box: the
+     * authenticated document-stream URL plus the pixel box to crop to. Bbox
+     * pixel coordinates come from YOLOv8 running on the uploaded raster
+     * image, so they only line up 1:1 with a raster upload — a PDF's box is
+     * relative to its 300-DPI *rendered* page, not the PDF bytes an <img>
+     * would load, so PDFs get no crop preview (text detail only).
+     *
+     * @param  list<float>|null  $box
+     * @return array{url: string, box: list<float>}|null
+     */
+    private static function cropData(?ValidationResult $result, ?array $box): ?array
+    {
+        $document = $box !== null ? $result?->document : null;
+        if ($document === null || self::previewKind($document->mime_type) !== 'image') {
+            return null;
+        }
+
+        return [
+            'url' => route('admin.documents.show', $document->id),
+            'box' => $box,
         ];
     }
 
@@ -226,25 +256,112 @@ class SubmissionPresenter
     }
 
     /**
-     * Per-document OCR text for the drill-down's filter tabs, in file order —
-     * one tab per document (keyed by document id), since raw OCR text is
+     * Per-document OCR output for the drill-down's filter tabs, in file order —
+     * one tab per document (keyed by document id), since OCR output is
      * intrinsically per-file, not per-type.
      *
-     * @return array{0: list<array{key: string, label: string}>, 1: array<string, string>}
+     * Returns the extracted key/value rows the panel renders, plus the raw text
+     * behind them (kept for the collapsed "raw text" view, and the only thing to
+     * show for results written before `ocr_fields` existed).
+     *
+     * @return array{
+     *     0: list<array{key: string, label: string}>,
+     *     1: array<string, string>,
+     *     2: array<string, list<array<string, mixed>>>,
+     * }
      */
     private static function ocrByDocument(Submission $submission): array
     {
         $filters = [];
         $texts = [];
+        $fields = [];
 
         foreach ($submission->documents as $document) {
             $key = (string) $document->id;
+            $result = $document->validationResult;
+
             $filters[] = ['key' => $key, 'label' => $document->original_filename];
-            $texts[$key] = $document->validationResult?->ocr_extracted_text
+            $texts[$key] = $result?->ocr_extracted_text
                 ?? 'OCR stage not yet available — no extracted text for this document.';
+            $fields[$key] = self::ocrFieldRows($result?->ocr_fields);
         }
 
-        return [$filters, $texts];
+        return [$filters, $texts, $fields];
+    }
+
+    /**
+     * Flatten the API's field map into ordered rows for the key/value panel.
+     * Template order is preserved (the map arrives in field-spec order), so a
+     * document type always reads the same way.
+     *
+     * @param  array<string, mixed>|null  $fields
+     * @return list<array{key: string, label: string, value: string|null, required: bool, warning: array{label: string, reasons: list<string>}|null}>
+     */
+    private static function ocrFieldRows(?array $fields): array
+    {
+        $rows = [];
+
+        foreach ($fields ?? [] as $key => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $value = $field['value'] ?? null;
+
+            $rows[] = [
+                'key' => (string) $key,
+                // The API names each field as the form itself captions it
+                // ("Registered Activity(ies)"); humanizeFieldName is the fallback
+                // for a payload written before names were sent.
+                'label' => $field['name'] ?? self::humanizeFieldName((string) $key),
+                'value' => ($value === null || $value === '') ? null : (string) $value,
+                'required' => (bool) ($field['required'] ?? false),
+                'warning' => self::fieldWarning($field),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Chip label + officer-readable reasons for one field's warning tokens, or
+     * null when the pipeline had nothing to say about the value. Tokens are
+     * raised in Python (ocr_dryrun.annotate_field_warnings) so the format
+     * patterns that judge a value live with the field specs that define it.
+     *
+     * Listed in priority order — the chip shows the first token present, the
+     * tooltip lists them all.
+     *
+     * @param  array<string, mixed>  $field
+     * @return array{label: string, reasons: list<string>}|null
+     */
+    private static function fieldWarning(array $field): ?array
+    {
+        $catalog = [
+            'format_mismatch' => ['Format', 'Value does not match the format expected for this field.'],
+            'noisy_text' => ['Noisy', 'Value contains character patterns typical of noisy OCR output.'],
+            'not_found' => ['Not found', 'This required field was not found in the document.'],
+            'low_confidence' => ['Low confidence', 'OCR read this value with low confidence.'],
+        ];
+
+        $raised = array_filter((array) ($field['warnings'] ?? []), 'is_string');
+        $tokens = array_values(array_intersect(array_keys($catalog), $raised));
+
+        if ($tokens === []) {
+            return null;
+        }
+
+        $confidence = $field['confidence'] ?? null;
+
+        return [
+            'label' => $catalog[$tokens[0]][0],
+            'reasons' => array_map(
+                fn (string $token): string => $token === 'low_confidence' && $confidence !== null
+                    ? sprintf('OCR read this value with low confidence (%d%%).', (int) round((float) $confidence))
+                    : $catalog[$token][1],
+                $tokens,
+            ),
+        ];
     }
 
     /**

@@ -114,6 +114,10 @@ class MlPipelineService
             $quality = $page['quality'] ?? [];
             $columns['ocr_extracted_text'] = $page['text'] ?? null;
             $columns['ocr_confidence'] = $this->float($quality['mean_confidence'] ?? null);
+            // The structured key/value map the drill-down renders. Stored as the
+            // API returns it — per-field warnings included — so the format
+            // patterns that grade a value stay in the field specs that define it.
+            $columns['ocr_fields'] = $page['fields'] ?? null;
             $columns['text_validation_score'] = $this->float($quality['text_validation_score'] ?? null);
             $columns['text_fields_matched'] = $quality['required_matched'] ?? null;
             $columns['text_fields_expected'] = $quality['required_total'] ?? null;

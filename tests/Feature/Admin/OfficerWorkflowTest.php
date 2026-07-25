@@ -230,6 +230,43 @@ class OfficerWorkflowTest extends TestCase
         $component->call('setOcrDocumentFilter', '999999')->assertStatus(400);
     }
 
+    public function test_ocr_panel_renders_extracted_field_pairs_and_flags_suspect_values(): void
+    {
+        $submission = $this->makePendingSubmission('Reyes Manufacturing', 40.0, 'medium');
+        $submission->documents()->delete();
+
+        $document = Document::factory()->for($submission)->for($submission->vendor)->create([
+            'original_filename' => 'bir-certificate.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $document->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+            'ocr_fields' => [
+                'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                    'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+                'trade_name' => ['name' => 'Trade Name', 'value' => 'EE Bincn', 'required' => true,
+                    'matched' => true, 'confidence' => 88.0, 'warnings' => ['noisy_text']],
+            ],
+        ]);
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            // Label + value pairs replace the raw dump as the panel's content.
+            ->assertSee('TIN')
+            ->assertSee('009-028-463-000')
+            ->assertSee('Trade Name')
+            ->assertSee('EE Bincn')
+            // The suspect value carries a warning chip; the clean one does not.
+            ->assertSee('Noisy')
+            ->assertSee('Value contains character patterns typical of noisy OCR output.')
+            // The engine name is no longer asserted anywhere in the panel — values
+            // can come from Tesseract or the ROI+TrOCR pass.
+            ->assertDontSee('PyTesseract');
+    }
+
     public function test_officer_can_request_resubmission_with_a_reason(): void
     {
         $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');

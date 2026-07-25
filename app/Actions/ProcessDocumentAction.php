@@ -81,8 +81,12 @@ class ProcessDocumentAction
             'tamper_confidence' => $verdict['tamper_confidence'] ?? null,
         ]);
 
+        // Flags describe THIS run only. Re-running a document must not inherit
+        // the previous run's flags, or a transient failure ("ML pipeline
+        // unavailable", "Text validation unavailable") stays on the officer's
+        // drill-down long after it was fixed. ProcessDocumentAction is the only
+        // writer of this column, so nothing else is lost by rebuilding it.
         $flags = array_values(array_unique(array_merge(
-            $result->flags ?? [],
             $mlFlags,
             $verdict['flags'] ?? [],
             $risk['hard_override'] ? ['Document tampering suspected'] : [],

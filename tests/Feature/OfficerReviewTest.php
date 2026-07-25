@@ -190,6 +190,11 @@ class OfficerReviewTest extends TestCase
             'Signature region detected, but no reference is enrolled for this vendor yet.',
             $components['signature']['detail'],
         );
+        $this->assertSame(
+            route('admin.documents.show', $document->id),
+            $components['signature']['crop']['url'],
+        );
+        $this->assertSame([10, 20, 30, 40], $components['signature']['crop']['box']);
 
         $this->assertTrue($components['stamp']['detected']);
         $this->assertFalse($components['stamp']['verified']);
@@ -197,6 +202,7 @@ class OfficerReviewTest extends TestCase
             'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
             $components['stamp']['detail'],
         );
+        $this->assertSame([50, 60, 70, 80], $components['stamp']['crop']['box']);
 
         $this->actingAs($this->officer)
             ->get(route('admin.submissions.show', $submission->id))
@@ -204,7 +210,35 @@ class OfficerReviewTest extends TestCase
             ->assertDontSee('No signature region was detected by YOLOv8')
             ->assertDontSee('No stamp region was detected by YOLOv8')
             ->assertSee('no reference is enrolled for this vendor yet')
-            ->assertSee('no reference logo is on file for this issuer yet');
+            ->assertSee('no reference logo is on file for this issuer yet')
+            ->assertSee(route('admin.documents.show', $document->id));
+    }
+
+    /**
+     * A region detected on a PDF upload has no accurate crop preview (its box
+     * is relative to the 300-DPI rendered page, not the PDF bytes an <img>
+     * would load), so the drill-down must fall back to text only — no broken
+     * image reference.
+     */
+    public function test_drill_down_omits_the_crop_preview_for_a_pdf_upload(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'mime_type' => 'application/pdf',
+        ]);
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => false,
+            'signature_bbox' => [10, 20, 30, 40],
+            'signature_passed' => null,
+            'signature_score' => null,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertTrue($components['signature']['detected']);
+        $this->assertNull($components['signature']['crop']);
     }
 
     /**
@@ -282,6 +316,84 @@ class OfficerReviewTest extends TestCase
             'OCR stage not yet available — no extracted text for this document.',
             $detail['ocr_by_document'][(string) $document->id],
         );
+    }
+
+    public function test_drill_down_builds_ocr_field_rows_from_the_persisted_field_map(): void
+    {
+        $detail = $this->detailForOcrFields([
+            'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+            'revenue_district_officer' => ['name' => 'Revenue District Officer', 'value' => null,
+                'required' => false, 'matched' => false, 'confidence' => null, 'warnings' => []],
+        ], $document);
+
+        $rows = $detail['ocr_fields_by_document'][(string) $document->id];
+
+        // Template order is preserved, and an unmatched optional field still gets
+        // a row — "not found" is information the officer needs.
+        $this->assertSame(['tin', 'revenue_district_officer'], array_column($rows, 'key'));
+        $this->assertSame('TIN', $rows[0]['label']);
+        $this->assertSame('009-028-463-000', $rows[0]['value']);
+        $this->assertTrue($rows[0]['required']);
+        $this->assertNull($rows[0]['warning']);
+        $this->assertNull($rows[1]['value']);
+        $this->assertNull($rows[1]['warning']);
+    }
+
+    public function test_drill_down_marks_suspect_ocr_values_with_a_warning(): void
+    {
+        $detail = $this->detailForOcrFields([
+            'rdo_code' => ['name' => 'Revenue District No. (RDO)', 'value' => 'REVENUE DISTRICT',
+                'required' => false, 'matched' => true, 'confidence' => 41.0,
+                'warnings' => ['format_mismatch', 'low_confidence']],
+            'trade_name' => ['name' => 'Trade Name', 'value' => 'EE Bincn', 'required' => true,
+                'matched' => true, 'confidence' => 88.0, 'warnings' => ['noisy_text']],
+            'line_of_business' => ['name' => 'Line of Business / PSIC', 'value' => null,
+                'required' => true, 'matched' => false, 'confidence' => null,
+                'warnings' => ['not_found']],
+        ], $document);
+
+        $rows = collect($detail['ocr_fields_by_document'][(string) $document->id])->keyBy('key');
+
+        // The chip shows the highest-priority reason; the tooltip lists them all,
+        // and the low-confidence reason carries the measured percentage.
+        $this->assertSame('Format', $rows['rdo_code']['warning']['label']);
+        $this->assertCount(2, $rows['rdo_code']['warning']['reasons']);
+        $this->assertStringContainsString('(41%)', $rows['rdo_code']['warning']['reasons'][1]);
+
+        $this->assertSame('Noisy', $rows['trade_name']['warning']['label']);
+        $this->assertSame('Not found', $rows['line_of_business']['warning']['label']);
+    }
+
+    public function test_drill_down_has_no_ocr_field_rows_when_the_field_map_is_absent(): void
+    {
+        // Results written before the ocr_fields column existed keep only their
+        // raw text; the panel falls back to it rather than rendering nothing.
+        $detail = $this->detailForOcrFields(null, $document);
+
+        $this->assertSame([], $detail['ocr_fields_by_document'][(string) $document->id]);
+        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $document->id]);
+    }
+
+    /**
+     * A one-document pending submission whose validation result carries the given
+     * field map, presented through the drill-down.
+     *
+     * @param  array<string, mixed>|null  $fields
+     * @return array<string, mixed>
+     */
+    private function detailForOcrFields(?array $fields, ?Document &$document = null): array
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+
+        ValidationResult::factory()->for($document)->create([
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+            'ocr_fields' => $fields,
+        ]);
+
+        return SubmissionPresenter::detail($submission->fresh());
     }
 
     public function test_drill_down_marks_each_document_with_a_preview_kind(): void

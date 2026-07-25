@@ -39,6 +39,10 @@ class MlPipelineServiceTest extends TestCase
             'classification' => ['label' => 'BIR Permit', 'confidence' => 0.95, 'passed_threshold' => true],
             'ocr' => ['pages' => [[
                 'text' => 'BUREAU OF INTERNAL REVENUE',
+                'fields' => [
+                    'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                        'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+                ],
                 'quality' => ['mean_confidence' => 92.0, 'text_validation_score' => 1.0,
                     'required_matched' => 3, 'required_total' => 3, 'flags' => []],
             ]]],
@@ -56,6 +60,13 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame('BIR Permit', $columns['classification_label']);
         $this->assertEqualsWithDelta(0.95, $columns['classification_confidence'], 1e-6);
         $this->assertSame('BUREAU OF INTERNAL REVENUE', $columns['ocr_extracted_text']);
+        // The structured field map is persisted verbatim — warnings included —
+        // for the officer drill-down's key/value panel.
+        $this->assertSame(
+            ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+            $columns['ocr_fields']['tin'],
+        );
         $this->assertEqualsWithDelta(1.0, $columns['text_validation_score'], 1e-6);
         $this->assertSame(3, $columns['text_fields_matched']);
         $this->assertSame([10, 20, 30, 40], $columns['signature_bbox']);

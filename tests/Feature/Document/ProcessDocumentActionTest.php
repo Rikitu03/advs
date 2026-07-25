@@ -171,6 +171,34 @@ class ProcessDocumentActionTest extends TestCase
         $this->assertNotNull($result->document_risk_score);
     }
 
+    /**
+     * Flags describe the CURRENT pipeline run. Re-running a document whose
+     * earlier run failed (ML API down, Stage 2 timed out) must clear that
+     * run's flags — otherwise "ML pipeline unavailable" and "Text validation
+     * unavailable" stay on the officer's drill-down forever, describing a
+     * failure that has since been fixed.
+     */
+    public function test_reprocessing_clears_the_previous_runs_flags(): void
+    {
+        $document = $this->document();
+        // One attempt per execute(), so the sequence below maps 1:1 onto runs.
+        config(['advs.ml.retries' => 1]);
+        // A sequence, not two fake() calls — fake() MERGES stubs and the first
+        // match wins, so a second fake() of the same URL would never take effect.
+        Http::fakeSequence('*/v1/validate')
+            ->push('', 500)
+            ->push(['stages' => $this->cleanStages(), 'flags' => []], 200);
+
+        $failed = app(ProcessDocumentAction::class)->execute($document->fresh());
+        $this->assertContains('ML pipeline unavailable', $failed->flags);
+
+        $result = app(ProcessDocumentAction::class)->execute($document->fresh());
+
+        $this->assertNotContains('ML pipeline unavailable', $result->flags);
+        $this->assertNotContains('Text validation unavailable', $result->flags);
+        $this->assertSame(1.0, (float) $result->text_validation_score);
+    }
+
     public function test_job_marks_document_failed_on_failure(): void
     {
         $document = Document::factory()->create(['processing_status' => Document::STATUS_VERIFYING]);

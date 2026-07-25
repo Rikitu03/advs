@@ -126,7 +126,7 @@ async def validate(
         # ── Stage 2: OCR + fields ──────────────────────────────────────────
         ocr_context: dict = {}
         try:
-            stage = run_ocr_stage(original, settings, template)
+            stage = run_ocr_stage(original, settings, template, registry=registry, city=city)
             stages["ocr"] = stage
             if stage["pages"]:
                 page = stage["pages"][0]

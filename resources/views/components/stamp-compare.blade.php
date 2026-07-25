@@ -9,15 +9,20 @@
 @endphp
 
 @unless ($verified)
-    <div class="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
-        <flux:icon icon="exclamation-triangle" class="size-5 shrink-0 text-amber-700 dark:text-amber-300" />
-        <p class="text-sm text-cu-text">
-            @if ($detected)
-                A stamp/logo region was detected, but no reference logo is on file for this issuer yet, so no comparison could be run. A missing-component penalty was applied to the risk score.
-            @else
-                No stamp region was detected by YOLOv8, so no comparison could be run. A missing-component penalty was applied to the risk score.
-            @endif
-        </p>
+    <div class="flex flex-col gap-4 rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 sm:flex-row sm:items-start">
+        @if ($detected && ($data['crop'] ?? null))
+            <x-detection-crop :url="$data['crop']['url']" :box="$data['crop']['box']" label="Detected stamp/logo" />
+        @endif
+        <div class="flex items-start gap-3">
+            <flux:icon icon="exclamation-triangle" class="size-5 shrink-0 text-amber-700 dark:text-amber-300" />
+            <p class="text-sm text-cu-text">
+                @if ($detected)
+                    A stamp/logo region was detected, but no reference logo is on file for this issuer yet, so no comparison could be run. A missing-component penalty was applied to the risk score.
+                @else
+                    No stamp region was detected by YOLOv8, so no comparison could be run. A missing-component penalty was applied to the risk score.
+                @endif
+            </p>
+        </div>
     </div>
 @else
     <div class="flex flex-col gap-4">

@@ -9,8 +9,10 @@ its endpoints, it never crashes the service.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PY_ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +38,20 @@ class Settings(BaseSettings):
     stamp_model_path: Path | None = None        # default: MODEL_DIR/efficientnet_feature_extractor.h5
     signature_threshold_path: Path | None = None  # default: MODEL_DIR/signature_threshold.txt
     stamp_threshold_path: Path | None = None      # default: MODEL_DIR/stamp_threshold.txt
+    # ROI+TrOCR field-recognition fallback (Stage 2 augmentation, see
+    # roi_field_ocr.py). Same convention as every other model: a LOCAL
+    # snapshot directory (transformers' save_pretrained() layout), gated on
+    # existing — never a bare HF Hub id, so a missing/unbaked model degrades
+    # to "not loaded" with zero network calls, instead of every request (or
+    # every test that builds the app) silently trying to fetch ~2.3GB.
+    # Two recognizers, routed per template (see routers/ocr.resolve_recognizer).
+    # Benchmarked on the real BIR / permit / DTI samples: base and large agree
+    # exactly on DTI and Business Permit while base is ~3x faster, but on BIR
+    # base misreads values including the issue YEAR — so BIR alone pays for the
+    # accurate model. Either path missing simply falls back to the other.
+    trocr_model_path: Path | None = None            # default: MODEL_DIR/trocr-base-printed
+    trocr_accurate_model_path: Path | None = None   # default: MODEL_DIR/trocr-large-printed
+    trocr_accurate_templates: str = "bir"           # comma-separated template names
 
     # --- §9 tunables ---
     classification_confidence_threshold: float = 0.70
@@ -46,9 +62,36 @@ class Settings(BaseSettings):
     pdf_dpi: int = 300
     max_pdf_pages: int = 2
 
+    # --- Stage 2 ROI+TrOCR pass (roi_field_ocr.py) ---
+    # Not §9 parameters — these bound the *cost* of the field-recognition pass,
+    # they do not affect any score or threshold. Each field crop is ~10-30s of
+    # CPU inference, so an ungated BIR page (13 fields) measured 409s against
+    # Laravel's 180s ML_API_TIMEOUT; the budget makes the stage bounded and
+    # fail-forward instead of taking the whole /v1/validate call down.
+    # Per page; fields the budget cannot reach keep their label+regex value.
+    # 210 = the measured worst case (BIR, 11 crops on the accurate recognizer,
+    # 186s) plus headroom. DTI/Business Permit never approach it (8s / 3s on
+    # the fast recognizer) — this is a ceiling, not a spend.
+    roi_budget_seconds: float = 210.0
+    # Decode cap per field crop. 64, not 32: a real BIR registered_address
+    # decodes to 70 chars (~34 tokens) and a 32-token cap truncated it to a
+    # wrong-but-plausible value. Generation stops at EOS, so short fields
+    # never pay for this headroom.
+    trocr_max_new_tokens: int = 64
+    # Skip TrOCR on a field Tesseract already read at or above this per-word
+    # confidence. Deliberately HIGH: measured on a real BIR page, Tesseract
+    # reports 68-78% on values it read wrong ("NORTHZ2N STAR FINANCE",
+    # "GEMINI STREZT", "CONSTRUCTION CF"), so a low floor gates out exactly
+    # the fields TrOCR exists to fix. Only a near-certain read is worth
+    # skipping; the time budget, not this gate, is what bounds the pass.
+    roi_tesseract_confidence_floor: float = 90.0
+
     # --- runtime ---
     tesseract_cmd: str | None = None
-    num_threads: int = 2  # HF free tier is CPU-limited; don't oversubscribe
+    # CPU thread cap. Auto-sizes to the host: 2 on the HF free tier (2 vCPU),
+    # 4 on the Oracle A1 deploy target (4 OCPU), without oversubscribing a
+    # bigger dev box. Measured: 1 TrOCR crop 15.8s @2 threads vs 10.3s @8.
+    num_threads: int = Field(default_factory=lambda: min(4, os.cpu_count() or 2))
     # Where PATCH /v1/config persists admin threshold overrides (JSON).
     threshold_store_path: Path | None = None
 
@@ -78,6 +121,22 @@ class Settings(BaseSettings):
     @property
     def store_path(self) -> Path:
         return self.threshold_store_path or PY_ROOT / ".thresholds.json"
+
+    @property
+    def trocr_path(self) -> Path:
+        # A local directory (baked into the Docker image at build time, or
+        # downloaded once via generate_roi_config.py's sibling bake step) —
+        # never a bare HF Hub id; see the field comment above for why.
+        return self.trocr_model_path or self.model_dir / "trocr-base-printed"
+
+    @property
+    def trocr_accurate_path(self) -> Path:
+        return self.trocr_accurate_model_path or self.model_dir / "trocr-large-printed"
+
+    def accurate_templates(self) -> tuple[str, ...]:
+        return tuple(
+            name.strip() for name in self.trocr_accurate_templates.split(",") if name.strip()
+        )
 
     # ------------------------------------------------------------- thresholds
     def resolved_signature_distance_threshold(self) -> float | None:

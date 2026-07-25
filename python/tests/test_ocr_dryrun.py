@@ -750,6 +750,128 @@ def test_extract_fields_defaults_to_bir_specs() -> None:
     assert ocr_dryrun.extract_fields(SAMPLE_OCR_TEXT, {})["tin"]["value"] == "009-028-463-000"
 
 
+# ---------------------------------------------------------------------------
+# Per-field warnings (annotate_field_warnings / _looks_noisy)
+# ---------------------------------------------------------------------------
+def _noisy(value: str) -> bool:
+    return ocr_dryrun._looks_noisy(value, ocr_dryrun.CONFIG)
+
+
+def test_looks_noisy_passes_real_field_values() -> None:
+    # A false positive here is the expensive failure: warn on every row and the
+    # officer stops reading the column.
+    for value in [
+        "NORTHERN STAR FINANCE CORPORATION",
+        "GEMINI STREET, BRGY. SAN ANTONIO, PASIG CITY",
+        "Wholesale of construction materials",
+        "REBEKAH TURNER",
+        "ABC Trading Corporation",          # 3-letter acronym is a real name, not garble
+        "INCOME TAX PERCENTAGE TAX - MONTHLY",
+        # Alphanumeric unit/lot/block codes are normal in a PH address — this is
+        # a real extracted value, and flagging it would warn on every address.
+        "G09 LO2 GEMINI STREET, SCHWARTZ VILLAGE, PASIG CITY",
+        "BLK 5 L2 MARIA CLARA ST.",
+    ]:
+        assert not _noisy(value), value
+
+
+def test_looks_noisy_catches_garble_shapes() -> None:
+    for value in [
+        "EE Bincn",                 # caps fragment beside a mixed-case token
+        "NORTHZ2N STAR FINANCE",    # letter fused to a digit
+        "| Certificate of .",       # hallucinated rule character
+        "a b c d",                  # orphaned single letters
+        "X",                        # too short to be a value
+        "BRGY WRKGTN LOPEZ",        # unpronounceable consonant run
+    ]:
+        assert _noisy(value), value
+
+
+def _field(value, *, required=True, confidence=95.0, **extra) -> dict:
+    return {"name": "X", "value": value, "required": required,
+            "matched": value is not None, "confidence": confidence, **extra}
+
+
+def _warn(key: str, field: dict, specs=None) -> list:
+    specs = specs if specs is not None else ocr_dryrun.FIELD_SPECS
+    return ocr_dryrun.annotate_field_warnings({key: field}, specs,
+                                              ocr_dryrun.CONFIG)[key]["warnings"]
+
+
+def test_clean_field_raises_no_warning() -> None:
+    assert _warn("tin", _field("009-028-463-000")) == []
+    assert _warn("registered_name", _field("NORTHERN STAR FINANCE CORPORATION")) == []
+
+
+def test_value_violating_its_format_is_flagged() -> None:
+    # A line-scope regex that doesn't match falls back to the whole region, so
+    # the caption itself can land in the value (extract_fields' `else region`).
+    assert _warn("rdo_code", _field("REVENUE DISTRICT")) == ["format_mismatch"]
+    # A TIN that never reached _normalise_value's canonical 3-3-3-4 form.
+    assert _warn("tin", _field("009-028-463")) == ["format_mismatch"]
+
+
+def test_free_text_value_is_graded_by_the_noise_heuristic() -> None:
+    assert _warn("trade_name", _field("EE Bincn")) == ["noisy_text"]
+
+
+def test_format_checked_field_skips_the_noise_heuristic() -> None:
+    # The OCN's real format (1RC0001016814) trips the letter/digit rule, so
+    # running both graders would flag every valid OCN.
+    assert _warn("ocn", _field("1RC0001016814")) == []
+
+
+def test_low_confidence_value_is_flagged() -> None:
+    floor = ocr_dryrun.CONFIG["field_confidence_floor"]
+    assert _warn("registered_address", _field("PUROK ORIENTAL", confidence=floor - 10)) \
+        == ["low_confidence"]
+    assert _warn("registered_address", _field("PUROK ORIENTAL", confidence=floor)) == []
+
+
+def test_roi_trocr_value_is_not_treated_as_unsure() -> None:
+    # The ROI pass reports no confidence AND is the more accurate recogniser
+    # (routers/ocr.py), so "unknown" must not read as "low".
+    field = _field("PUROK ORIENTAL", confidence=None, source="roi_trocr")
+    assert _warn("registered_address", field) == []
+
+
+def test_missing_required_field_is_flagged_but_optional_one_is_not() -> None:
+    assert _warn("line_of_business", _field(None)) == ["not_found"]
+    assert _warn("revenue_district_officer", _field(None, required=False)) == []
+
+
+def test_warnings_are_ordered_by_priority() -> None:
+    field = _field("REVENUE DISTRICT", confidence=10.0)
+    assert _warn("rdo_code", field) == ["format_mismatch", "low_confidence"]
+
+
+def test_every_template_annotates_without_error() -> None:
+    # Guards against a value_regex added to one template's specs but not wired
+    # through TEMPLATES, which would silently drop warnings for that type.
+    for template in ("bir", "business_permit", "dti"):
+        specs = ocr_dryrun.TEMPLATES[template]["field_specs"]
+        fields = ocr_dryrun.extract_fields("", {}, specs)
+        annotated = ocr_dryrun.annotate_field_warnings(fields, specs, ocr_dryrun.CONFIG)
+        assert all("warnings" in f for f in annotated.values()), template
+
+
+def test_dti_date_value_regex_accepts_the_extracted_value() -> None:
+    # Regression for the reason value_regex exists: date_issued's extraction
+    # pattern is anchored on "valid from", so reusing it to validate the
+    # captured "09/18/2022" would report every DTI date as malformed.
+    fields = ocr_dryrun.extract_fields(
+        "This certificate is valid from 09/18/2022 to 09/18/2027 subject to",
+        {}, ocr_dryrun.DTI_FIELD_SPECS,
+    )
+    annotated = ocr_dryrun.annotate_field_warnings(
+        fields, ocr_dryrun.DTI_FIELD_SPECS, ocr_dryrun.CONFIG
+    )
+    assert annotated["date_issued"]["value"] == "09/18/2022"
+    assert annotated["date_issued"]["warnings"] == []
+    assert annotated["expiry_date"]["value"] == "09/18/2027"
+    assert annotated["expiry_date"]["warnings"] == []
+
+
 if __name__ == "__main__":  # runnable without pytest: `python tests/test_ocr_dryrun.py`
     import sys
     import traceback

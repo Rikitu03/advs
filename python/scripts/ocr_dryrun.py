@@ -79,6 +79,15 @@ CONFIG: dict = {
     "text_validation_threshold": 0.70,  # §6 drill-down "Text Validation (OCR)" pass mark
     "low_conf_floor": 60,             # per-word Tesseract confidence below this = "low" (0-100)
     "min_words_for_text": 15,         # fewer recognised words than this -> "insufficient_text" flag
+    # Per-FIELD warning thresholds (annotate_field_warnings). These grade one
+    # extracted value for the officer's drill-down; they never feed a score or a
+    # risk component. Deliberately looser than low_conf_floor: a whole page can
+    # average 60% and still be usable, but a single value read at 75% is worth a
+    # second look, since Tesseract reports 68-78% on values it read WRONG
+    # (see api/config.py roi_tesseract_confidence_floor for the measurements).
+    "field_confidence_floor": 80,     # mean per-word confidence below this = "unsure" value
+    "noise_symbol_ratio": 0.15,       # share of chars outside the plausible set before "noisy"
+    "noise_consonant_run": 5,         # consonants in a row inside one token before "noisy"
     # Stamp recovery (experimental, --compare only). The BIR seal prints the
     # REVENUE REGION/DISTRICT numbers in red ink over an orange guilloche; a single
     # colour channel separates the two where grayscale cannot. ROI is a fractional
@@ -128,30 +137,56 @@ class OcrError(RuntimeError):
 # "global" searches the whole OCR blob, "line" searches the text after the
 # label (falling back to the next non-empty line). `required` fields feed the
 # missing-component flag and the text-validation score.
+#
+# `value_regex` is VALIDATION-ONLY (annotate_field_warnings) and never used to
+# extract anything. It exists because most `regex` patterns are context-anchored
+# - they match surrounding prose and capture group 1 (DTI's date is
+# `valid from\s+(\d{1,2}/...)`, capturing "09/18/2022") - so re-applying `regex`
+# to the extracted VALUE always fails. `value_regex` is fullmatched against the
+# final value, whichever engine produced it (label+regex, positional, or
+# ROI+TrOCR). Fields whose value is free text (names, addresses) get no
+# `value_regex`; the noise heuristic grades those instead.
 # ---------------------------------------------------------------------------
+
+# "MON DD YYYY" with a REAL month name (abbreviated or full), an optional comma
+# after the day, and the year bound to 19xx/20xx. Shared by date_issued's
+# extraction pattern and its value_regex so the two can never disagree.
+_MONTH_DATE = (
+    r"(?:JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|"
+    r"JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|"
+    r"DEC(?:EMBER)?)\.?\s+\d{1,2},?\s+(?:19|20)\d{2}"
+)
+
 FIELD_SPECS: list[dict] = [
     {"key": "form_no", "name": "Form No.", "scope": "global",
      # Still extracted for the report, but NOT part of the officer's required
      # keyword set, so a missing Form No. no longer penalises text-validation.
-     "regex": r"\b(2303)\b", "required": False},
+     "regex": r"\b(2303)\b", "value_regex": r"2303", "required": False},
     {"key": "ocn", "name": "OCN", "scope": "global",
      # OCN prints ABOVE its caption and is digit-heavy (e.g. 1RC0001016814), so
      # match the format directly. A label scan returns the line after "OCN",
      # which is "CERTIFICATE OF REGISTRATION" -> the old regex grabbed that.
-     "regex": r"\b(\d[A-Z]{1,3}\d{7,})\b", "required": True},
+     "regex": r"\b(\d[A-Z]{1,3}\d{7,})\b", "value_regex": r"\d[A-Z]{1,3}\d{7,}",
+     "required": True},
     {"key": "tin", "name": "TIN", "scope": "global",
      "regex": r"(\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3,4})",
+     # _normalise_value re-emits a matched TIN as 999-999-999-9999, so validate
+     # that canonical form - a value still carrying OCR spacing/en-dashes (or a
+     # short digit run) never went through the normaliser and IS suspect.
+     "value_regex": r"\d{3}-\d{3}-\d{3}-\d{3,4}",
      "required": True},
     {"key": "registered_name", "name": "Registered Name", "scope": "line",
      "labels": ["REGISTERED NAME", "NAME"], "custom": "header_table_name",
      "required": True},
     {"key": "registration_date", "name": "Registration Date", "scope": "line",
      "labels": ["REGISTRATION DATE"], "regex": r"(\d{1,2}/\d{1,2}/\d{2,4})",
+     "value_regex": r"\d{1,2}/\d{1,2}/\d{2,4}",
      "global_fallback": True, "required": True},
     {"key": "registered_address", "name": "Registered Address", "scope": "line",
      "labels": ["REGISTERED ADDRESS"], "required": True},
     {"key": "revenue_region_no", "name": "Revenue Region No.", "scope": "line",
      "labels": ["REVENUE REGION NO", "REVENUE REGION"], "regex": r"(\d{1,3}[A-Z]?)",
+     "value_regex": r"\d{1,3}[A-Z]?",
      # the region code can carry a trailing letter (e.g. 09B), so a digits-only
      # regex would drop the "B". Value sits on the caption's own stamp row, so
      # same_line keeps it from falling through to the district line below.
@@ -159,6 +194,7 @@ FIELD_SPECS: list[dict] = [
      "same_line": True, "required": False},
     {"key": "rdo_code", "name": "Revenue District No. (RDO)", "scope": "line",
      "labels": ["REVENUE DISTRICT NO", "REVENUE DISTRICT", "RDO"], "regex": r"(\d{1,3})",
+     "value_regex": r"\d{1,3}",
      # value is column-aligned on the caption's own row; without same_line the
      # scan falls to the next line and grabs the "1" from the OCN (1RC0001016814).
      # "REVENUE DISTRICT" (no "NO") tolerates OCR dropping the noisy caption token.
@@ -174,12 +210,9 @@ FIELD_SPECS: list[dict] = [
      "labels": ["REVENUE DISTRICT OFFICER", "DISTRICT OFFICER"], "required": False},
     {"key": "date_issued", "name": "Date Issued", "scope": "global",
      # The issue date floats anywhere on the form as "MON DD YYYY" (e.g. MAR 09
-     # 2017). Anchor on a REAL month (abbrev or full name) so a stray 3-letter
-     # token + numbers like "RDO 39 2018" is not mistaken for a date, and bound the
-     # year to 19xx/20xx. Comma after the day is optional ("SEP 5, 2019").
-     "regex": r"\b((?:JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|"
-              r"JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|"
-              r"DEC(?:EMBER)?)\.?\s+\d{1,2},?\s+(?:19|20)\d{2})\b",
+     # 2017). Anchoring on a REAL month keeps a stray 3-letter token + numbers
+     # like "RDO 39 2018" from being mistaken for a date (see _MONTH_DATE).
+     "regex": rf"\b({_MONTH_DATE})\b", "value_regex": _MONTH_DATE,
      "required": True},
 ]
 
@@ -212,7 +245,8 @@ BUSINESS_PERMIT_FIELD_SPECS: list[dict] = [
      # The issuing city prints in the header as "CITY OF <NAME>". Keep the
      # separator to spaces/tabs (not \s, which would run the match across the
      # newline into the following caption lines).
-     "regex": r"CITY OF ([A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*)", "required": True},
+     "regex": r"CITY OF ([A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*)",
+     "value_regex": r"[A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*", "required": True},
     {"key": "name_of_proprietor", "name": "Name of Proprietor", "scope": "line",
      "labels": ["NAME OF PROPRIETOR", "PROPRIETOR"], "value_above": True, "required": True},
     {"key": "trade_name", "name": "Trade Name", "scope": "line",
@@ -225,6 +259,7 @@ BUSINESS_PERMIT_FIELD_SPECS: list[dict] = [
     {"key": "date_issued", "name": "Issued Date", "scope": "global",
      # "Issued this 26th day of AUGUST , 2012, at ..." — capture day + month + year.
      "regex": r"(?i)issued this\s+(\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2})",
+     "value_regex": r"(?i)\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2}",
      "required": True},
 ]
 
@@ -249,15 +284,18 @@ DTI_FIELD_SPECS: list[dict] = [
     {"key": "owner_representative_name", "name": "Owner / Representative Name", "scope": "line",
      "labels": ["ISSUED TO"], "required": True},
     {"key": "date_issued", "name": "Valid Date", "scope": "global",
-     "regex": r"(?i)valid from\s+(\d{1,2}/\d{1,2}/\d{2,4})", "required": True},
+     "regex": r"(?i)valid from\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+     "value_regex": r"\d{1,2}/\d{1,2}/\d{2,4}", "required": True},
     {"key": "expiry_date", "name": "Expiration Date", "scope": "global",
      "regex": r"(?i)valid from\s+\d{1,2}/\d{1,2}/\d{2,4}\s+to\s+(\d{1,2}/\d{1,2}/\d{2,4})",
-     "required": True},
+     "value_regex": r"\d{1,2}/\d{1,2}/\d{2,4}", "required": True},
     {"key": "certificate_no", "name": "Certificate Number", "scope": "line",
      "labels": ["CERTIFICATE NO", "CERTIFICATE NUMBER"],
-     "regex": r"((?:BN\s*)?\d{5,})", "same_line": True, "required": True},
+     "regex": r"((?:BN\s*)?\d{5,})", "value_regex": r"(?:BN\s*)?\d{5,}",
+     "same_line": True, "required": True},
     {"key": "trn_no", "name": "TRN", "scope": "line",
      "labels": ["TRN"], "regex": r"(DTI-\d{4}-\d+|[A-Z0-9-]{6,})",
+     "value_regex": r"DTI-\d{4}-\d+|[A-Z0-9-]{6,}",
      "same_line": True, "required": True},
 ]
 
@@ -834,6 +872,141 @@ TEMPLATES: dict[str, dict] = {
         "positional": None,
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Per-field warnings (officer drill-down; never feeds a score)
+#
+# score_quality() grades the PAGE. These grade one VALUE, so the officer's
+# key/value table can mark the individual pairs worth re-reading rather than
+# leaving them to spot "EE Bincn" in a wall of text. Purely presentational:
+# nothing here changes an extracted value, a flag, or the risk score.
+# ---------------------------------------------------------------------------
+
+# Characters Tesseract emits when it hallucinates structure out of rules, seals
+# and guilloche patterns. None of them appear in a real Philippine business
+# name, address or activity list, so any occurrence marks the value noisy.
+_GARBLE_CHARS = set("|~^\\_«»§¢£¥°¬{}[]<>*+=@")
+
+# The plausible character set for a free-text field value. Anything outside it
+# counts toward noise_symbol_ratio.
+_PLAUSIBLE_VALUE_CHARS = re.compile(r"[A-Za-z0-9 .,&/'#()\-]")
+
+_VOWELS = set("AEIOUY")
+
+# A lone letter that is not an initial ("J." is fine, a bare "J" is not).
+_STRAY_LETTER = re.compile(r"(?<![\w.])[A-Za-z](?![\w.])")
+
+# A letter running straight into a digit inside one token, e.g. "NORTHZ2N".
+_ALNUM_BOUNDARY = re.compile(r"[A-Za-z]\d|\d[A-Za-z]")
+
+# Tokens up to this length are exempt from the letter/digit rule: unit, lot and
+# block designators are routinely alphanumeric in a Philippine address
+# ("G09 LO2 GEMINI STREET", "BLK 5", "L2"), and flagging them would put a
+# standing warning on every address field. Real garble runs longer than this
+# ("NORTHZ2N"), so the rule still catches what it was written for.
+_SHORT_ALNUM_TOKEN = 4
+
+
+def _looks_noisy(value: str, cfg: dict) -> bool:
+    """Whether a free-text value reads as OCR garble.
+
+    This detects GARBLE, not grammar - there is no language model here, and a
+    grammatical check is not what separates "GEMINI STREZT" from "GEMINI
+    STREET". It looks for the shapes Tesseract actually produces on a degraded
+    scan: hallucinated symbols, unpronounceable consonant runs, letters fused
+    to digits, and orphaned single letters. Tuned to under-report - a clean
+    value must never be flagged, since a false warning on every row would train
+    officers to ignore the column.
+    """
+    value = value.strip()
+    if len(value) < 3:
+        return True
+
+    if _GARBLE_CHARS & set(value):
+        return True
+
+    implausible = len(_PLAUSIBLE_VALUE_CHARS.sub("", value))
+    if implausible / len(value) > cfg["noise_symbol_ratio"]:
+        return True
+
+    if len(_STRAY_LETTER.findall(value)) > 1:
+        return True
+
+    tokens = value.split()
+    # A 1-2 letter ALL-CAPS fragment inside an otherwise mixed-case value, e.g.
+    # "EE Bincn" - the leftovers of a caption or a signature Tesseract tried to
+    # read as text. Capped at 2 letters on purpose: a real acronym in a business
+    # name ("ABC Trading Corporation") is 3+, so it stays unflagged.
+    if any(any(ch.islower() for ch in tok) for tok in tokens):
+        for token in tokens:
+            letters = "".join(ch for ch in token if ch.isalpha())
+            if 0 < len(letters) <= 2 and letters.isupper():
+                return True
+
+    run = cfg["noise_consonant_run"]
+    for token in tokens:
+        if len(token) > _SHORT_ALNUM_TOKEN and _ALNUM_BOUNDARY.search(token):
+            return True
+        letters = "".join(ch for ch in token if ch.isalpha()).upper()
+        # A pure-digit or mixed token (dates, codes) has no letters to judge.
+        if len(letters) < 4:
+            continue
+        if not (_VOWELS & set(letters)):
+            return True
+        consecutive = 0
+        for char in letters:
+            consecutive = 0 if char in _VOWELS else consecutive + 1
+            if consecutive >= run:
+                return True
+
+    return False
+
+
+def annotate_field_warnings(fields: dict, specs: list[dict], cfg: dict) -> dict:
+    """Add a ``warnings`` list to every field in ``fields`` (mutated in place).
+
+    Call this AFTER every engine that can write a value (label+regex, the
+    positional refiner, and the ROI+TrOCR merge), so the warnings describe the
+    value the officer actually sees rather than an intermediate one.
+
+    Tokens: ``not_found`` (required but absent), ``format_mismatch`` (violates
+    the spec's ``value_regex``), ``low_confidence`` (read below
+    ``field_confidence_floor``), ``noisy_text`` (see :func:`_looks_noisy`).
+    """
+    specs_by_key = {spec["key"]: spec for spec in specs}
+
+    for key, field in fields.items():
+        spec = specs_by_key.get(key, {})
+        warnings: list[str] = []
+        value = field.get("value")
+
+        if not field.get("matched") or not value:
+            if field.get("required"):
+                warnings.append("not_found")
+            field["warnings"] = warnings
+            continue
+
+        value_regex = spec.get("value_regex")
+        if value_regex is not None:
+            if re.fullmatch(value_regex, value.strip()) is None:
+                warnings.append("format_mismatch")
+        elif _looks_noisy(value, cfg):
+            # Only free-text fields get the heuristic. A format-checked field is
+            # already graded by its pattern, and running both would double-flag
+            # e.g. an OCN ("1RC0001016814" trips the letter/digit boundary).
+            warnings.append("noisy_text")
+
+        confidence = field.get("confidence")
+        # confidence is None on the ROI+TrOCR path (routers/ocr.py sets it), which
+        # reports no confidence AND is the more accurate recogniser - treating
+        # "unknown" as "unsure" there would invert the signal.
+        if confidence is not None and confidence < cfg["field_confidence_floor"]:
+            warnings.append("low_confidence")
+
+        field["warnings"] = warnings
+
+    return fields
 
 
 # ---------------------------------------------------------------------------
