@@ -47,7 +47,7 @@ class MlPipelineService
         );
 
         $form = array_filter([
-            'template' => $ml['template'] ?? 'bir',
+            'template' => $this->ocrTemplateFor($type['code'] ?? null),
             'document_type' => $type['code'] ?? null,
             'city' => $city,
             'signature_reference' => $this->resolveSignatureReference($document),
@@ -114,6 +114,10 @@ class MlPipelineService
             $quality = $page['quality'] ?? [];
             $columns['ocr_extracted_text'] = $page['text'] ?? null;
             $columns['ocr_confidence'] = $this->float($quality['mean_confidence'] ?? null);
+            // The structured key/value map the drill-down renders. Stored as the
+            // API returns it — per-field warnings included — so the format
+            // patterns that grade a value stay in the field specs that define it.
+            $columns['ocr_fields'] = $page['fields'] ?? null;
             $columns['text_validation_score'] = $this->float($quality['text_validation_score'] ?? null);
             $columns['text_fields_matched'] = $quality['required_matched'] ?? null;
             $columns['text_fields_expected'] = $quality['required_total'] ?? null;
@@ -137,6 +141,12 @@ class MlPipelineService
             }
         } elseif ($signature !== null) {
             $columns['signature_detected'] = false;
+            if (($signature['reason'] ?? null) === 'no_reference_embedding') {
+                // Distinct from a genuine detection miss: the region may well have
+                // been found (signature_bbox above) — there's just no vendor
+                // reference to compare it against yet.
+                $flags[] = 'no_signature_reference';
+            }
         }
 
         // ── Stage 4b issuer logo ───────────────────────────────────────────────
@@ -217,6 +227,21 @@ class MlPipelineService
     private function float(mixed $value): ?float
     {
         return $value === null ? null : (float) $value;
+    }
+
+    /**
+     * The OCR field template the API applies for a document type. The three
+     * vendor-submittable types map to their own field template; anything else
+     * (IDs, contracts, …) falls back to the configured default (see config/advs.php).
+     */
+    private function ocrTemplateFor(?string $code): string
+    {
+        return match ($code) {
+            'bir_certificate' => 'bir',
+            'business_permit' => 'business_permit',
+            'dti_registration' => 'dti',
+            default => (string) (config('advs.ml.template') ?? 'bir'),
+        };
     }
 
     /**

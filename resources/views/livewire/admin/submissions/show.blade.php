@@ -6,7 +6,8 @@ use App\Support\SubmissionPresenter;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     /** The submission id under review (from the {submission} route parameter). */
     public int $submissionId;
 
@@ -25,6 +26,9 @@ new class extends Component {
     /** Active risk-score breakdown filter: 'all' or a key from component_filters. */
     public string $componentFilter = 'all';
 
+    /** Active OCR-text filter: a document id (key) from ocr_filters. */
+    public string $ocrDocumentFilter = '';
+
     public function mount(string $submission): void
     {
         $model = Submission::query()
@@ -39,6 +43,7 @@ new class extends Component {
 
         $this->submissionId = $model->id;
         $this->record = SubmissionPresenter::detail($model);
+        $this->ocrDocumentFilter = $this->record['ocr_filters'][0]['key'] ?? '';
     }
 
     public function setComponentFilter(string $key): void
@@ -46,6 +51,13 @@ new class extends Component {
         abort_unless(array_key_exists($key, $this->record['component_sets']), 400);
 
         $this->componentFilter = $key;
+    }
+
+    public function setOcrDocumentFilter(string $key): void
+    {
+        abort_unless(array_key_exists($key, $this->record['ocr_by_document']), 400);
+
+        $this->ocrDocumentFilter = $key;
     }
 
     public function startDecision(string $mode): void
@@ -99,8 +111,10 @@ new class extends Component {
 
         // Normalised component-breakdown rows (ADVS_System_Reference.md §6).
         // A null score means the stage is not yet live (standby pipeline).
-        $sigDetected = $c['signature']['detected'];
-        $stampDetected = $c['stamp']['detected'];
+        // 'verified' = comparison ran; 'detected' = YOLOv8 found the region even
+        // if verification couldn't run (e.g. no reference enrolled yet).
+        $sigVerified = $c['signature']['verified'];
+        $stampVerified = $c['stamp']['verified'];
 
         $breakdown = [
             [
@@ -117,13 +131,17 @@ new class extends Component {
             ],
             [
                 'key' => 'signature', 'label' => 'Signature Match (Siamese CNN)', 'icon' => 'finger-print',
-                'score' => $sigDetected ? $c['signature']['similarity'].'% sim.' : 'Not detected',
+                'score' => $sigVerified
+                    ? $c['signature']['similarity'].'% sim.'
+                    : ($c['signature']['detected'] ? 'Unverified' : 'Not detected'),
                 'threshold' => round($thresholds['signature'] * 100).'%',
                 'pass' => $c['signature']['pass'], 'detail' => $c['signature']['detail'], 'expandable' => true,
             ],
             [
                 'key' => 'stamp', 'label' => 'Stamp Match (EfficientNet)', 'icon' => 'check-badge',
-                'score' => $stampDetected ? $c['stamp']['similarity'].'% sim.' : 'Not detected',
+                'score' => $stampVerified
+                    ? $c['stamp']['similarity'].'% sim.'
+                    : ($c['stamp']['detected'] ? 'Unverified' : 'Not detected'),
                 'threshold' => round($thresholds['stamp'] * 100).'%',
                 'pass' => $c['stamp']['pass'], 'detail' => $c['stamp']['detail'], 'expandable' => true,
             ],
@@ -314,11 +332,69 @@ new class extends Component {
         <div class="flex flex-col gap-6">
             {{-- OCR text --}}
             <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 240ms">
-                <div class="flex items-center justify-between">
+                @php
+                    $ocrFields = $s['ocr_fields_by_document'][$ocrDocumentFilter] ?? [];
+                @endphp
+                <div class="flex flex-wrap items-center justify-between gap-3">
                     <h2 class="text-base font-semibold text-cu-text">OCR extracted text</h2>
-                    <flux:badge size="sm" color="zinc">PyTesseract</flux:badge>
+                    @if (count($s['ocr_filters']) > 1)
+                        <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1" wire:loading.class="opacity-60" wire:target="setOcrDocumentFilter">
+                            @foreach ($s['ocr_filters'] as $filter)
+                                <button type="button" wire:click="setOcrDocumentFilter('{{ $filter['key'] }}')"
+                                        title="{{ $filter['label'] }}"
+                                        class="max-w-48 truncate rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $ocrDocumentFilter === $filter['key'] ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $filter['label'] }}</button>
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
-                <pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-cu-border bg-cu-bg p-4 font-mono text-xs leading-relaxed text-cu-muted">{{ $s['ocr_excerpt'] }}</pre>
+
+                @if (count($s['ocr_filters']) === 0)
+                    <p class="mt-3 text-sm text-cu-muted">No documents to display OCR text for.</p>
+                @else
+                    <div wire:loading.class="opacity-40" wire:target="setOcrDocumentFilter">
+                        @if (count($ocrFields) > 0)
+                            {{-- Extracted key/value pairs, in the document type's template order --}}
+                            <dl class="mt-3 divide-y divide-cu-border overflow-hidden rounded-xl border border-cu-border bg-cu-bg">
+                                @foreach ($ocrFields as $field)
+                                    <div class="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-baseline sm:gap-4">
+                                        <dt class="shrink-0 text-xs font-medium text-cu-muted sm:w-56">{{ $field['label'] }}</dt>
+                                        <dd class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                                            @if ($field['value'] !== null)
+                                                <span class="min-w-0 break-words font-mono text-xs text-cu-text">{{ $field['value'] }}</span>
+                                            @else
+                                                <span class="font-mono text-xs text-cu-muted">—</span>
+                                            @endif
+                                            @if ($field['warning'] !== null)
+                                                <x-ocr-warning-badge :label="$field['warning']['label']"
+                                                                     :reasons="$field['warning']['reasons']" />
+                                            @endif
+                                        </dd>
+                                    </div>
+                                @endforeach
+                            </dl>
+                        @else
+                            {{-- No field map: either the stage hasn't run, or this result predates
+                                 the ocr_fields column and has only its raw text. --}}
+                            <p class="mt-3 text-sm text-cu-muted">
+                                No extracted fields for this document — the OCR stage has not run, or it
+                                was processed before field extraction was recorded. The raw text below is
+                                all that is on file.
+                            </p>
+                        @endif
+
+                        {{-- The raw blob stays one click away so a field can be checked in context --}}
+                        <div class="mt-3" x-data="{ open: {{ count($ocrFields) > 0 ? 'false' : 'true' }} }">
+                            <button type="button" x-on:click="open = ! open" :aria-expanded="open"
+                                    class="flex items-center gap-2 rounded-lg py-0.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cu-purple/40">
+                                <span class="shrink-0 text-cu-muted transition-transform duration-200" :class="open && 'rotate-90'">
+                                    <flux:icon icon="chevron-right" class="size-3.5" />
+                                </span>
+                                <span class="text-xs font-medium text-cu-muted">Raw OCR text</span>
+                            </button>
+                            <pre x-show="open" x-collapse x-cloak class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-cu-border bg-cu-bg p-4 font-mono text-xs leading-relaxed text-cu-muted">{{ $s['ocr_by_document'][$ocrDocumentFilter] ?? '' }}</pre>
+                        </div>
+                    </div>
+                @endif
             </div>
 
             {{-- Flags + documents --}}

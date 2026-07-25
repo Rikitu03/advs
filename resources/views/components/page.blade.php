@@ -3,6 +3,6 @@
      collapses to content height when a search/filter returns few or no rows.
      The -m-6/lg:-m-8 bleed + matching padding paints edge-to-edge under the
      layout's own padding. --}}
-<div {{ $attributes->class('-m-6 flex min-h-full flex-1 flex-col bg-white p-6 text-zinc-900 lg:-m-8 lg:p-8 dark:bg-cu-bg dark:text-cu-text') }}>
+<div {{ $attributes->class('-m-6 flex min-h-full flex-1 flex-col bg-white p-6 text-ink lg:-m-8 lg:p-8 dark:bg-cu-bg dark:text-cu-text') }}>
     {{ $slot }}
 </div>

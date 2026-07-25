@@ -65,7 +65,7 @@ class NegofoodSubmissionSeeder extends Seeder
         $vendor->update(['status' => Vendor::STATUS_UNDER_REVIEW]);
 
         $this->notify($vendorUserId, Notification::TYPE_DECISION_MADE, 'Resubmission requested',
-            'Your financial statement submission requires resubmission. Review the officer comments before resubmitting.',
+            'Your DTI Business Name Registration submission requires resubmission. Review the officer comments before resubmitting.',
             $resubmission->id, $resubmission->reviewed_at);
         $this->notify($vendorUserId, Notification::TYPE_DECISION_MADE, 'Submission approved',
             'Your BIR Certificate of Registration was approved and added to your vendor record.',
@@ -116,7 +116,7 @@ class NegofoodSubmissionSeeder extends Seeder
             // [type code, asset, stored name, risk, extra flags, tamper score]
             ['business_permit', 'business_permit.png', 'business_permit_negofood_2026_01.png', 58.0, [self::NO_METADATA_FLAG], 0.15],
             ['bir_certificate', 'bir_certificate.png', 'bir_certificate_negofood_2026_02.png', 52.0, [self::NO_METADATA_FLAG], 0.12],
-            ['financial_statement', 'financial_statement.pdf', 'audited_financial_statement_2025_03.pdf', 60.0, [], 0.0],
+            ['dti_registration', 'dti_registration.png', 'dti_business_name_registration_2026_03.png', 60.0, [], 0.0],
         ];
 
         foreach ($documents as [$typeCode, $asset, $storedName, $risk, $extraFlags, $tamperScore]) {
@@ -209,20 +209,20 @@ class NegofoodSubmissionSeeder extends Seeder
             'risk_level' => 'high',
             'reviewed_by' => $officer?->id,
             'reviewed_at' => $submittedAt->copy()->addDays(2),
-            'review_comments' => 'Copy-move tampering evidence could not be cleared on manual review. Please resubmit a clean scan of the audited financial statement.',
+            'review_comments' => 'Copy-move tampering evidence could not be cleared on manual review. Please resubmit a clean scan of the DTI Business Name Registration certificate.',
             'created_at' => $submittedAt,
             'updated_at' => $submittedAt->copy()->addDays(2),
         ]);
 
         $document = $this->storeDocument(
-            $vendor, $submission, $typeIds['financial_statement'] ?? null,
-            'financial_statement.pdf', 'audited_financial_statement_2025.pdf', $submittedAt,
+            $vendor, $submission, $typeIds['dti_registration'] ?? null,
+            'dti_registration.png', 'dti_business_name_registration_2025.png', $submittedAt,
         );
 
         ValidationResult::factory()->create([
             'document_id' => $document->id,
             'submission_id' => $submission->id,
-            'classification_label' => 'Financial Statement',
+            'classification_label' => 'DTI Business Name Registration',
             'document_risk_score' => 84.0,
             'flags' => ['Document tampering suspected', 'Copy-move: 48 cloned keypoints'],
         ]);

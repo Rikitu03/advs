@@ -5,7 +5,8 @@ use App\Support\SubmissionPresenter;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     /**
      * @return array<string, mixed>
      */
@@ -92,9 +93,9 @@ new class extends Component {
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             @foreach ([
                 ['Total submissions', $kpis['total'], 'folder-open', 'bg-cu-purple/10 text-cu-purple', 'Documents sent for validation'],
-                ['In progress', $kpis['processing'], 'arrow-path', 'bg-cu-blue/10 text-sky-700', 'Processing or review'],
-                ['Approved', $kpis['approved'], 'check-badge', 'bg-cu-yellow/20 text-yellow-700', 'Accepted documents'],
-                ['For Resubmission', $kpis['resubmission'], 'arrow-path', 'bg-cu-pink/10 text-rose-600', 'Correct and submit again'],
+                ['In progress', $kpis['processing'], 'arrow-path', 'bg-cu-blue/10 text-cu-blue', 'Processing or review'],
+                ['Approved', $kpis['approved'], 'check-badge', 'bg-cu-yellow/20 text-cu-yellow', 'Accepted documents'],
+                ['For Resubmission', $kpis['resubmission'], 'arrow-path', 'bg-cu-pink/10 text-cu-pink', 'Correct and submit again'],
             ] as [$label, $value, $icon, $accent, $hint])
                 <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5 shadow-sm">
                     <div class="flex items-start justify-between gap-3">

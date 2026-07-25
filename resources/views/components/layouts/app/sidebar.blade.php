@@ -9,8 +9,8 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white text-zinc-950 dark:bg-cu-bg dark:text-cu-text">
-        <flux:sidebar sticky stashable class="border-r border-zinc-200 bg-white text-zinc-950 dark:border-white/10 dark:bg-cu-surface dark:text-cu-text">
+    <body class="min-h-screen bg-white text-ink dark:bg-cu-bg dark:text-cu-text">
+        <flux:sidebar sticky stashable class="border-r border-ink-mute bg-white text-ink dark:border-white/10 dark:bg-cu-surface dark:text-cu-text">
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
             <a href="{{ route('dashboard') }}" class="mr-5 flex items-center space-x-2" wire:navigate>

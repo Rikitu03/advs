@@ -239,7 +239,7 @@ new class extends Component
                             class="grid cursor-pointer gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 lg:grid-cols-[1.1fr_.6fr_.7fr_.7fr_.7fr] lg:items-center"
                         >
                             <div class="flex min-w-0 gap-3">
-                                <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700">
+                                <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue">
                                     <flux:icon icon="document-text" class="size-5" />
                                 </span>
                                 <div class="min-w-0">
@@ -265,7 +265,7 @@ new class extends Component
                                     @click.stop="open = !open"
                                     :aria-expanded="open"
                                     aria-label="Toggle submission details"
-                                    class="inline-flex items-center gap-2 rounded-lg border border-cu-border bg-cu-surface px-3 py-1.5 text-sm font-medium text-cu-text transition hover:border-cu-blue hover:bg-cu-blue/10 hover:text-sky-700"
+                                    class="inline-flex items-center gap-2 rounded-lg border border-cu-border bg-cu-surface px-3 py-1.5 text-sm font-medium text-cu-text transition hover:border-cu-blue hover:bg-cu-blue/10 hover:text-cu-blue"
                                 >
                                     <flux:icon icon="eye" class="size-4" />
                                     Details

@@ -164,7 +164,7 @@ This section walks through exactly what happens from the moment a file enters th
 **What happens**:
 1. The preprocessed image is passed to **PyTesseract** (`pytesseract.image_to_string()`), which performs its own internal processing (segmentation into lines/words/characters, feature extraction, deep-learning-based character classification, and post-processing with dictionary correction).
 2. The raw extracted text is passed through **NLP post-processing** for further correction and sentence structuring.
-3. The cleaned text is compared against **predefined templates** — expected field names, required keywords, formatting patterns specific to each document type (e.g., a BIR permit must contain certain registration numbers, a financial statement must contain specific headers).
+3. The cleaned text is compared against **predefined templates** — expected field names, required keywords, formatting patterns specific to each document type (e.g., a BIR certificate must contain certain registration numbers, a DTI Business Name Registration must contain a certificate number and TRN).
 
 **Validation logic**: The system checks for:
 - **Required fields present**: Does the extracted text contain the expected sections/keywords for this document type?
@@ -191,7 +191,7 @@ This section walks through exactly what happens from the moment a file enters th
 - Saved format: HDF5 (`resnet50_authenticity.h5`) with pickled LabelEncoder
 
 **What happens**:
-1. The model produces a **probability distribution** over all document classes (e.g., `[0.02, 0.01, 0.96, 0.04]` for classes like BIR Permit, Financial Statement, etc.).
+1. The model produces a **probability distribution** over all document classes (e.g., `[0.02, 0.01, 0.96, 0.04]` for classes like BIR Permit, DTI Registration, etc.).
 2. The index with the highest probability is decoded back to the class label using the saved LabelEncoder.
 3. The **confidence score** is the maximum probability value (e.g., 96%).
 
@@ -257,7 +257,7 @@ This section walks through exactly what happens from the moment a file enters th
 > **Logo references are keyed by the document's issuer, not by the vendor.** Official stamps, logos, and seals belong to whoever **issues** the document. `document_types.issuer_scope` records which kind, and that drives how the reference is keyed:
 > - **`national`** (e.g. BIR Permit, SEC GIS) — one logo agency-wide; the reference is keyed by **document type alone** (the BIR logo is identical on every BIR document, in any city).
 > - **`lgu`** (e.g. Business Permit) — one seal per city; the reference is keyed by **(document type, city)** (Pasig's business-permit seal differs from Quezon City's).
-> - **`null`** (e.g. audited Financial Statement, Signed Contract) — no official issuer logo; the reference lookup is skipped (only the tamper check runs).
+> - **`null`** (e.g. Signed Contract) — no official issuer logo; the reference lookup is skipped (only the tamper check runs).
 >
 > References live in the **`logo_references`** table. There is **no per-vendor stamp embedding** and no per-vendor enrollment step. (This is the opposite of the signature handling in §4a, which uses one per-vendor reference enrolled at registration.)
 
@@ -458,7 +458,7 @@ All file paths are stored as references in the database, not the files themselve
 | Signature reference embedding | Database, **per vendor** (`users.signature_path` + `vendor_embeddings.signature_embedding`) | 128-dimensional float vector, serialized as JSON or binary blob |
 | Logo / stamp / seal reference vector | Database, **per issuer** (the `logo_references` table, keyed by `document_type` for national issuers and `(document_type, city)` for LGU issuers) | Float vector per issuer (dimension depends on EfficientNet variant), serialized similarly |
 
-The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. financial statements, signed contracts) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
+The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. Signed Contract) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
 
 ### Global Document Catalog & "Available Documents" Storage
 

@@ -9,6 +9,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -38,6 +39,10 @@ class MlPipelineServiceTest extends TestCase
             'classification' => ['label' => 'BIR Permit', 'confidence' => 0.95, 'passed_threshold' => true],
             'ocr' => ['pages' => [[
                 'text' => 'BUREAU OF INTERNAL REVENUE',
+                'fields' => [
+                    'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                        'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+                ],
                 'quality' => ['mean_confidence' => 92.0, 'text_validation_score' => 1.0,
                     'required_matched' => 3, 'required_total' => 3, 'flags' => []],
             ]]],
@@ -55,6 +60,13 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame('BIR Permit', $columns['classification_label']);
         $this->assertEqualsWithDelta(0.95, $columns['classification_confidence'], 1e-6);
         $this->assertSame('BUREAU OF INTERNAL REVENUE', $columns['ocr_extracted_text']);
+        // The structured field map is persisted verbatim — warnings included —
+        // for the officer drill-down's key/value panel.
+        $this->assertSame(
+            ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+            $columns['ocr_fields']['tin'],
+        );
         $this->assertEqualsWithDelta(1.0, $columns['text_validation_score'], 1e-6);
         $this->assertSame(3, $columns['text_fields_matched']);
         $this->assertSame([10, 20, 30, 40], $columns['signature_bbox']);
@@ -104,6 +116,42 @@ class MlPipelineServiceTest extends TestCase
         $this->assertContains('unreferenced_logo', $mapped['flags']);
     }
 
+    /**
+     * A region YOLOv8 actually found (signature_bbox populated) but the vendor has
+     * no enrolled reference yet must be distinguishable from a genuine detection
+     * miss — it should flag as a missing reference, not "no signature detected".
+     */
+    public function test_skipped_signature_with_no_reference_flags_distinctly_from_a_detection_miss(): void
+    {
+        $stages = [
+            'detection' => ['detections' => [
+                ['label' => 'signature', 'confidence' => 0.9, 'box' => [10, 20, 30, 40]],
+            ], 'flags' => []],
+            'signature' => ['skipped' => true, 'reason' => 'no_reference_embedding'],
+        ];
+
+        $mapped = $this->service()->mapStages($stages);
+
+        $this->assertSame([10, 20, 30, 40], $mapped['columns']['signature_bbox']);
+        $this->assertFalse($mapped['columns']['signature_detected']);
+        $this->assertContains('no_signature_reference', $mapped['flags']);
+        $this->assertNotContains('no_signature_detected', $mapped['flags']);
+    }
+
+    public function test_skipped_signature_with_a_genuine_detection_miss_does_not_flag_no_reference(): void
+    {
+        $stages = [
+            'detection' => ['detections' => [], 'flags' => ['no_signature_detected']],
+            'signature' => ['skipped' => true, 'reason' => 'no_signature_detected'],
+        ];
+
+        $mapped = $this->service()->mapStages($stages);
+
+        $this->assertNull($mapped['columns']['signature_bbox']);
+        $this->assertFalse($mapped['columns']['signature_detected']);
+        $this->assertNotContains('no_signature_reference', $mapped['flags']);
+    }
+
     // ── validate(): transport + reference gathering ───────────────────────────
 
     public function test_validate_returns_stages_and_flags(): void
@@ -126,6 +174,60 @@ class MlPipelineServiceTest extends TestCase
         $this->expectException(RuntimeException::class);
 
         $this->service()->validate($this->document());
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function templatePerTypeProvider(): array
+    {
+        return [
+            'BIR certificate → bir' => ['bir_certificate', 'bir'],
+            'Business Permit → business_permit' => ['business_permit', 'business_permit'],
+            'DTI registration → dti' => ['dti_registration', 'dti'],
+        ];
+    }
+
+    #[DataProvider('templatePerTypeProvider')]
+    public function test_validate_sends_the_ocr_template_matching_the_document_type(string $code, string $template): void
+    {
+        $typeId = DB::table('document_types')->insertGetId([
+            'name' => $code, 'code' => $code, 'issuer_scope' => 'national',
+            'is_required' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $document = $this->document(['document_type_id' => $typeId]);
+        Http::fake(['*/v1/validate' => Http::response(['stages' => [], 'flags' => []], 200)]);
+
+        $this->service()->validate($document);
+
+        Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === $template);
+    }
+
+    public function test_validate_falls_back_to_the_configured_template_for_an_unmapped_type(): void
+    {
+        config()->set('advs.ml.template', 'bir');
+        $typeId = DB::table('document_types')->insertGetId([
+            'name' => 'Sanitary Permit', 'code' => 'sanitary_permit', 'issuer_scope' => 'lgu',
+            'is_required' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $document = $this->document(['document_type_id' => $typeId]);
+        Http::fake(['*/v1/validate' => Http::response(['stages' => [], 'flags' => []], 200)]);
+
+        $this->service()->validate($document);
+
+        Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === 'bir');
+    }
+
+    /**
+     * Read one multipart form-data field's value out of a raw request body.
+     */
+    private function multipartField(string $body, string $name): ?string
+    {
+        // Guzzle inserts a Content-Length header between the disposition and the
+        // value, so skip any intervening part headers to the blank-line separator.
+        return preg_match('/name="'.preg_quote($name, '/').'".*?\r\n\r\n(.*?)\r\n/s', $body, $m) === 1
+            ? $m[1]
+            : null;
     }
 
     public function test_validate_sends_issuer_references_for_a_national_type(): void

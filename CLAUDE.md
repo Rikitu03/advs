@@ -22,7 +22,7 @@
 **One-sentence description:** A desktop-first web application that automates the validation of third-party vendor accreditation documents using image processing, OCR, and machine learning to detect fraud and reduce manual compliance work.
 
 **Main Purpose:**
-The ADVS replaces manual document review by automatically classifying uploaded vendor documents (e.g., BIR Permits, Financial Statements, Business Registration certificates), extracting text via OCR, and verifying the authenticity of signatures and official stamps through a multi-model ML pipeline (ResNet-50 + YOLOv8 + Siamese CNN + EfficientNet). A risk score is assigned to each submission. Compliance officers review the results on an Admin Dashboard and issue a final approve/reject decision.
+The ADVS replaces manual document review by automatically classifying uploaded vendor documents (e.g., BIR Permits, Business Permits, DTI Business Name Registrations), extracting text via OCR, and verifying the authenticity of signatures and official stamps through a multi-model ML pipeline (ResNet-50 + YOLOv8 + Siamese CNN + EfficientNet). A risk score is assigned to each submission. Compliance officers review the results on an Admin Dashboard and issue a final approve/reject decision.
 
 **Users:**
 - **Vendors (external):** Submit accreditation documents through a secure portal.
@@ -932,7 +932,7 @@ The project follows the Agile cycle: **Plan → Build → Test → Refine** acro
 - Document with no detectable signature region: YOLOv8 returns empty detections → `signature_verify.py` should return `{"match": false, "reason": "no_signature_detected"}` — handle this in `SignatureVerificationService`.
 - Signature reference always exists (enrolled at registration), so `ProcessDocumentAction` always *verifies* the signature — there is no first-submission enrollment branch for signatures.
 - Logo for an issuer with no reference yet: `ProcessDocumentAction` should skip the similarity comparison, raise the `unreferenced_logo` flag, and (only on officer approval) dispatch `EnrollReferenceJob` to seed that issuer's reference — confirm this branching logic.
-- `lgu` document type where OCR cannot identify a city: `stamp_verify.py` cannot scope the lookup → raise a `city_not_identified` flag and skip logo verification. For `issuer_scope = null` types (e.g. financial statements), logo verification is skipped entirely (`no_issuer_logo`).
+- `lgu` document type where OCR cannot identify a city: `stamp_verify.py` cannot scope the lookup → raise a `city_not_identified` flag and skip logo verification. For `issuer_scope = null` types (e.g. Signed Contract), logo verification is skipped entirely (`no_issuer_logo`).
 - Verification/reset email delivery failure (SMTP down): the queued mail retries; the user can re-request via Fortify's resend (`verification.send`) / forgot-password, which are rate-limited. If a custom email-OTP 2FA is added (Phase 3, Option B), give it the same rate-limited resend.
 
 ---

@@ -81,8 +81,12 @@ class _StubKerasModel:
 
     input_shape = (None, 64, 64, 3)
 
+    def __init__(self):
+        self.last_batch = None
+
     def predict(self, batch, verbose=0):
         assert batch.shape == (1, 64, 64, 3)
+        self.last_batch = np.array(batch, copy=True)
         return np.array([[0.15, 0.85]])
 
 
@@ -95,10 +99,19 @@ def test_health_is_open_and_reports_missing_models(client):
 
     body = response.json()
     assert body["status"] == "ok"
-    assert set(body["models"]) == {"classifier", "detector", "siamese", "stamp"}
-    for status in body["models"].values():
+    assert set(body["models"]) == {
+        "classifier", "detector", "siamese", "stamp", "rapid_detector",
+        "trocr", "trocr_accurate",
+    }
+    # File/dir-gated models: an empty tmp model_dir means none of these are
+    # configured, so all report "not loaded" the same way.
+    for name in ("classifier", "detector", "siamese", "stamp", "trocr", "trocr_accurate"):
+        status = body["models"][name]
         assert status["loaded"] is False
         assert status["error"] == "weights_not_found"
+    # rapid_detector (RapidOCR) bundles its own weights inside the pip
+    # package — no path to gate on, so it always loads.
+    assert body["models"]["rapid_detector"]["loaded"] is True
 
 
 def test_v1_routes_require_bearer_token(client, jpeg_bytes):
@@ -134,8 +147,6 @@ def test_missing_weights_yield_503_with_configured_path(client, jpeg_bytes, rout
 # classify (stubbed model — no TF weights involved)
 # --------------------------------------------------------------------------- #
 def test_classify_contract_with_stub_model(tmp_path, jpeg_bytes):
-    pytest.importorskip("tensorflow")  # run_classification uses resnet50 preprocess_input
-
     app = create_app(_settings(tmp_path))
     with TestClient(app) as client:
         registry = app.state.registry
@@ -153,6 +164,31 @@ def test_classify_contract_with_stub_model(tmp_path, jpeg_bytes):
     assert body["passed_threshold"] is True
     assert body["threshold"] == pytest.approx(0.70)
     assert set(body["probabilities"]) == {"bir_certificate", "fake"}
+
+
+def test_classify_feeds_raw_pixels_not_double_preprocessed(tmp_path, jpeg_bytes):
+    """Regression: train_classifier.py embeds resnet50.preprocess_input INSIDE
+    the saved graph, so the API must feed raw 0-255 RGB. Applying ImageNet
+    preprocessing again flipped genuine documents to 'fake' in production."""
+    from PIL import Image
+
+    stub = _StubKerasModel()
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = {
+            "model": stub, "class_names": ["bir_certificate", "fake"],
+        }
+        response = client.post("/v1/classify", headers=AUTH, files=_upload(jpeg_bytes))
+
+    assert response.status_code == 200
+    expected = np.asarray(
+        Image.open(io.BytesIO(jpeg_bytes)).convert("RGB").resize((64, 64)),
+        dtype=np.float32,
+    )
+    # Raw pixels: exact resize values, still in 0-255 (ImageNet mean-centering
+    # would shift channels negative and swap RGB->BGR).
+    assert stub.last_batch is not None
+    np.testing.assert_allclose(stub.last_batch[0], expected)
 
 
 def test_classify_rejects_unreadable_image(tmp_path):
@@ -180,6 +216,24 @@ def test_classify_with_real_weights(jpeg_bytes):
     body = response.json()
     assert isinstance(body["label"], str)
     assert 0.0 <= body["confidence"] <= 1.0
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ADVS_API_REAL_MODEL_TESTS")
+    or not (PY_ROOT / "models" / "trocr-base-printed").is_dir()
+    or not (PY_ROOT / "models" / "trocr-large-printed").is_dir(),
+    reason="real-weights test; set ADVS_API_REAL_MODEL_TESTS=1 with both TrOCR models baked",
+)
+def test_health_reports_both_trocr_recognizers_loaded_with_real_weights():
+    """Per-template routing needs both baked locally: the fast one for
+    DTI/Business Permit, the accurate one for BIR."""
+    with TestClient(create_app(Settings(_env_file=None, api_token=TOKEN))) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    models = response.json()["models"]
+    assert models["trocr"]["loaded"] is True
+    assert models["trocr_accurate"]["loaded"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -230,11 +284,101 @@ def test_ocr_page_contract(client, jpeg_bytes):
     assert "text_validation_score" in page["quality"]
 
 
+def test_ocr_page_reports_roi_diagnostics(client, jpeg_bytes):
+    """Each ROI+TrOCR field crop costs real CPU seconds, so a page has to say
+    what that pass did - which fields it attempted, which it recognized, which
+    the time budget refused. ``None`` distinguishes "the extension isn't
+    loaded" (this client's model dir is empty) from "it ran and did nothing".
+    """
+    if not _tesseract_available():
+        pytest.skip("Tesseract engine not installed")
+
+    page = client.post(
+        "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes), data={"template": "bir"}
+    ).json()["pages"][0]
+
+    assert "roi" in page
+    assert page["roi"] is None  # trocr weights absent -> pass never ran
+
+
+class _StubRegistry:
+    """Just the registry surface resolve_recognizer needs."""
+
+    def __init__(self, models: dict):
+        self._models = models
+
+    def get(self, name):
+        return self._models.get(name)
+
+
+def test_bir_routes_to_the_accurate_recognizer_and_other_templates_to_the_fast_one():
+    """Benchmarked on the real samples: trocr-base and trocr-large produce
+    IDENTICAL field values on DTI and Business Permit (base ~3x faster), but
+    on BIR base misreads values — including the issue YEAR ("FEB 24 2025" for
+    a 2023 certificate), which feeds expiration monitoring. So BIR pays for
+    the accurate model and the other templates do not.
+    """
+    from api.routers.ocr import resolve_recognizer
+
+    registry = _StubRegistry({"trocr": "base", "trocr_accurate": "large"})
+
+    assert resolve_recognizer(registry, "bir", ("bir",)) == "large"
+    assert resolve_recognizer(registry, "dti", ("bir",)) == "base"
+    assert resolve_recognizer(registry, "business_permit", ("bir",)) == "base"
+
+
+def test_recognizer_falls_back_to_whichever_model_is_actually_loaded():
+    """One recognizer baked instead of two is a normal deployment (the Docker
+    image bakes one by default) — Stage 2 must use it rather than silently
+    skipping the ROI pass."""
+    from api.routers.ocr import resolve_recognizer
+
+    assert resolve_recognizer(_StubRegistry({"trocr": "base"}), "bir", ("bir",)) == "base"
+    assert resolve_recognizer(_StubRegistry({"trocr_accurate": "large"}), "dti", ("bir",)) == "large"
+    assert resolve_recognizer(_StubRegistry({}), "bir", ("bir",)) is None
+
+
+def test_trocr_decode_cap_is_long_enough_for_a_real_address_field(tmp_path):
+    """Measured on a real BIR page: registered_address decodes to 70 chars
+    ("...GUINGOLUNGAN, 3209 PAMPANGA") at ~2.1 chars/token, i.e. ~34 tokens.
+    A 32-token cap silently truncated it to "3209 PAMPAN" - a wrong value
+    that still passes every regex. Don't trim this back as an "optimisation":
+    generation stops at EOS anyway, so short fields never pay for the headroom.
+    """
+    assert _settings(tmp_path).trocr_max_new_tokens >= 48
+
+
 def test_ocr_rejects_unknown_template(client, jpeg_bytes):
     response = client.post(
         "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes), data={"template": "sec"}
     )
     assert response.status_code == 422
+
+
+def test_ocr_accepts_business_permit_and_dti_templates(client, jpeg_bytes):
+    # The per-type templates are valid now: they pass template validation and
+    # proceed to OCR (200 with an engine, 503 without) — never 422 like "sec".
+    for template in ("business_permit", "dti"):
+        response = client.post(
+            "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes), data={"template": template}
+        )
+        assert response.status_code != 422, template
+
+
+def test_ocr_business_permit_template_selects_permit_fields(client, jpeg_bytes):
+    if not _tesseract_available():
+        pytest.skip("Tesseract engine not installed")
+
+    body = client.post(
+        "/v1/ocr", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"template": "business_permit"},
+    ).json()
+    fields = body["pages"][0]["fields"]
+    # The tiny blank fixture matches nothing, but the field KEYS reflect which
+    # template was applied — proving the router routed by template, not BIR-always.
+    assert fields is not None
+    assert {"name_of_proprietor", "trade_name", "kind_of_business", "city_issued"} <= set(fields)
+    assert "tin" not in fields  # would be present under the BIR template
 
 
 # --------------------------------------------------------------------------- #

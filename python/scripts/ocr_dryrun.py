@@ -79,6 +79,15 @@ CONFIG: dict = {
     "text_validation_threshold": 0.70,  # §6 drill-down "Text Validation (OCR)" pass mark
     "low_conf_floor": 60,             # per-word Tesseract confidence below this = "low" (0-100)
     "min_words_for_text": 15,         # fewer recognised words than this -> "insufficient_text" flag
+    # Per-FIELD warning thresholds (annotate_field_warnings). These grade one
+    # extracted value for the officer's drill-down; they never feed a score or a
+    # risk component. Deliberately looser than low_conf_floor: a whole page can
+    # average 60% and still be usable, but a single value read at 75% is worth a
+    # second look, since Tesseract reports 68-78% on values it read WRONG
+    # (see api/config.py roi_tesseract_confidence_floor for the measurements).
+    "field_confidence_floor": 80,     # mean per-word confidence below this = "unsure" value
+    "noise_symbol_ratio": 0.15,       # share of chars outside the plausible set before "noisy"
+    "noise_consonant_run": 5,         # consonants in a row inside one token before "noisy"
     # Stamp recovery (experimental, --compare only). The BIR seal prints the
     # REVENUE REGION/DISTRICT numbers in red ink over an orange guilloche; a single
     # colour channel separates the two where grayscale cannot. ROI is a fractional
@@ -128,55 +137,83 @@ class OcrError(RuntimeError):
 # "global" searches the whole OCR blob, "line" searches the text after the
 # label (falling back to the next non-empty line). `required` fields feed the
 # missing-component flag and the text-validation score.
+#
+# `value_regex` is VALIDATION-ONLY (annotate_field_warnings) and never used to
+# extract anything. It exists because most `regex` patterns are context-anchored
+# - they match surrounding prose and capture group 1 (DTI's date is
+# `valid from\s+(\d{1,2}/...)`, capturing "09/18/2022") - so re-applying `regex`
+# to the extracted VALUE always fails. `value_regex` is fullmatched against the
+# final value, whichever engine produced it (label+regex, positional, or
+# ROI+TrOCR). Fields whose value is free text (names, addresses) get no
+# `value_regex`; the noise heuristic grades those instead.
 # ---------------------------------------------------------------------------
+
+# "MON DD YYYY" with a REAL month name (abbreviated or full), an optional comma
+# after the day, and the year bound to 19xx/20xx. Shared by date_issued's
+# extraction pattern and its value_regex so the two can never disagree.
+_MONTH_DATE = (
+    r"(?:JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|"
+    r"JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|"
+    r"DEC(?:EMBER)?)\.?\s+\d{1,2},?\s+(?:19|20)\d{2}"
+)
+
 FIELD_SPECS: list[dict] = [
     {"key": "form_no", "name": "Form No.", "scope": "global",
-     "regex": r"\b(2303)\b", "required": True},
+     # Still extracted for the report, but NOT part of the officer's required
+     # keyword set, so a missing Form No. no longer penalises text-validation.
+     "regex": r"\b(2303)\b", "value_regex": r"2303", "required": False},
     {"key": "ocn", "name": "OCN", "scope": "global",
      # OCN prints ABOVE its caption and is digit-heavy (e.g. 1RC0001016814), so
      # match the format directly. A label scan returns the line after "OCN",
      # which is "CERTIFICATE OF REGISTRATION" -> the old regex grabbed that.
-     "regex": r"\b(\d[A-Z]{1,3}\d{7,})\b", "required": False},
+     "regex": r"\b(\d[A-Z]{1,3}\d{7,})\b", "value_regex": r"\d[A-Z]{1,3}\d{7,}",
+     "required": True},
     {"key": "tin", "name": "TIN", "scope": "global",
      "regex": r"(\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3,4})",
+     # _normalise_value re-emits a matched TIN as 999-999-999-9999, so validate
+     # that canonical form - a value still carrying OCR spacing/en-dashes (or a
+     # short digit run) never went through the normaliser and IS suspect.
+     "value_regex": r"\d{3}-\d{3}-\d{3}-\d{3,4}",
      "required": True},
     {"key": "registered_name", "name": "Registered Name", "scope": "line",
      "labels": ["REGISTERED NAME", "NAME"], "custom": "header_table_name",
      "required": True},
     {"key": "registration_date", "name": "Registration Date", "scope": "line",
      "labels": ["REGISTRATION DATE"], "regex": r"(\d{1,2}/\d{1,2}/\d{2,4})",
+     "value_regex": r"\d{1,2}/\d{1,2}/\d{2,4}",
      "global_fallback": True, "required": True},
     {"key": "registered_address", "name": "Registered Address", "scope": "line",
      "labels": ["REGISTERED ADDRESS"], "required": True},
     {"key": "revenue_region_no", "name": "Revenue Region No.", "scope": "line",
      "labels": ["REVENUE REGION NO", "REVENUE REGION"], "regex": r"(\d{1,3}[A-Z]?)",
+     "value_regex": r"\d{1,3}[A-Z]?",
      # the region code can carry a trailing letter (e.g. 09B), so a digits-only
      # regex would drop the "B". Value sits on the caption's own stamp row, so
      # same_line keeps it from falling through to the district line below.
-     "same_line": True, "required": True},
+     # Extracted + merged from the seal pass, but not a required keyword.
+     "same_line": True, "required": False},
     {"key": "rdo_code", "name": "Revenue District No. (RDO)", "scope": "line",
      "labels": ["REVENUE DISTRICT NO", "REVENUE DISTRICT", "RDO"], "regex": r"(\d{1,3})",
+     "value_regex": r"\d{1,3}",
      # value is column-aligned on the caption's own row; without same_line the
      # scan falls to the next line and grabs the "1" from the OCN (1RC0001016814).
      # "REVENUE DISTRICT" (no "NO") tolerates OCR dropping the noisy caption token.
-     "same_line": True, "required": True},
+     # Extracted for the report, but not a required keyword.
+     "same_line": True, "required": False},
     {"key": "line_of_business", "name": "Line of Business / PSIC", "scope": "line",
-     "labels": ["LINE OF BUSINESS", "INDUSTRY"], "required": False},
+     "labels": ["LINE OF BUSINESS", "INDUSTRY"], "required": True},
     {"key": "trade_name", "name": "Trade Name", "scope": "line",
-     "labels": ["TRADE NAME"], "required": False},
-    {"key": "tax_types", "name": "Tax Type(s)", "scope": "line",
-     "labels": ["TAX TYPE", "REGISTERED ACTIVITIES"], "required": False},
+     "labels": ["TRADE NAME"], "required": True},
+    {"key": "tax_types", "name": "Registered Activity(ies)", "scope": "line",
+     "labels": ["REGISTERED ACTIVITIES", "REGISTERED ACTIVITY", "TAX TYPE"], "required": True},
     {"key": "revenue_district_officer", "name": "Revenue District Officer", "scope": "line",
      "labels": ["REVENUE DISTRICT OFFICER", "DISTRICT OFFICER"], "required": False},
     {"key": "date_issued", "name": "Date Issued", "scope": "global",
      # The issue date floats anywhere on the form as "MON DD YYYY" (e.g. MAR 09
-     # 2017). Anchor on a REAL month (abbrev or full name) so a stray 3-letter
-     # token + numbers like "RDO 39 2018" is not mistaken for a date, and bound the
-     # year to 19xx/20xx. Comma after the day is optional ("SEP 5, 2019").
-     "regex": r"\b((?:JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|"
-              r"JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|"
-              r"DEC(?:EMBER)?)\.?\s+\d{1,2},?\s+(?:19|20)\d{2})\b",
-     "required": False},
+     # 2017). Anchoring on a REAL month keeps a stray 3-letter token + numbers
+     # like "RDO 39 2018" from being mistaken for a date (see _MONTH_DATE).
+     "regex": rf"\b({_MONTH_DATE})\b", "value_regex": _MONTH_DATE,
+     "required": True},
 ]
 
 # Keywords that should appear anywhere in a genuine Form 2303 (a quick template
@@ -191,6 +228,80 @@ TEMPLATE_KEYWORDS = [
 # dataset generator's FIELD_BOXES). Derived from FIELD_SPECS so the two never
 # drift: a box drawn for keyword "tin" maps straight to the "tin" field.
 KEYWORD_LIST = [spec["key"] for spec in FIELD_SPECS]
+
+
+# ---------------------------------------------------------------------------
+# LGU Business Permit (Mayor's Permit) field template.
+#
+# Unlike the BIR form, the fill VALUE prints on the line ABOVE its caption
+# (a permit "write-on-the-line, label-underneath" layout), so the label fields
+# use ``value_above`` and read the previous non-empty line. City + issue date are
+# sentence/header text matched globally. Field keys mirror
+# business_permit_dataset_generator.py so the synthetic data and the template
+# never drift.
+# ---------------------------------------------------------------------------
+BUSINESS_PERMIT_FIELD_SPECS: list[dict] = [
+    {"key": "city_issued", "name": "City Issued", "scope": "global",
+     # The issuing city prints in the header as "CITY OF <NAME>". Keep the
+     # separator to spaces/tabs (not \s, which would run the match across the
+     # newline into the following caption lines).
+     "regex": r"CITY OF ([A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*)",
+     "value_regex": r"[A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*", "required": True},
+    {"key": "name_of_proprietor", "name": "Name of Proprietor", "scope": "line",
+     "labels": ["NAME OF PROPRIETOR", "PROPRIETOR"], "value_above": True, "required": True},
+    {"key": "trade_name", "name": "Trade Name", "scope": "line",
+     "labels": ["TRADE NAME"], "value_above": True, "required": True},
+    {"key": "business_location", "name": "Business Address / Location", "scope": "line",
+     "labels": ["BUSINESS LOCATION", "BUSINESS ADDRESS", "LOCATION"],
+     "value_above": True, "required": True},
+    {"key": "kind_of_business", "name": "Kind of Business", "scope": "line",
+     "labels": ["KIND OF BUSINESS", "NATURE OF BUSINESS"], "value_above": True, "required": True},
+    {"key": "date_issued", "name": "Issued Date", "scope": "global",
+     # "Issued this 26th day of AUGUST , 2012, at ..." — capture day + month + year.
+     "regex": r"(?i)issued this\s+(\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2})",
+     "value_regex": r"(?i)\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2}",
+     "required": True},
+]
+
+BUSINESS_PERMIT_KEYWORDS = [
+    "BUSINESS PERMIT", "PROPRIETOR", "TRADE NAME", "KIND OF BUSINESS", "CITY OF",
+]
+
+
+# ---------------------------------------------------------------------------
+# DTI Business Name Registration certificate field template.
+#
+# The certificate is prose, not a form: the business name/address sit in the
+# "This certifies that ..." block, the owner after "certificate issued to", the
+# validity as "valid from <date> to <date>", and the certificate/TRN on their own
+# captioned lines. Field keys mirror dti_registration_dataset_generator.py.
+# ---------------------------------------------------------------------------
+DTI_FIELD_SPECS: list[dict] = [
+    {"key": "business_name", "name": "Business Name", "scope": "line",
+     "custom": "dti_business_name", "required": True},
+    {"key": "business_address", "name": "Business Address", "scope": "line",
+     "custom": "dti_business_address", "required": True},
+    {"key": "owner_representative_name", "name": "Owner / Representative Name", "scope": "line",
+     "labels": ["ISSUED TO"], "required": True},
+    {"key": "date_issued", "name": "Valid Date", "scope": "global",
+     "regex": r"(?i)valid from\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+     "value_regex": r"\d{1,2}/\d{1,2}/\d{2,4}", "required": True},
+    {"key": "expiry_date", "name": "Expiration Date", "scope": "global",
+     "regex": r"(?i)valid from\s+\d{1,2}/\d{1,2}/\d{2,4}\s+to\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+     "value_regex": r"\d{1,2}/\d{1,2}/\d{2,4}", "required": True},
+    {"key": "certificate_no", "name": "Certificate Number", "scope": "line",
+     "labels": ["CERTIFICATE NO", "CERTIFICATE NUMBER"],
+     "regex": r"((?:BN\s*)?\d{5,})", "value_regex": r"(?:BN\s*)?\d{5,}",
+     "same_line": True, "required": True},
+    {"key": "trn_no", "name": "TRN", "scope": "line",
+     "labels": ["TRN"], "regex": r"(DTI-\d{4}-\d+|[A-Z0-9-]{6,})",
+     "value_regex": r"DTI-\d{4}-\d+|[A-Z0-9-]{6,}",
+     "same_line": True, "required": True},
+]
+
+DTI_KEYWORDS = [
+    "DEPARTMENT OF TRADE", "BUSINESS NAME", "CERTIFICATE", "TRN",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +579,47 @@ def _find_by_label(lines: list[str], labels: list[str], allow_next_line: bool = 
     return None
 
 
+def _find_by_label_above(lines: list[str], labels: list[str]):
+    """Return the nearest non-empty line ABOVE the first matching caption.
+
+    LGU business permits print the fill value on the line above its printed
+    caption ("<value>" then "NAME OF PROPRIETOR"), the reverse of the BIR form, so
+    the value is read from the previous non-empty line rather than after the label.
+    """
+    for i, line in enumerate(lines):
+        upper = line.upper()
+        if any(label in upper for label in labels):
+            for j in range(i - 1, -1, -1):
+                prev = lines[j].strip()
+                if prev:
+                    return prev
+            return ""
+    return None
+
+
+def _dti_certified_block(lines: list[str]) -> list[str]:
+    """The value lines inside a DTI "This certifies that ..." block: the business
+    name followed by its address, stopping at the boilerplate that follows."""
+    for i, line in enumerate(lines):
+        if "CERTIFIES THAT" in line.upper():
+            block: list[str] = []
+            for cont in lines[i + 1:]:
+                if re.search(r"IS A BUSINESS NAME REGISTERED|PURSUANT|IN COMPLIANCE",
+                             cont.upper()):
+                    break
+                if cont.strip():
+                    block.append(cont.strip())
+                if len(block) >= 2:
+                    break
+            return block
+    return []
+
+
+def _dti_certified_line(lines: list[str], index: int) -> str | None:
+    block = _dti_certified_block(lines)
+    return block[index] if index < len(block) else None
+
+
 _TIN_TOKEN = re.compile(r"\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3}\s*[-–]\s*\d{3,4}")
 _DATE_TOKEN = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}")
 
@@ -511,20 +663,31 @@ def _extract_registered_name(lines: list[str]) -> str | None:
     return None
 
 
-def extract_fields(text: str, token_conf: dict) -> dict:
+def extract_fields(text: str, token_conf: dict, specs: list[dict] | None = None) -> dict:
+    """Extract structured fields for a template. ``specs`` selects the field
+    template (defaults to the BIR ``FIELD_SPECS``); see ``TEMPLATES``."""
+    specs = specs if specs is not None else FIELD_SPECS
     lines = text.splitlines()
     out: dict = {}
-    for spec in FIELD_SPECS:
+    for spec in specs:
         raw_value = None
-        if spec.get("custom") == "header_table_name":
+        custom = spec.get("custom")
+        if custom == "header_table_name":
             raw_value = _extract_registered_name(lines)
+        elif custom == "dti_business_name":
+            raw_value = _dti_certified_line(lines, 0)
+        elif custom == "dti_business_address":
+            raw_value = _dti_certified_line(lines, 1)
         elif spec["scope"] == "global":
             m = re.search(spec["regex"], text)
             raw_value = m.group(1) if m else None
         else:  # line scope
-            region = _find_by_label(
-                lines, spec["labels"], allow_next_line=not spec.get("same_line", False)
-            )
+            if spec.get("value_above"):
+                region = _find_by_label_above(lines, spec["labels"])
+            else:
+                region = _find_by_label(
+                    lines, spec["labels"], allow_next_line=not spec.get("same_line", False)
+                )
             if region is not None and spec.get("regex"):
                 m = re.search(spec["regex"], region)
                 raw_value = m.group(1) if m else region
@@ -685,9 +848,173 @@ def refine_fields_with_positions(fields: dict, words: list[dict], token_conf: di
 
 
 # ---------------------------------------------------------------------------
+# Per-document-type template registry.
+#
+# Stage 2 selects a template by the document's type (Laravel maps document_type
+# code -> template name). Each entry carries its field specs, the sanity-keyword
+# list for the quality report, and the optional positional refiner (the two-column
+# Form 2303 box logic is BIR-only; the permit/DTI templates are label-scan only).
+# ---------------------------------------------------------------------------
+TEMPLATES: dict[str, dict] = {
+    "bir": {
+        "field_specs": FIELD_SPECS,
+        "keywords": TEMPLATE_KEYWORDS,
+        "positional": refine_fields_with_positions,
+    },
+    "business_permit": {
+        "field_specs": BUSINESS_PERMIT_FIELD_SPECS,
+        "keywords": BUSINESS_PERMIT_KEYWORDS,
+        "positional": None,
+    },
+    "dti": {
+        "field_specs": DTI_FIELD_SPECS,
+        "keywords": DTI_KEYWORDS,
+        "positional": None,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Per-field warnings (officer drill-down; never feeds a score)
+#
+# score_quality() grades the PAGE. These grade one VALUE, so the officer's
+# key/value table can mark the individual pairs worth re-reading rather than
+# leaving them to spot "EE Bincn" in a wall of text. Purely presentational:
+# nothing here changes an extracted value, a flag, or the risk score.
+# ---------------------------------------------------------------------------
+
+# Characters Tesseract emits when it hallucinates structure out of rules, seals
+# and guilloche patterns. None of them appear in a real Philippine business
+# name, address or activity list, so any occurrence marks the value noisy.
+_GARBLE_CHARS = set("|~^\\_«»§¢£¥°¬{}[]<>*+=@")
+
+# The plausible character set for a free-text field value. Anything outside it
+# counts toward noise_symbol_ratio.
+_PLAUSIBLE_VALUE_CHARS = re.compile(r"[A-Za-z0-9 .,&/'#()\-]")
+
+_VOWELS = set("AEIOUY")
+
+# A lone letter that is not an initial ("J." is fine, a bare "J" is not).
+_STRAY_LETTER = re.compile(r"(?<![\w.])[A-Za-z](?![\w.])")
+
+# A letter running straight into a digit inside one token, e.g. "NORTHZ2N".
+_ALNUM_BOUNDARY = re.compile(r"[A-Za-z]\d|\d[A-Za-z]")
+
+# Tokens up to this length are exempt from the letter/digit rule: unit, lot and
+# block designators are routinely alphanumeric in a Philippine address
+# ("G09 LO2 GEMINI STREET", "BLK 5", "L2"), and flagging them would put a
+# standing warning on every address field. Real garble runs longer than this
+# ("NORTHZ2N"), so the rule still catches what it was written for.
+_SHORT_ALNUM_TOKEN = 4
+
+
+def _looks_noisy(value: str, cfg: dict) -> bool:
+    """Whether a free-text value reads as OCR garble.
+
+    This detects GARBLE, not grammar - there is no language model here, and a
+    grammatical check is not what separates "GEMINI STREZT" from "GEMINI
+    STREET". It looks for the shapes Tesseract actually produces on a degraded
+    scan: hallucinated symbols, unpronounceable consonant runs, letters fused
+    to digits, and orphaned single letters. Tuned to under-report - a clean
+    value must never be flagged, since a false warning on every row would train
+    officers to ignore the column.
+    """
+    value = value.strip()
+    if len(value) < 3:
+        return True
+
+    if _GARBLE_CHARS & set(value):
+        return True
+
+    implausible = len(_PLAUSIBLE_VALUE_CHARS.sub("", value))
+    if implausible / len(value) > cfg["noise_symbol_ratio"]:
+        return True
+
+    if len(_STRAY_LETTER.findall(value)) > 1:
+        return True
+
+    tokens = value.split()
+    # A 1-2 letter ALL-CAPS fragment inside an otherwise mixed-case value, e.g.
+    # "EE Bincn" - the leftovers of a caption or a signature Tesseract tried to
+    # read as text. Capped at 2 letters on purpose: a real acronym in a business
+    # name ("ABC Trading Corporation") is 3+, so it stays unflagged.
+    if any(any(ch.islower() for ch in tok) for tok in tokens):
+        for token in tokens:
+            letters = "".join(ch for ch in token if ch.isalpha())
+            if 0 < len(letters) <= 2 and letters.isupper():
+                return True
+
+    run = cfg["noise_consonant_run"]
+    for token in tokens:
+        if len(token) > _SHORT_ALNUM_TOKEN and _ALNUM_BOUNDARY.search(token):
+            return True
+        letters = "".join(ch for ch in token if ch.isalpha()).upper()
+        # A pure-digit or mixed token (dates, codes) has no letters to judge.
+        if len(letters) < 4:
+            continue
+        if not (_VOWELS & set(letters)):
+            return True
+        consecutive = 0
+        for char in letters:
+            consecutive = 0 if char in _VOWELS else consecutive + 1
+            if consecutive >= run:
+                return True
+
+    return False
+
+
+def annotate_field_warnings(fields: dict, specs: list[dict], cfg: dict) -> dict:
+    """Add a ``warnings`` list to every field in ``fields`` (mutated in place).
+
+    Call this AFTER every engine that can write a value (label+regex, the
+    positional refiner, and the ROI+TrOCR merge), so the warnings describe the
+    value the officer actually sees rather than an intermediate one.
+
+    Tokens: ``not_found`` (required but absent), ``format_mismatch`` (violates
+    the spec's ``value_regex``), ``low_confidence`` (read below
+    ``field_confidence_floor``), ``noisy_text`` (see :func:`_looks_noisy`).
+    """
+    specs_by_key = {spec["key"]: spec for spec in specs}
+
+    for key, field in fields.items():
+        spec = specs_by_key.get(key, {})
+        warnings: list[str] = []
+        value = field.get("value")
+
+        if not field.get("matched") or not value:
+            if field.get("required"):
+                warnings.append("not_found")
+            field["warnings"] = warnings
+            continue
+
+        value_regex = spec.get("value_regex")
+        if value_regex is not None:
+            if re.fullmatch(value_regex, value.strip()) is None:
+                warnings.append("format_mismatch")
+        elif _looks_noisy(value, cfg):
+            # Only free-text fields get the heuristic. A format-checked field is
+            # already graded by its pattern, and running both would double-flag
+            # e.g. an OCN ("1RC0001016814" trips the letter/digit boundary).
+            warnings.append("noisy_text")
+
+        confidence = field.get("confidence")
+        # confidence is None on the ROI+TrOCR path (routers/ocr.py sets it), which
+        # reports no confidence AND is the more accurate recogniser - treating
+        # "unknown" as "unsure" there would invert the signal.
+        if confidence is not None and confidence < cfg["field_confidence_floor"]:
+            warnings.append("low_confidence")
+
+        field["warnings"] = warnings
+
+    return fields
+
+
+# ---------------------------------------------------------------------------
 # Quality scoring (fail-forward, mirrors Stage 2 output)
 # ---------------------------------------------------------------------------
-def score_quality(text: str, fields: dict, ocr: dict, cfg: dict) -> dict:
+def score_quality(text: str, fields: dict, ocr: dict, cfg: dict,
+                  keywords: list[str] | None = None) -> dict:
+    keywords = keywords if keywords is not None else TEMPLATE_KEYWORDS
     confs = ocr["confidences"]
     word_count = len(confs)
     low = [c for c in confs if c < cfg["low_conf_floor"]]
@@ -702,7 +1029,7 @@ def score_quality(text: str, fields: dict, ocr: dict, cfg: dict) -> dict:
         round(len(matched_required) / len(expected), 3) if expected else 0.0
     )
     upper = text.upper()
-    keywords_found = [kw for kw in TEMPLATE_KEYWORDS if kw in upper]
+    keywords_found = [kw for kw in keywords if kw in upper]
 
     flags = []
     if word_count < cfg["min_words_for_text"]:
@@ -724,7 +1051,7 @@ def score_quality(text: str, fields: dict, ocr: dict, cfg: dict) -> dict:
         "required_matched": len(matched_required),
         "missing_required": missing_required,
         "template_keywords_found": keywords_found,
-        "template_keywords_total": len(TEMPLATE_KEYWORDS),
+        "template_keywords_total": len(keywords),
         "text_validation_score": text_validation_score,
         "passes_text_validation": text_validation_score >= cfg["text_validation_threshold"],
         "flags": flags,

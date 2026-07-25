@@ -46,6 +46,12 @@ DEFAULT_TAMPER_THRESHOLD = 0.50
 # enough to hard-flag the document (the §6 risk hard-override mirrors this).
 DEFAULT_HARD_CONFIDENCE = 0.80
 
+# Only techniques backed by pixel/provenance evidence may hard-flag a document
+# on their own. The statistical heuristics (font baseline, format regexes on
+# noisy OCR text) stay in the weighted blend but false-positive too readily on
+# genuine documents to justify a solo High-Risk override.
+HARD_FLAG_TECHNIQUES = frozenset({"metadata", "ela", "copy_move"})
+
 
 def technique_result(
     score: float,
@@ -83,7 +89,8 @@ def aggregate(
 
     Skipped techniques are excluded (their weight is not counted). Returns the
     aggregate ``tamper_score`` (0 clean .. 1 tampered), ``tamper_authenticity``
-    (its inverse), ``tamper_confidence`` (the single strongest tamper signal),
+    (its inverse), ``tamper_confidence`` (the strongest tamper signal among
+    the ``HARD_FLAG_TECHNIQUES``),
     ``tamper_passed`` and merged ``flags``.
 
     ``hard_flag`` mirrors the §6 risk hard-override: one technique reporting
@@ -104,7 +111,8 @@ def aggregate(
         weight = float(weights.get(name, 0.0))
         num += weight * tamper_signal
         den += weight
-        strongest = max(strongest, tamper_signal)
+        if name in HARD_FLAG_TECHNIQUES:
+            strongest = max(strongest, tamper_signal)
         flags.extend(result.get("flags", []))
 
     tamper_score = (num / den) if den > 0 else 0.0
