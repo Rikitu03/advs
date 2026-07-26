@@ -1,14 +1,18 @@
 <?php
 
-use App\Services\Signature\SignatureAuthenticityService;
+use App\Services\Signature\SignatureEnrollmentResult;
+use App\Services\Signature\SignatureEnrollmentService;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
 
-new #[Layout('components.layouts.auth')] class extends Component {
+new #[Layout('components.layouts.auth')] class extends Component
+{
     use WithFileUploads;
 
     public $photo = null;
@@ -59,53 +63,95 @@ new #[Layout('components.layouts.auth')] class extends Component {
         }
     }
 
+    /** Server-verified MIME allow-list (Livewire's temp file reports MIME from
+     *  the extension, so the stored bytes are sniffed independently). */
+    private const ACCEPTED_MIME_TYPES = ['image/jpeg', 'image/png'];
+
     /**
-     * Verify the uploaded signature photo and, if authentic, enroll it as the
-     * vendor's reference before email verification.
+     * Detect and verify the three signatures in the uploaded photo and, if the
+     * enrollment gates pass, store all three embeddings (with their centroid as
+     * the pipeline reference) before sending the email-verification link.
      */
-    public function enroll(SignatureAuthenticityService $authenticity): void
+    public function enroll(SignatureEnrollmentService $enrollment): void
     {
         $this->validate();
 
-        $result = $authenticity->verify($this->photo);
+        $this->rejected = false;
+        $this->reasons = [];
 
-        if (! $result['authentic']) {
-            $this->rejected = true;
-            $this->reasons = $result['reasons'];
+        $user = Auth::user();
+
+        // extension() derives the extension from the detected MIME type; never
+        // trust the client-supplied filename for the stored path.
+        $path = $this->photo->storeAs(
+            "signatures/{$user->id}",
+            'reference-'.now()->timestamp.'.'.$this->photo->extension(),
+            'local',
+        );
+
+        // Defence in depth: sniff the stored bytes' real MIME (mirrors the
+        // document-submission upload) and drop a disguised extension.
+        if (! in_array((string) mime_content_type(Storage::disk('local')->path($path)), self::ACCEPTED_MIME_TYPES, true)) {
+            Storage::disk('local')->delete($path);
             $this->reset('photo');
-
-            Flux::toast(
-                text: __('We could not verify this image as an original capture. Please retake the photo and upload again.'),
-                heading: __('Signature photo rejected'),
-                variant: 'danger',
-            );
+            $this->toast(__('That file is not a valid JPG or PNG image. Please upload a photo of your signatures.'));
 
             return;
         }
 
-        $user = Auth::user();
+        try {
+            $result = $enrollment->enroll(Storage::disk('local')->get($path), basename($path));
+        } catch (Throwable $e) {
+            report($e);
+            Storage::disk('local')->delete($path);
+            $this->reset('photo');
+            $this->toast(__('We could not check your signatures right now. Please try again in a moment.'), __('Upload failed'));
+
+            return;
+        }
+
+        if (! $result->accepted) {
+            Storage::disk('local')->delete($path);
+            $this->reset('photo');
+
+            if ($result->reason === SignatureEnrollmentService::REASON_EDITED) {
+                $this->rejected = true;
+                $this->reasons = $result->forensics['reasons'] ?? [];
+            }
+
+            $this->toast($this->rejectionMessage($result), __('Signature photo rejected'));
+
+            return;
+        }
 
         try {
-            // extension() derives the extension from the detected MIME type;
-            // never trust the client-supplied filename for the stored path.
-            $path = $this->photo->storeAs(
-                "signatures/{$user->id}",
-                'reference-'.now()->timestamp.'.'.$this->photo->extension(),
-                'local',
-            );
+            DB::transaction(function () use ($user, $path, $result): void {
+                $user->forceFill([
+                    'signature_path' => $path,
+                    'signature_enrolled_at' => now(),
+                ])->save();
 
-            $user->forceFill([
-                'signature_path' => $path,
-                'signature_enrolled_at' => now(),
-            ])->save();
-        } catch (\Throwable $e) {
+                if ($vendor = $user->vendor) {
+                    // signature_embedding stays the SINGLE reference the pipeline
+                    // verifies against (§5 Stage 4a) — now the centroid of the three;
+                    // the samples/consistency columns keep the per-signature audit.
+                    DB::table('vendor_embeddings')->updateOrInsert(
+                        ['vendor_id' => $vendor->id],
+                        [
+                            'signature_embedding' => json_encode($result->centroid, JSON_THROW_ON_ERROR),
+                            'signature_samples' => json_encode($result->samples, JSON_THROW_ON_ERROR),
+                            'signature_consistency' => $result->consistency,
+                            'signature_image_path' => $path,
+                            'signature_enrolled_at' => now(),
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ],
+                    );
+                }
+            });
+        } catch (Throwable $e) {
             report($e);
-
-            Flux::toast(
-                text: __('Something went wrong while saving your signature. Please try again.'),
-                heading: __('Upload failed'),
-                variant: 'danger',
-            );
+            $this->toast(__('Something went wrong while saving your signature. Please try again.'), __('Upload failed'));
 
             return;
         }
@@ -119,6 +165,25 @@ new #[Layout('components.layouts.auth')] class extends Component {
         session()->flash('status', 'signature-enrolled');
 
         $this->redirectRoute('verification.notice', navigate: true);
+    }
+
+    /** The user-facing message for a rejected enrollment, by gate reason. */
+    private function rejectionMessage(SignatureEnrollmentResult $result): string
+    {
+        return match ($result->reason) {
+            SignatureEnrollmentService::REASON_COUNT => __(
+                'We detected :count signature(s). Please upload a photo with exactly :expected signatures.',
+                ['count' => $result->count, 'expected' => (int) config('advs.signature.expected_count')],
+            ),
+            SignatureEnrollmentService::REASON_SIMILARITY => __('Signatures are not similar enough'),
+            SignatureEnrollmentService::REASON_EDITED => __('This image appears edited, or a signature was placed on top of another file. Please upload a genuine, unedited photo.'),
+            default => __('We could not accept this photo. Please retake it and upload again.'),
+        };
+    }
+
+    private function toast(string $text, ?string $heading = null): void
+    {
+        Flux::toast(text: $text, heading: $heading ?? __('Photo not accepted'), variant: 'danger');
     }
 }; ?>
 

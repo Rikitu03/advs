@@ -117,4 +117,21 @@ return [
         'template' => env('ML_API_TEMPLATE', 'bir'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Registration signature enrollment (§5 Stage 4a — captured at sign-up)
+    |--------------------------------------------------------------------------
+    |
+    | The vendor uploads one photo of THREE signatures on bond paper. The ML API
+    | (POST {ml.base_url}{endpoint}) detects and embeds them; SignatureEnrollmentService
+    | applies these gates: exactly `expected_count` signatures, mean pairwise cosine
+    | >= `consistency_threshold`, and no forensic hard-flag (edited / pasted on top).
+    */
+
+    'signature' => [
+        'enroll_endpoint' => env('ML_API_SIGNATURE_ENROLL_ENDPOINT', '/v1/signature/enroll'),
+        'expected_count' => (int) env('SIGNATURE_ENROLL_COUNT', 3),
+        'consistency_threshold' => (float) env('SIGNATURE_CONSISTENCY_THRESHOLD', 0.80),
+    ],
+
 ];

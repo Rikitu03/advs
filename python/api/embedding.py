@@ -60,6 +60,39 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(va, vb) / denom)
 
 
+def mean_pairwise_cosine(vectors: list[list[float]]) -> float | None:
+    """Mean cosine similarity over every unordered pair of embeddings.
+
+    The registration consistency gate: three same-session signatures should embed
+    close together, so a low mean signals mixed/dissimilar samples. ``None`` when
+    fewer than two vectors are given (no pair to compare)."""
+    if len(vectors) < 2:
+        return None
+    total = 0.0
+    pairs = 0
+    for i in range(len(vectors)):
+        for j in range(i + 1, len(vectors)):
+            total += cosine_similarity(vectors[i], vectors[j])
+            pairs += 1
+    return total / pairs
+
+
+def centroid(vectors: list[list[float]]) -> list[float]:
+    """The unit-normalised mean of the embeddings — the single reference vector the
+    document pipeline verifies against (§5 Stage 4a). The Siamese encoder emits
+    L2-normalised vectors, so the mean is re-normalised back onto the unit sphere to
+    keep it comparable to future query embeddings under Euclidean distance."""
+    import numpy as np
+
+    if not vectors:
+        raise ValueError("centroid requires at least one vector")
+    mean = np.asarray(vectors, dtype=np.float64).mean(axis=0)
+    norm = float(np.linalg.norm(mean))
+    if norm == 0.0:
+        return [float(v) for v in mean]
+    return [float(v) for v in (mean / norm)]
+
+
 def require_same_length(reference: list[float], embedding: list[float], field: str) -> None:
     if len(reference) != len(embedding):
         raise HTTPException(
