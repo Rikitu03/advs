@@ -117,14 +117,18 @@ advs/
 │       ├── FortifyServiceProvider.php          # auth view callbacks + rate limiters
 │       └── VoltServiceProvider.php
 │
-│   # ── Planned (ML document pipeline — not yet built; see §6–§7) ─────────────
-│   #   Http/Controllers/{Vendor,Admin}/...     document submission, reports, accreditation
-│   #   Services/{Document,Verification}/...     Process-facade wrappers around python/
-│   #   Actions/ProcessDocumentAction.php        orchestrates the full validation pipeline
-│   #   Jobs/{ProcessDocumentJob,EnrollReferenceJob,RetrainModelJob}.php
-│   #   Models/{Vendor,Document,ValidationReport,SignatureEmbedding,LogoReference}.php
-│   #     (SignatureEmbedding = per-vendor, enrolled at registration; LogoReference = per-issuer logo keyed by document_type [+city for LGU] via document_types.issuer_scope, seeded on first approval — NOT per-vendor)
-│   #   Notifications/DocumentValidationComplete.php
+│   # ── Document pipeline (Phases 4–8 — built; folders below are illustrative, ──
+│   #    not exhaustive — see §6–§7 and app/ for the current tree) ─────────────
+│   #   Http/Controllers/Admin/{AuditLogController,SystemSettingsController,UserController}.php
+│   #     (vendor submission + admin reports/reviews are Volt full-page components, not controllers — see routes/web.php)
+│   #   Services/Document/{MlPipelineService,RiskScoreService,TamperDetectionService,SubmissionFinalizer,OfficerDecisionService}.php
+│   #     (MlPipelineService is an HTTP client — one call to the FastAPI ML service's POST /v1/validate — not a Process-facade wrapper; see §6)
+│   #   Actions/ProcessDocumentAction.php        orchestrates the full validation pipeline (built)
+│   #   Jobs/ProcessDocumentJob.php               built; EnrollReferenceJob / RetrainModelJob are still planned — no logo/signature enrollment write path exists in app/ yet
+│   #   Models/{Vendor,VendorRepresentative,Document,Submission,ValidationResult,TamperAnalysis,MlModel}.php
+│   #     (ValidationResult replaces the originally planned ValidationReport name; `vendor_embeddings`/`logo_references`/`document_types` are read via DB::table — no Eloquent model for those tables yet.
+│   #      SignatureEmbedding = per-vendor, enrolled at registration [enrollment write path still planned]; LogoReference = per-issuer logo keyed by document_type [+city for LGU] via document_types.issuer_scope, seeded on first approval — NOT per-vendor)
+│   #   Notifications are DB-only via Services/NotificationService.php + Models/Notification.php, not a Mailable-style Notifications/ class
 │
 ├── python/                                     # ALL Python scripts live here
 │   ├── requirements.txt
@@ -213,7 +217,7 @@ advs/
 - Application routes live in `routes/web.php` and use the **session-based `web` guard** (there is no JWT/API layer yet). Protect pages with `auth`, `verified`, and the `role:` middleware.
 - Reference routes by **named route helpers**: `route('admin.dashboard')`, `route('vendor.dashboard')` — never hardcoded URLs.
 - Role-based landing is centralized: the `/dashboard` route (`name('dashboard')`) redirects to `auth()->user()->dashboardRoute()`.
-- When the document pipeline is built, prefer **resource controllers** for CRUD entities: `Route::resource('admin/vendors', VendorAccreditationController::class)`.
+- The built document pipeline did not follow this resource-controller pattern: vendor submission and admin review/reports are **Volt full-page components** (`Volt::route('vendor/submissions', 'vendor.submissions')`, `Volt::route('admin/submissions/{submission}', 'admin.submissions.show')`, …), consistent with the Livewire/Volt-first convention below. Only a few genuinely CRUD-shaped admin screens (audit log, system settings, user management) use controllers, under `Http/Controllers/Admin/`.
 
 ### Eloquent
 - Define **relationships** explicitly on every model (e.g., `Vendor::hasMany(Document::class)`, `Document::belongsTo(Vendor::class)`).
@@ -346,86 +350,54 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
 ### How Python is Called
 
-Laravel calls Python scripts exclusively through the **`Process` facade** (Laravel 11/12 built-in). Python scripts are never called directly from controllers — they are always dispatched as queued Jobs that use `Process` inside a Service.
+The built pipeline calls Python through a **standalone FastAPI service** (`python/api`, deployed independently — see `python/README.md`), not through per-stage `Process` calls from Laravel. `App\Services\Document\MlPipelineService` sends **one** authenticated multipart HTTP request — the uploaded file plus signature/logo reference vectors and OCR template/context — to `POST {ML_API_BASE_URL}/v1/validate`, and the API runs classification, OCR, YOLOv8 detection, signature verification, stamp verification, and Stage-T forensics **in-process** on its side, returning a single fail-forward JSON body (`{"stages": {...}, "flags": [...]}`) that `ProcessDocumentAction` maps onto `ValidationResult` and feeds to `RiskScoreService`. Laravel never calls a Python script directly from a controller, and — for this HTTP path — never shells out per pipeline stage either.
 
-**Pattern used in Services:**
+**Pattern used in Services (`app/Services/Document/MlPipelineService.php`):**
 ```php
-// app/Services/Document/ClassificationService.php
-use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Http;
 
-public function classify(string $imagePath): array
+public function validate(Document $document): array
 {
-    $payloadPath = storage_path("app/python_payloads/classify_{$jobId}.json");
-    $outputPath  = storage_path("app/python_payloads/classify_{$jobId}_result.json");
+    $ml = config('advs.ml');
 
-    // Write input payload
-    file_put_contents($payloadPath, json_encode(['image_path' => $imagePath]));
+    $response = Http::baseUrl($ml['base_url'])
+        ->withToken((string) $ml['token'])
+        ->timeout((int) ($ml['timeout'] ?? 180))
+        ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
+        ->post('/v1/validate', $form); // template, document_type, city, signature_reference, stamp_reference, forensics
 
-    $result = Process::path(base_path('python'))
-        ->timeout(60)
-        ->run("python3 classify_document.py --input {$payloadPath} --output {$outputPath}");
-
-    if ($result->failed()) {
-        Log::error('Python classify_document.py failed', [
-            'exit_code' => $result->exitCode(),
-            'stderr'    => $result->errorOutput(),
-        ]);
-        throw new \RuntimeException('Document classification script failed.');
+    if ($response->failed()) {
+        throw new RuntimeException("ML API /v1/validate returned HTTP {$response->status()}.");
     }
 
-    $output = json_decode(file_get_contents($outputPath), true);
-    @unlink($payloadPath);
-    @unlink($outputPath);
+    $body = $response->json();
 
-    return $output; // e.g., ['label' => 'BIR Permit', 'confidence' => 0.96]
+    return ['stages' => $body['stages'], 'flags' => $body['flags'] ?? []];
 }
 ```
 
+**The one exception** is Stage T forensics considered in isolation: `App\Services\Document\TamperDetectionService` still contains a `Process`-facade path (`analyze()`) that spawns `python/scripts/tamper_analyze.py` directly, following the same `--input`/`--output` JSON contract as the table below. It is exercised by tests and local smoke-testing, but the live pipeline never calls it — `ProcessDocumentAction` only calls `TamperDetectionService::persist()` to store the Stage-T verdict the FastAPI service already returned as part of `/v1/validate`.
+
 ### Python Script I/O Convention
 
-Every Python script follows this contract:
+The scripts under `python/scripts/` (and the `python/forensics/` package) still follow a `--input <json_payload_path> --output <json_result_path>` contract internally — this is what the FastAPI routers in `python/api/routers/` compose to build each stage's response, and what `TamperDetectionService::analyze()` invokes directly for Stage T. It is **not** the interface Laravel calls for Stages 2–4b in the live pipeline; that interface is the single `/v1/validate` HTTP endpoint described above.
 
 | Script | Input | Output |
 |---|---|---|
 | `preprocess.py` | `--input <image_path>` `--output <preprocessed_image_path>` | Preprocessed PNG saved to output path |
-| `ocr_runner.py` | `--input <preprocessed_image_path>` `--output <json_path>` | `{"text": "...", "confidence": 0.94}` |
+| `ocr_runner.py` / `scripts/roi_field_ocr.py` | `--input <preprocessed_image_path>` `--output <json_path>` | `{"text": "...", "confidence": 0.94}` — the ROI pass augments Tesseract's per-field extraction with a RapidOCR (PP-OCRv4 detector) + TrOCR recognition pass, gated so already-confident fields are skipped and required fields go first |
 | `classify_document.py` | `--input <json_payload_path>` `--output <json_result_path>` | `{"label": "BIR Permit", "confidence": 0.96}` |
 | `signature_verify.py` | `--input <json_payload_path>` `--output <json_result_path>` | `{"match": true, "similarity": 0.91, "embedding": [...]}` |
 | `stamp_verify.py` | `--input <json_payload_path>` (includes `document_type` + `city` from OCR) `--output <json_result_path>` | `{"match": true, "similarity_score": 0.952}` — or `{"match": false, "reason": "unreferenced_logo"}` / `{"reason": "no_issuer_logo"}` |
-| `enroll_reference.py` | `--input <json_payload_path>` (document_type + city + logo crop) `--output <json_result_path>` | `{"vector_path": "..."}` — seeds the issuer's reference logo |
+| `enroll_reference.py` | `--input <json_payload_path>` (document_type + city + logo crop) `--output <json_result_path>` | `{"vector_path": "..."}` — seeds the issuer's reference logo (write path still planned — see §3) |
+| `scripts/tamper_analyze.py` | `--input <json_payload_path>` (original file path, page images, OCR context) `--output <json_result_path>` | Stage-T verdict (`tamper_score`, `tamper_authenticity`, `tamper_confidence`, `hard_flag`, per-technique breakdown) — imported in-process by the API's `/v1/tamper` and `/v1/validate` routers, and callable standalone via `TamperDetectionService::analyze()` |
 
 All scripts exit with code `0` on success, non-zero on failure, and write errors to stderr.
 
-### Python Script Internal Structure
-
-Each script follows this template:
-```python
-# python/classify_document.py
-import argparse, json, sys
-from utils.model_loader import load_resnet50
-from utils.image_utils import preprocess_for_resnet
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--input', required=True)
-    parser.add_argument('--output', required=True)
-    args = parser.parse_args()
-
-    try:
-        payload = json.load(open(args.input))
-        model, label_encoder = load_resnet50()
-        result = classify(payload['image_path'], model, label_encoder)
-        json.dump(result, open(args.output, 'w'))
-        sys.exit(0)
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        sys.exit(1)
-```
-
 ### Logging & Error Handling
-- PHP side: all `Process::run()` calls are wrapped in try/catch. Failures are logged to `storage/logs/laravel.log` via `Log::error()` with script name, exit code, and stderr.
-- Python side: each script uses Python's `logging` module writing to `storage/logs/python_{script_name}.log` (path passed as env var `PYTHON_LOG_DIR` or defaulting to `storage/logs/`).
-- Jobs that call Python have `$tries = 3` and `$backoff = [30, 60, 120]` (seconds). After 3 failures, the job is moved to the `failed_jobs` table and an admin notification is triggered.
+- PHP side: `MlPipelineService` wraps the HTTP call in try/catch and throws `RuntimeException` on transport failure or a non-2xx response; `ProcessDocumentAction` catches that and fails forward (every ML component scores as missing, the document still finalizes) rather than logging via `Process`-specific fields. `TamperDetectionService::analyze()`'s own `Process::run()` path still logs exit code + stderr to `storage/logs/laravel.log` via `Log::error()` when used.
+- Python side: each script/router uses Python's `logging` module writing to `storage/logs/python_{script_name}.log` (path passed as env var `PYTHON_LOG_DIR` or defaulting to `storage/logs/`).
+- `ProcessDocumentJob` has `$tries = 3` and `$backoff = [30, 60, 120]` (seconds). After 3 failures, the job is moved to the `failed_jobs` table.
 
 ---
 
@@ -437,12 +409,12 @@ def main():
 
 ### Jobs
 
-| Job | Triggered by | Python script called | Queue |
-|---|---|---|---|
-| `ProcessDocumentJob` | Document upload | `preprocess.py` → `ocr_runner.py` → `classify_document.py` → `signature_verify.py` / `stamp_verify.py` | `document-processing` |
-| `SendOtpEmailJob` | Login (after password verified) | None (pure mail) | `mail` |
-| `RetrainModelJob` | Admin trigger via dashboard | Artisan command → Python training script | `ml-training` |
-| `EnrollReferenceJob` | First officer-approved document carrying a logo for an issuer with no reference yet → seeds that issuer's reference logo (signature ref is enrolled at registration, not here) | `enroll_reference.py` | `document-processing` |
+| Job | Status | Triggered by | Python called | Queue |
+|---|---|---|---|---|
+| `ProcessDocumentJob` | **Built** | Document upload | One HTTP call — `MlPipelineService::validate()` → FastAPI `POST /v1/validate` (Stages 2–4b + T in one round trip); no per-stage script invocation | `document-processing` |
+| `SendOtpEmailJob` | Planned (2FA not yet enabled — see §3) | Login (after password verified) | None (pure mail) | `mail` |
+| `RetrainModelJob` | Planned | Admin trigger via dashboard | Artisan command → Python training script | `ml-training` |
+| `EnrollReferenceJob` | Planned — no logo/signature enrollment write path exists in `app/` yet; `MlPipelineService` only *reads* `vendor_embeddings`/`logo_references` | First officer-approved document carrying a logo for an issuer with no reference yet → seeds that issuer's reference logo (signature ref is enrolled at registration, not here) | `enroll_reference.py` | `document-processing` |
 
 **`ProcessDocumentJob` outline:**
 ```php

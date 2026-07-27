@@ -159,6 +159,8 @@ This section walks through exactly what happens from the moment a file enters th
 
 ### Stage 2: Text Extraction and Validation (PyTesseract OCR)
 
+> **Runtime order note**: these stage numbers denote logical pipeline *concerns*, not strict execution order. In the built FastAPI service (`python/api/routers/validate.py`), **Stage 3 (Classification) runs before Stage 2 (OCR)** — the field-targeted OCR pass needs the document type to select the correct field template (§ Stage 2 also gained a second, ROI-targeted recognition pass using RapidOCR + TrOCR alongside PyTesseract; see `CLAUDE.md` §6). Stages 4/4a/4b, T, and 5 still run after both in the order implied below.
+
 **Input**: Preprocessed image from Stage 1.
 
 **What happens**:
