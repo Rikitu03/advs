@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Jobs\EnrollReferenceJob;
 use App\Models\Document;
 use App\Models\Notification;
 use App\Models\Submission;
@@ -10,6 +11,7 @@ use App\Models\ValidationResult;
 use App\Models\Vendor;
 use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -128,6 +130,54 @@ class OfficerWorkflowTest extends TestCase
         $this->assertSame('Submission approved', $officerNotification->subject);
         $this->assertStringContainsString($this->officer->name, $officerNotification->body);
         $this->assertStringContainsString('Garcia Textiles', $officerNotification->body);
+    }
+
+    public function test_approval_queues_issuer_logo_reference_seeding(): void
+    {
+        Bus::fake();
+        $this->seed(DocumentTypeSeeder::class);
+
+        $submission = $this->makePendingSubmission('Garcia Textiles', 22.0, 'low');
+        $typeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $typed = $submission->documents()->firstOrFail();
+        $typed->update(['document_type_id' => $typeId]);
+        // A document with no resolved type has no issuer to key a reference by.
+        $untyped = Document::factory()->for($submission)->create([
+            'vendor_id' => $submission->vendor_id,
+            'document_type_id' => null,
+        ]);
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'approve')
+            ->call('submitDecision');
+
+        // §5 Stage 4b: an approved document's logo "becomes the reference".
+        Bus::assertDispatched(
+            EnrollReferenceJob::class,
+            fn (EnrollReferenceJob $job): bool => $job->document->is($typed) && $job->officerId === $this->officer->id,
+        );
+        Bus::assertNotDispatched(
+            EnrollReferenceJob::class,
+            fn (EnrollReferenceJob $job): bool => $job->document->is($untyped),
+        );
+    }
+
+    public function test_resubmission_request_does_not_seed_any_reference(): void
+    {
+        Bus::fake();
+        $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'resubmit')
+            ->set('comments', 'Please resubmit corrected documents.')
+            ->call('submitDecision');
+
+        // Only an APPROVED document may become an issuer's reference.
+        Bus::assertNotDispatched(EnrollReferenceJob::class);
     }
 
     public function test_risk_breakdown_can_be_filtered_by_document_type(): void

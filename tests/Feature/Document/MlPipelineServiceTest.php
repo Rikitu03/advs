@@ -83,6 +83,72 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame([], $mapped['flags']);
     }
 
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function cityCasings(): array
+    {
+        return [
+            'header caps' => ['DIGOS', 'Digos'],
+            'multi-word' => ['GENERAL SANTOS', 'General Santos'],
+            'doubled spacing' => ["General  \tSantos ", 'General Santos'],
+        ];
+    }
+
+    /**
+     * The stored city is half of the unique (document_type_id, city) issuer key, so
+     * every casing/spacing OCR can produce has to land on one canonical value.
+     */
+    #[DataProvider('cityCasings')]
+    public function test_maps_the_ocr_issuing_city_to_detected_city(string $read, string $stored): void
+    {
+        $mapped = $this->service()->mapStages($this->ocrStageWithCity([
+            'name' => 'City Issued', 'value' => $read, 'required' => true,
+            'matched' => true, 'confidence' => 88.0, 'warnings' => [],
+        ]));
+
+        $this->assertSame($stored, $mapped['columns']['detected_city']);
+    }
+
+    /**
+     * An unread city must leave the column ALONE, not blank it: a re-run whose OCR
+     * degraded would otherwise erase the city an earlier run read off the same
+     * document — and '' is the national-issuer sentinel, not "no city".
+     */
+    public function test_an_unmatched_city_leaves_detected_city_untouched(): void
+    {
+        $mapped = $this->service()->mapStages($this->ocrStageWithCity([
+            'name' => 'City Issued', 'value' => null, 'required' => true,
+            'matched' => false, 'confidence' => 0.0, 'warnings' => [],
+        ]));
+
+        $this->assertArrayNotHasKey('detected_city', $mapped['columns']);
+    }
+
+    public function test_a_document_type_with_no_city_field_sets_no_detected_city(): void
+    {
+        $mapped = $this->service()->mapStages(['ocr' => ['pages' => [[
+            'text' => 'BUREAU OF INTERNAL REVENUE', 'fields' => [], 'quality' => [],
+        ]]]]);
+
+        $this->assertArrayNotHasKey('detected_city', $mapped['columns']);
+    }
+
+    /**
+     * A Stage-2 payload carrying one `city_issued` field, shaped as the API returns it.
+     *
+     * @param  array<string, mixed>  $cityField
+     * @return array<string, mixed>
+     */
+    private function ocrStageWithCity(array $cityField): array
+    {
+        return ['ocr' => ['pages' => [[
+            'text' => 'CITY OF DIGOS',
+            'fields' => ['city_issued' => $cityField],
+            'quality' => ['mean_confidence' => 90.0, 'flags' => []],
+        ]]]];
+    }
+
     public function test_signature_calibration_uses_distance_and_flags_mismatch(): void
     {
         // Forged pair: distance well past the EER threshold.

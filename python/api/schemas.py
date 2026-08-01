@@ -80,6 +80,10 @@ class SignatureEnrollResponse(BaseModel):
 
 class StampEmbedResponse(BaseModel):
     vector: list[float]
+    # Base64 PNG of the region actually embedded, returned only when the caller
+    # passed a `box`. EnrollReferenceJob persists it as the issuer's
+    # reference_image_path, so the stored crop is provably the embedded pixels.
+    crop_png_base64: str | None = None
 
 
 class StampVerifyResponse(BaseModel):

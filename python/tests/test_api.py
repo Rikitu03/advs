@@ -589,6 +589,52 @@ def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_b
     assert body["city"] == "Makati"
 
 
+def test_stamp_embed_crops_the_requested_box_and_returns_it(tmp_path, jpeg_bytes):
+    """The issuer-reference seeding path (EnrollReferenceJob) sends the FULL document
+    plus Stage 4's detection box, because those coordinates are in the page space
+    this service rendered. The crop comes back so the caller can persist exactly
+    what was embedded as reference_image_path."""
+    import base64
+    import io as _io
+
+    from PIL import Image as _Image
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+
+        body = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"box": json.dumps([10, 20, 60, 90])},
+        ).json()
+
+    assert body["vector"]
+    crop = _Image.open(_io.BytesIO(base64.b64decode(body["crop_png_base64"])))
+    assert crop.size == (50, 70)  # x2-x1, y2-y1
+
+
+def test_stamp_embed_without_a_box_is_unchanged(tmp_path, jpeg_bytes):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        body = client.post("/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["vector"]
+    assert body["crop_png_base64"] is None
+
+
+@pytest.mark.parametrize("box", ["not-json", "[1,2,3]", '["a","b","c","d"]'])
+def test_stamp_embed_rejects_a_malformed_box(tmp_path, jpeg_bytes, box):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        response = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes), data={"box": box},
+        )
+
+    assert response.status_code == 422
+
+
 # --------------------------------------------------------------------------- #
 # validate (fail-forward composite)
 # --------------------------------------------------------------------------- #

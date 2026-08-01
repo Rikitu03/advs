@@ -2,12 +2,15 @@
 
 namespace App\Services\Document;
 
+use App\Jobs\EnrollReferenceJob;
 use App\Models\Document;
 use App\Models\ValidationResult;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -56,11 +59,7 @@ class MlPipelineService
         ], static fn ($value): bool => $value !== null);
 
         try {
-            $response = Http::baseUrl($ml['base_url'])
-                ->withToken((string) $ml['token'])
-                ->connectTimeout((int) ($ml['connect_timeout'] ?? 10))
-                ->timeout((int) ($ml['timeout'] ?? 180))
-                ->retry(max(1, (int) ($ml['retries'] ?? 1)), 200, throw: false)
+            $response = $this->client()
                 ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
                 ->post('/v1/validate', $form);
         } catch (ConnectionException $exc) {
@@ -81,6 +80,65 @@ class MlPipelineService
             'flags' => array_values($body['flags'] ?? []),
             'context' => ['issuer_scope' => $issuerScope, 'logo_reference_id' => $logoReferenceId],
         ];
+    }
+
+    /**
+     * Embed the issuer logo found at $box inside $document (Stage 4b reference
+     * seeding — {@see EnrollReferenceJob}).
+     *
+     * The FULL document is sent with the box rather than a PHP-side crop: the box
+     * comes from Stage 4 detection, whose coordinates are in the space of the page
+     * image the API rendered, so for a PDF only the API can reproduce that space.
+     * It returns the crop it embedded, which the caller persists as the issuer's
+     * `reference_image_path` — so the stored image is provably the embedded pixels.
+     *
+     * @param  list<float>  $box  [x1, y1, x2, y2] in page-image coordinates
+     * @return array{vector: list<float>, crop: string|null} crop = raw PNG bytes
+     *
+     * @throws RuntimeException on any transport or non-2xx failure (the job retries).
+     */
+    public function embedStamp(Document $document, array $box): array
+    {
+        $ml = config('advs.ml');
+
+        try {
+            $response = $this->client()
+                ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
+                ->post('/v1/stamp/embed', ['box' => json_encode(array_values($box), JSON_THROW_ON_ERROR)]);
+        } catch (ConnectionException $exc) {
+            throw new RuntimeException("ML API unreachable at {$ml['base_url']}: {$exc->getMessage()}", previous: $exc);
+        }
+
+        if ($response->failed()) {
+            throw new RuntimeException("ML API /v1/stamp/embed returned HTTP {$response->status()}.");
+        }
+
+        $vector = $response->json('vector');
+        if (! is_array($vector) || $vector === []) {
+            throw new RuntimeException('ML API /v1/stamp/embed returned no feature vector.');
+        }
+
+        $crop = $response->json('crop_png_base64');
+
+        return [
+            'vector' => array_map(static fn (mixed $value): float => (float) $value, $vector),
+            'crop' => is_string($crop) && $crop !== '' ? base64_decode($crop, true) ?: null : null,
+        ];
+    }
+
+    /**
+     * The shared, env-configured ML API client (base URL, bearer token, timeouts,
+     * retries) used by every call in this service.
+     */
+    private function client(): PendingRequest
+    {
+        $ml = config('advs.ml');
+
+        return Http::baseUrl($ml['base_url'])
+            ->withToken((string) $ml['token'])
+            ->connectTimeout((int) ($ml['connect_timeout'] ?? 10))
+            ->timeout((int) ($ml['timeout'] ?? 180))
+            ->retry(max(1, (int) ($ml['retries'] ?? 1)), 200, throw: false);
     }
 
     /**
@@ -121,6 +179,15 @@ class MlPipelineService
             $columns['text_validation_score'] = $this->float($quality['text_validation_score'] ?? null);
             $columns['text_fields_matched'] = $quality['required_matched'] ?? null;
             $columns['text_fields_expected'] = $quality['required_total'] ?? null;
+
+            // The issuing city an LGU logo reference is keyed by (§5 Stage 4b). It is
+            // knowable only here — the city prints on the document, so it does not
+            // exist until Stage 2 has read it — which is why the pre-call lookup in
+            // validate() can scope national issuers but never LGU ones.
+            $city = $this->detectedCity($page['fields'] ?? null);
+            if ($city !== null) {
+                $columns['detected_city'] = $city;
+            }
         }
 
         // ── Stage 4a signature — calibrated authenticity, NOT raw similarity ───
@@ -227,6 +294,36 @@ class MlPipelineService
     private function float(mixed $value): ?float
     {
         return $value === null ? null : (float) $value;
+    }
+
+    /**
+     * The issuing city read by Stage 2, canonicalised, or null when this run did
+     * not read one.
+     *
+     * Returns null rather than an empty value on a miss so the caller can leave the
+     * column untouched: a re-run whose OCR degraded must not erase a city an earlier
+     * run read off the same document. Note that `''` is NOT "no city" here — it is
+     * the national-issuer sentinel in `logo_references.city`, so it must never be
+     * written from a failed read.
+     *
+     * Case and spacing are canonicalised at this single writer because the value
+     * becomes half of the unique `(document_type_id, city)` key: "CITY OF DIGOS"
+     * and "City of  Digos" have to resolve to one issuer, and the stored form is
+     * what {@see EnrollReferenceJob} labels the reference with.
+     *
+     * @param  array<string, mixed>|null  $fields  the API's Stage-2 field map
+     */
+    private function detectedCity(?array $fields): ?string
+    {
+        $field = $fields['city_issued'] ?? null;
+
+        if (! is_array($field) || ($field['matched'] ?? false) !== true) {
+            return null;
+        }
+
+        $city = Str::title(Str::squish((string) ($field['value'] ?? '')));
+
+        return $city === '' ? null : $city;
     }
 
     /**

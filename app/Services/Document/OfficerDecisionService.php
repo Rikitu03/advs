@@ -2,6 +2,7 @@
 
 namespace App\Services\Document;
 
+use App\Jobs\EnrollReferenceJob;
 use App\Models\AuditLog;
 use App\Models\Submission;
 use App\Models\User;
@@ -64,8 +65,35 @@ class OfficerDecisionService
 
         $fresh = $submission->fresh(['vendor.user', 'reviewer']);
 
+        if ($decision === Submission::STATUS_APPROVED) {
+            $this->seedIssuerReferences($fresh, $officer);
+        }
+
         $this->notifications->decisionMade($fresh);
 
         return $fresh;
+    }
+
+    /**
+     * Queue issuer-logo reference seeding for an approved submission (§5 Stage 4b:
+     * a logo "becomes the reference only if an officer later approves the document").
+     *
+     * Dispatched AFTER the decision transaction commits, so the queue worker can
+     * never read an uncommitted submission, and one job per document so a single
+     * unseedable document cannot stop the others. {@see EnrollReferenceJob} decides
+     * per document whether an issuer is keyable and skips silently otherwise — the
+     * officer's decision is already final and must never depend on this.
+     */
+    private function seedIssuerReferences(Submission $submission, User $officer): void
+    {
+        $submission->loadMissing('documents');
+
+        foreach ($submission->documents as $document) {
+            if ($document->document_type_id === null) {
+                continue;
+            }
+
+            EnrollReferenceJob::dispatch($document, $officer->id);
+        }
     }
 }
