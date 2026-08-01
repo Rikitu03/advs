@@ -31,11 +31,6 @@ router = APIRouter()
 # bounds the work if the detector floods the page with boxes.
 MAX_ENROLL_SIGNATURES = 10
 
-# Metadata "no provenance metadata present" is the one anomaly the lenient
-# enrollment gate tolerates — a re-saved phone photo routinely strips EXIF. Every
-# other metadata flag (editor software, modify-after-issue) still hard-flags.
-_STRIPPED_METADATA_PREFIX = "No provenance metadata"
-
 
 def _resnet_preprocess(batch):
     # Phase 6 trains the towers on a ResNet50 base -> resnet50 preprocessing.
@@ -91,6 +86,11 @@ def _enrollment_forensics(original: Path) -> dict:
     metadata (image-editor signature, modify-after-issue) and copy-move (a signature
     cloned/placed on top) — and ignores the soft heuristics (ELA, font, cross-ref)
     plus stripped-EXIF, which false-positive on a genuine phone photo of bond paper.
+
+    These are also exactly ``forensics.HARD_FLAG_TECHNIQUES`` — the same two
+    techniques allowed to decide alone in the document pipeline — and stripped-EXIF
+    is no longer a flag at source (``forensics.metadata``), so no filtering is
+    needed here.
     """
     from forensics import copy_move as fcopy_move  # lazy: heavy cv2/PIL deps
     from forensics import metadata as fmetadata
@@ -98,9 +98,7 @@ def _enrollment_forensics(original: Path) -> dict:
     meta = fmetadata.analyze(str(original))
     clone = fcopy_move.analyze(str(original))
 
-    meta_flags = [f for f in meta.get("flags", []) if not f.startswith(_STRIPPED_METADATA_PREFIX)]
-    clone_flags = clone.get("flags", [])
-    reasons = meta_flags + clone_flags
+    reasons = list(meta.get("flags", [])) + list(clone.get("flags", []))
     return {
         "hard_flag": bool(reasons),
         "reasons": reasons,

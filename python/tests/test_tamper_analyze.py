@@ -49,6 +49,14 @@ def _word(text, x, y, w, h, conf=90):
     return {"text": text, "conf": conf, "bbox": [x, y, w, h]}
 
 
+def _tiled_image(tile=64, reps=6, seed=21):
+    """A periodic security-pattern background: one random tile repeated on a grid.
+    Self-similar at multiples of the tile pitch, but nothing is cloned."""
+    rng = np.random.default_rng(seed)
+    patch = rng.integers(0, 256, size=(tile, tile, 3), dtype=np.uint8)
+    return np.tile(patch, (reps, reps, 1))
+
+
 # --------------------------------------------------------------------------- #
 # T4 font consistency (pure python)
 # --------------------------------------------------------------------------- #
@@ -133,6 +141,60 @@ def test_metadata_clean_image_has_no_editor_flag(tmp_path):
     assert not any("editor" in f.lower() for f in result["flags"])
 
 
+def test_metadata_parses_iso_and_exif_and_pdf_timestamps():
+    """Regression: a `[+\\-Z].*$` timezone strip cut every hyphenated date at its
+    first hyphen ("2019-01-15" -> "2019"), so the ISO issue_date this module
+    documents never parsed and modify-after-issue was dead code."""
+    assert metadata._parse_dt("2019-01-15").date().isoformat() == "2019-01-15"
+    assert metadata._parse_dt("2026:07:20 10:00:00").hour == 10
+    assert metadata._parse_dt("D:20240115103000+05'00'").date().isoformat() == "2024-01-15"
+    assert metadata._parse_dt("2024-01-15T10:30:00Z").hour == 10
+    assert metadata._parse_dt("not a date") is None
+
+
+def test_metadata_stripped_exif_is_not_a_tamper_signal(tmp_path):
+    """Absent provenance metadata is universal, not discriminative: every browser
+    upload, scanner and re-encode strips EXIF. It was scoring 0.85 on 100% of
+    documents, so it cost authenticity everywhere while separating nothing.
+    Recorded as an observation, never as a tamper flag."""
+    from PIL import Image
+
+    path = tmp_path / "stripped.png"
+    Image.fromarray(_smooth_image()).save(path, "PNG")  # PNG save carries no EXIF
+
+    result = metadata.analyze(str(path))
+
+    assert result["score"] == 1.0
+    assert result["pass"] is True
+    assert result["flags"] == []
+    assert any("provenance" in note.lower() for note in result.get("notes", []))
+
+
+def test_metadata_editor_signature_still_hard_flags(tmp_path):
+    """The real signals must keep their bite — narrowing the hard-flag set to
+    metadata + copy_move only works if metadata can still reach it."""
+    import piexif
+    from PIL import Image
+
+    path = tmp_path / "edited.jpg"
+    Image.fromarray(_smooth_image()).save(path, "JPEG")
+    exif = {
+        "0th": {
+            piexif.ImageIFD.Software: b"Adobe Photoshop 25.0 (Windows)",
+            piexif.ImageIFD.DateTime: b"2026:07:20 10:00:00",
+        },
+        "Exif": {piexif.ExifIFD.DateTimeOriginal: b"2019:01:15 08:00:00"},
+        "1st": {}, "GPS": {}, "Interop": {},
+    }
+    piexif.insert(piexif.dump(exif), str(path))
+
+    result = metadata.analyze(str(path), issue_date="2019-01-15")
+    verdict = aggregate({"metadata": result})
+
+    assert result["flags"], "an edited file must still raise flags"
+    assert verdict["hard_flag"] is True
+
+
 # --------------------------------------------------------------------------- #
 # T2 ELA
 # --------------------------------------------------------------------------- #
@@ -176,6 +238,21 @@ def test_copy_move_clean_image_passes(tmp_path):
     assert result["pass"] is True
 
 
+def test_copy_move_ignores_periodic_security_pattern(tmp_path):
+    """A tiled guilloche/microtext background is self-similar at the tile pitch,
+    which is NOT a clone (regression: a genuine BIR 2303's orange guilloche
+    produced offsets (32,0)=25, (0,96)=22, (24,0)=15 — a 1.14 dominance ratio —
+    scoring the technique to 0.21 and landing 0.01 short of the hard-flag)."""
+    path = tmp_path / "guilloche.png"
+    cv2.imwrite(str(path), _tiled_image())
+
+    result = copy_move.analyze(str(path))
+
+    assert result["pass"] is True, result["detail"]
+    assert result["flags"] == []
+    assert any("periodic" in note.lower() for note in result.get("notes", []))
+
+
 # --------------------------------------------------------------------------- #
 # aggregate + entry point
 # --------------------------------------------------------------------------- #
@@ -206,6 +283,36 @@ def test_aggregate_heuristic_techniques_cannot_hard_flag_alone():
     assert verdict["hard_flag"] is False
     assert verdict["tamper_confidence"] == pytest.approx(0.0)
     assert verdict["tamper_score"] > 0.0  # still contributes to the blend
+
+
+def test_aggregate_ela_cannot_hard_flag_alone():
+    """ELA measures a CONTAINER property — recompression history — which is absent
+    in lossless and re-rendered inputs. Measured: the identical pixels of a clean
+    Makati permit score 0.2 as PNG and 1.0 as JPEG, and that 0.8 signal was
+    tripping the High-Risk override on a pristine document. It stays in the
+    weighted blend as corroborating evidence, but may not decide on its own."""
+    techniques = {
+        "metadata": {"score": 1.0, "threshold": 0.999, "pass": True, "flags": [], "detail": ""},
+        "ela": {"score": 0.2, "threshold": 0.85, "pass": False, "flags": ["ela"], "detail": ""},
+        "copy_move": {"score": 1.0, "threshold": 0.85, "pass": True, "flags": [], "detail": ""},
+    }
+    verdict = aggregate(techniques)
+
+    assert verdict["hard_flag"] is False
+    assert verdict["tamper_confidence"] == pytest.approx(0.0)
+    assert verdict["tamper_score"] > 0.0  # still contributes to the blend
+
+
+def test_aggregate_copy_move_still_hard_flags():
+    """copy_move keeps hard-flag authority, which is exactly why its
+    periodic-texture false positives had to be fixed."""
+    techniques = {
+        "copy_move": {"score": 0.1, "threshold": 0.85, "pass": False, "flags": ["clone"], "detail": ""},
+    }
+    verdict = aggregate(techniques)
+
+    assert verdict["hard_flag"] is True
+    assert verdict["tamper_confidence"] == pytest.approx(0.9)
 
 
 def test_aggregate_excludes_skipped_weight():

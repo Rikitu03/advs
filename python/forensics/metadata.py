@@ -16,7 +16,6 @@ importing on a bare interpreter.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,16 +32,40 @@ EDITOR_SIGNATURES = (
 EDITOR_PENALTY = 0.6          # editor software signature present
 MODIFIED_AFTER_CREATE_PENALTY = 0.3   # last-modified later than created
 MODIFIED_AFTER_ISSUE_PENALTY = 0.5    # last-modified later than the printed issue date
-STRIPPED_PENALTY = 0.15       # no provenance metadata at all (possibly scrubbed)
 
-_DATE_FORMATS = ("%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y%m%d%H%M%S")
+# Absent provenance metadata is NOT penalised. It is universal rather than
+# discriminative: every browser upload, scanner, screenshot and re-encode strips
+# EXIF, so it was scoring 0.85 on 100% of submitted documents — costing
+# authenticity everywhere while separating nothing. It is reported as an
+# observation in ``notes`` so an officer still sees it, and never as a ``flag``
+# (flags are what aggregate() merges and the drill-down renders as suspicion).
+STRIPPED_METADATA_NOTE = (
+    "No provenance metadata present — normal for uploads, scans and re-encodes; "
+    "not treated as tampering evidence on its own."
+)
+
+# Full-precision formats first: each candidate is matched against the input
+# truncated to that format's own width, so a trailing timezone ("+05'00'", "Z")
+# falls off naturally. The DATE-ONLY formats must stay last, or a complete
+# timestamp would match "%Y-%m-%d" and silently lose its time component.
+_DATE_FORMATS = (
+    "%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y%m%d%H%M%S",
+    "%Y-%m-%d", "%Y:%m:%d",
+)
 
 
 def _parse_dt(value: str | None) -> datetime | None:
+    """Parse an EXIF/PDF/ISO timestamp, or ``None`` when it isn't recognisable.
+
+    Deliberately no timezone-stripping regex here. A previous ``[+\\-Z].*$`` strip
+    truncated every hyphenated date at its first hyphen — "2019-01-15" became
+    "2019" — so the ISO ``issue_date`` this module documents could never parse and
+    the modify-after-issue check (one of the strongest tamper signals) was dead
+    code. Per-format width truncation handles trailing timezones instead.
+    """
     if not value:
         return None
     cleaned = value.strip().lstrip("D:").strip()  # PDF dates look like "D:20240115..."
-    cleaned = re.sub(r"[+\-Z].*$", "", cleaned).strip()
     for fmt in _DATE_FORMATS:
         try:
             return datetime.strptime(cleaned[: len(datetime.now().strftime(fmt))], fmt)
@@ -122,11 +145,11 @@ def analyze(path: str | None, issue_date: str | None = None) -> dict[str, Any]:
         penalty += MODIFIED_AFTER_ISSUE_PENALTY
         flags.append(f"File modified ({modified.date()}) after the document's printed issue date ({issue.date()})")
 
-    if not meta.get("has_exif") and not flags:
-        penalty += STRIPPED_PENALTY
-        flags.append("No provenance metadata present — may have been stripped to hide edits")
+    notes: list[str] = []
+    if not meta.get("has_exif"):
+        notes.append(STRIPPED_METADATA_NOTE)
 
     score = max(0.0, 1.0 - penalty)
     detail = "No metadata anomalies." if not flags else f"{len(flags)} metadata anomaly(ies) detected."
-    return technique_result(score=score, threshold=0.999, flags=flags, detail=detail,
+    return technique_result(score=score, threshold=0.999, flags=flags, detail=detail, notes=notes,
                             metadata={k: v for k, v in meta.items() if k != "has_exif"})

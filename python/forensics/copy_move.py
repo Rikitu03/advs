@@ -25,6 +25,24 @@ OFFSET_BIN = 8            # px; translation vectors rounded to this grid before 
 MIN_CLONE_MATCHES = 12    # this many matches sharing one offset => a clone
 HAMMING_MAX = 40          # ORB descriptor Hamming distance cap for a "match"
 
+# ── Periodic-texture rejection ────────────────────────────────────────────────
+# Government documents carry tiled security backgrounds (guilloche, microtext,
+# watermark lattices). A tiled pattern is self-similar at every multiple of its
+# pitch, so it votes for MANY offsets at once; a genuine clone has exactly ONE
+# true translation. Measured on a real BIR 2303's orange guilloche: offsets
+# (32,0)=25, (0,96)=22, (24,0)=15 — 3 competing offsets, a 1.14 dominance ratio —
+# which scored this technique to 0.21 and landed 0.01 short of hard-flagging a
+# genuine certificate. A synthetic 6x6 tiling shows the same shape far more
+# strongly (35 competing offsets, 1.10 ratio), while a real cloned region shows
+# 1 offset and no runner-up at all.
+#
+# NOTE: spatial spread deliberately plays no part here. It does not separate the
+# two cases — the tiled sample spans 0.81 of the page and the cloned sample 0.74,
+# and the BIR's false match was actually compact. Periodicity and dominance are
+# the load-bearing tests.
+PERIODIC_MIN_OFFSETS = 3   # this many competing offsets => a tiled texture
+DOMINANCE_RATIO = 2.0      # the top offset must beat the runner-up by this factor
+
 
 def analyze(path: str | None) -> dict[str, Any]:
     """Detect duplicated regions within one image via offset-consistent ORB matches."""
@@ -73,10 +91,26 @@ def analyze(path: str | None) -> dict[str, Any]:
         if not offsets:
             return technique_result(score=1.0, threshold=0.85, detail="No duplicated regions detected.")
 
-        offset, votes = offsets.most_common(1)[0]
+        ranked = offsets.most_common()
+        offset, votes = ranked[0]
+        runner_up = int(ranked[1][1]) if len(ranked) > 1 else 0
         if votes < MIN_CLONE_MATCHES:
             return technique_result(score=1.0, threshold=0.85, detail="No offset-consistent duplication found.",
                                     top_offset=list(offset), top_votes=int(votes))
+
+        # A tiled security background votes for many offsets at once, and no single
+        # one dominates. Either shape means "periodic texture", not "cloned region".
+        competing = sum(1 for _, count in ranked if count >= MIN_CLONE_MATCHES)
+        if competing >= PERIODIC_MIN_OFFSETS or votes < DOMINANCE_RATIO * runner_up:
+            return technique_result(
+                score=1.0, threshold=0.85,
+                detail=("Self-similarity is periodic, not localized — consistent with a tiled "
+                        "security background (guilloche / microtext), so no clone is reported."),
+                notes=[f"Periodic background: {competing} competing offset(s), top {int(votes)} vs "
+                       f"runner-up {runner_up} votes — below the {DOMINANCE_RATIO}x dominance a clone shows."],
+                top_offset=list(offset), top_votes=int(votes),
+                competing_offsets=competing, runner_up_votes=runner_up,
+            )
 
         # Strength scales with how far past the trigger the vote count is.
         penalty = min(0.85, 0.4 + 0.03 * (votes - MIN_CLONE_MATCHES))
