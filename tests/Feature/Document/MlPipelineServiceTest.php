@@ -182,6 +182,40 @@ class MlPipelineServiceTest extends TestCase
         $this->assertContains('unreferenced_logo', $mapped['flags']);
     }
 
+    public function test_persists_the_stage_4b_tamper_verdict_without_an_issuer_reference(): void
+    {
+        $stages = [
+            'stamp' => [
+                'match' => false,
+                'reason' => 'unreferenced_logo',
+                'similarity_score' => null,
+                'stamp_tampered' => true,
+                'genuine_probability' => 0.05,
+            ],
+        ];
+
+        $mapped = $this->service()->mapStages($stages, ['issuer_scope' => 'lgu']);
+
+        $this->assertTrue($mapped['columns']['stamp_tampered']);
+        $this->assertFalse($mapped['columns']['stamp_detected']);
+        $this->assertContains('unreferenced_logo', $mapped['flags']);
+    }
+
+    public function test_leaves_the_tamper_verdict_untouched_when_the_classifier_did_not_run(): void
+    {
+        $stages = [
+            'stamp' => [
+                'match' => true, 'similarity_score' => 0.95, 'reason' => null,
+                'stamp_tampered' => null, 'genuine_probability' => null,
+            ],
+        ];
+
+        $mapped = $this->service()->mapStages($stages, ['issuer_scope' => 'national']);
+
+        // Null is "could not run", not "clean" — never overwrite an earlier verdict.
+        $this->assertArrayNotHasKey('stamp_tampered', $mapped['columns']);
+    }
+
     /**
      * A region YOLOv8 actually found (signature_bbox populated) but the vendor has
      * no enrolled reference yet must be distinguishable from a genuine detection

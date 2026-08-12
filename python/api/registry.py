@@ -19,8 +19,8 @@ from .config import Settings
 
 logger = logging.getLogger("advs.api.registry")
 
-MODEL_NAMES = ("classifier", "detector", "siamese", "stamp", "rapid_detector",
-               "trocr", "trocr_accurate")
+MODEL_NAMES = ("classifier", "detector", "siamese", "stamp", "stamp_classifier",
+               "rapid_detector", "trocr", "trocr_accurate")
 
 
 class ModelRegistry:
@@ -36,6 +36,8 @@ class ModelRegistry:
             "detector": (str(self.settings.detector_path), self._load_detector),
             "siamese": (str(self.settings.siamese_path), self._load_siamese),
             "stamp": (str(self.settings.stamp_path), self._load_stamp),
+            "stamp_classifier": (str(self.settings.stamp_classifier_path),
+                                 self._load_stamp_classifier),
             # A local snapshot directory (transformers save_pretrained()
             # layout), not a single file, but the same "configured path must
             # exist" gate as everything else — unset/missing means "not
@@ -139,6 +141,15 @@ class ModelRegistry:
         import tensorflow as tf
 
         return tf.keras.models.load_model(self.settings.stamp_path)
+
+    def _load_stamp_classifier(self) -> Any:
+        # Trusted artefact: produced and consumed only by ADVS's own code
+        # (train_stamp.py). Never unpickle a stamp_classifier.pkl from an
+        # untrusted source.
+        import pickle
+
+        with open(self.settings.stamp_classifier_path, "rb") as fh:
+            return pickle.load(fh)
 
     def _load_rapid_detector(self) -> Any:
         from rapidocr_onnxruntime import RapidOCR

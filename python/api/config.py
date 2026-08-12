@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     detector_model_path: Path | None = None     # default: MODEL_DIR/yolov8_document.pt
     siamese_model_path: Path | None = None      # default: MODEL_DIR/siamese_encoder.h5
     stamp_model_path: Path | None = None        # default: MODEL_DIR/efficientnet_feature_extractor.h5
+    stamp_classifier_model_path: Path | None = None  # default: MODEL_DIR/stamp_classifier.pkl
     signature_threshold_path: Path | None = None  # default: MODEL_DIR/signature_threshold.txt
     stamp_threshold_path: Path | None = None      # default: MODEL_DIR/stamp_threshold.txt
     # ROI+TrOCR field-recognition fallback (Stage 2 augmentation, see
@@ -57,6 +58,11 @@ class Settings(BaseSettings):
     classification_confidence_threshold: float = 0.70
     yolo_detection_confidence: float = 0.50
     stamp_similarity_threshold: float = 0.85
+    # NOT a new §9 parameter. train_stamp.py fits a binary LogisticRegression
+    # (class 1 = genuine wet ink, class 0 = photocopy/edit) whose own predict()
+    # boundary is 0.50; this exposes that boundary so an operator can trade
+    # false accepts against false rejects without retraining.
+    stamp_tamper_threshold: float = 0.50
     # Empirical (EER) — set via env, or written by training to the threshold file.
     signature_distance_threshold: float | None = None
     pdf_dpi: int = 300
@@ -117,6 +123,12 @@ class Settings(BaseSettings):
     def stamp_path(self) -> Path:
         # train_stamp.py's frozen EfficientNet-B0 feature extractor.
         return self.stamp_model_path or self.model_dir / "efficientnet_feature_extractor.h5"
+
+    @property
+    def stamp_classifier_path(self) -> Path:
+        # train_stamp.py's genuine/forged LogisticRegression over the 1280-D
+        # EfficientNet features — the §5 Stage 4b texture check.
+        return self.stamp_classifier_model_path or self.model_dir / "stamp_classifier.pkl"
 
     @property
     def store_path(self) -> Path:

@@ -72,6 +72,21 @@ def embed_stamp(model, image: Image.Image) -> list[float]:
     return emb.embed(model, image, _efficientnet_preprocess)
 
 
+def run_tamper_check(classifier, vector: list[float], threshold: float) -> dict:
+    """EfficientNet texture verdict for one logo crop (§5 Stage 4b).
+
+    train_stamp.py fits a LogisticRegression over the 1280-D feature vector with
+    class 1 = genuine wet ink and class 0 = a photocopied/scanned/edited
+    reproduction, so column 1 of predict_proba is the genuine probability.
+    """
+    import numpy as np
+
+    probabilities = np.asarray(classifier.predict_proba(np.asarray([vector], dtype=np.float64)))
+    genuine = float(probabilities[0][1])
+
+    return {"stamp_tampered": genuine < threshold, "genuine_probability": round(genuine, 6)}
+
+
 def run_stamp_verify(
     model,
     image: Image.Image,
@@ -79,14 +94,29 @@ def run_stamp_verify(
     settings: Settings,
     document_type: str | None = None,
     city: str | None = None,
+    classifier=None,
+    missing_reason: str = "unreferenced_logo",
 ) -> dict:
-    base = {"document_type": document_type, "city": city}
+    """Stage 4b: texture check first, issuer comparison second.
+
+    The crop is ALWAYS embedded, reference or not — §5 Stage 4b runs the
+    wet-ink-vs-reproduction check "even before any reference exists", so the
+    fraud signal does not wait on an issuer being seeded. ``missing_reason``
+    lets the caller say WHY there is no reference (no issuer seeded yet, or an
+    LGU city that OCR could not read) without losing that check.
+    """
+    vector = embed_stamp(model, image)
+    tamper = (
+        run_tamper_check(classifier, vector, settings.stamp_tamper_threshold)
+        if classifier is not None
+        else {"stamp_tampered": None, "genuine_probability": None}
+    )
+    base = {"document_type": document_type, "city": city, **tamper}
 
     if reference is None:
-        return {**base, "match": False, "reason": "unreferenced_logo",
+        return {**base, "match": False, "reason": missing_reason,
                 "similarity_score": None, "threshold": None}
 
-    vector = embed_stamp(model, image)
     emb.require_same_length(reference, vector, "reference_vector")
 
     similarity = emb.cosine_similarity(vector, reference)
@@ -168,4 +198,8 @@ async def stamp_verify(
     model = request.app.state.registry.require("stamp")
     reference = emb.parse_reference(reference_vector, "reference_vector") if reference_vector else None
     image = await _read_crop(file)
-    return run_stamp_verify(model, image, reference, request.app.state.settings, document_type, city)
+
+    return run_stamp_verify(
+        model, image, reference, request.app.state.settings, document_type, city,
+        classifier=request.app.state.registry.get("stamp_classifier"),
+    )

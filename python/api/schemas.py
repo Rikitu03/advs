@@ -93,3 +93,7 @@ class StampVerifyResponse(BaseModel):
     reason: str | None = None
     document_type: str | None = None
     city: str | None = None
+    # §5 Stage 4b texture check — runs reference or not. Both are None when
+    # stamp_classifier.pkl is not loaded (the check could not run at all).
+    stamp_tampered: bool | None = None
+    genuine_probability: float | None = None

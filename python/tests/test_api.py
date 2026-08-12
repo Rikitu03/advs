@@ -100,12 +100,13 @@ def test_health_is_open_and_reports_missing_models(client):
     body = response.json()
     assert body["status"] == "ok"
     assert set(body["models"]) == {
-        "classifier", "detector", "siamese", "stamp", "rapid_detector",
-        "trocr", "trocr_accurate",
+        "classifier", "detector", "siamese", "stamp", "stamp_classifier",
+        "rapid_detector", "trocr", "trocr_accurate",
     }
     # File/dir-gated models: an empty tmp model_dir means none of these are
     # configured, so all report "not loaded" the same way.
-    for name in ("classifier", "detector", "siamese", "stamp", "trocr", "trocr_accurate"):
+    for name in ("classifier", "detector", "siamese", "stamp", "stamp_classifier",
+                 "trocr", "trocr_accurate"):
         status = body["models"][name]
         assert status["loaded"] is False
         assert status["error"] == "weights_not_found"
@@ -485,6 +486,18 @@ class _StubEmbedderModel:
         return batch.reshape(1, -1, 3).mean(axis=1)
 
 
+class _StubStampClassifier:
+    """sklearn-like binary classifier matching train_stamp.py's labelling:
+    column 1 = P(genuine wet ink), column 0 = P(reproduction)."""
+
+    def __init__(self, genuine_probability: float):
+        self._genuine = genuine_probability
+
+    def predict_proba(self, features):
+        assert np.asarray(features).shape[0] == 1
+        return np.array([[1.0 - self._genuine, self._genuine]])
+
+
 def test_signature_embed_and_verify_roundtrip(tmp_path, jpeg_bytes):
     pytest.importorskip("tensorflow")  # resnet50 preprocess_input
 
@@ -575,6 +588,8 @@ def test_stamp_verify_matches_genuine_and_rejects_mismatch(tmp_path, jpeg_bytes)
 
 
 def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")  # the crop is now always embedded
+
     app = create_app(_settings(tmp_path))
     with TestClient(app) as client:
         app.state.registry._models["stamp"] = _StubEmbedderModel()
@@ -587,6 +602,29 @@ def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_b
     assert body["reason"] == "unreferenced_logo"
     assert body["similarity_score"] is None
     assert body["city"] == "Makati"
+    # No stamp_classifier loaded -> the check could not run; not "clean".
+    assert body["stamp_tampered"] is None
+
+
+def test_stamp_verify_runs_the_tamper_check_without_a_reference(tmp_path, jpeg_bytes):
+    """§5 Stage 4b: 'Tamper check (always runs, reference or not)'. An issuer with
+    no reference logo yet must still get the wet-ink-vs-reproduction verdict."""
+    pytest.importorskip("tensorflow")  # efficientnet preprocess_input
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        app.state.registry._models["stamp_classifier"] = _StubStampClassifier(0.10)
+
+        body = client.post(
+            "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"document_type": "business_permit", "city": "Makati"},
+        ).json()
+
+    assert body["reason"] == "unreferenced_logo"      # unchanged
+    assert body["similarity_score"] is None           # unchanged
+    assert body["stamp_tampered"] is True
+    assert body["genuine_probability"] == pytest.approx(0.10)
 
 
 def test_stamp_embed_crops_the_requested_box_and_returns_it(tmp_path, jpeg_bytes):
@@ -657,6 +695,48 @@ def test_validate_is_fail_forward_without_models(client, jpeg_bytes):
 
     assert isinstance(body["flags"], list)
     assert len(body["flags"]) == len(set(body["flags"]))  # deduped
+
+
+class _StubBox:
+    def __init__(self, cls: int, conf: float, xyxy: list[float]):
+        self.cls = cls
+        self.conf = conf
+        # ultralytics hands back a tensor/array row, and run_detection calls
+        # .tolist() on it — a bare list would not survive that.
+        self.xyxy = [np.asarray(xyxy)]
+
+
+class _StubResult:
+    def __init__(self, names: dict[int, str], boxes: list[_StubBox]):
+        self.names = names
+        self.boxes = boxes
+
+
+class _StubDetector:
+    """Just enough of the ultralytics YOLO surface for run_detection."""
+
+    names = {0: "signature", 1: "stamp"}
+
+    def predict(self, source=None, conf=0.0, verbose=False):
+        return [_StubResult(self.names, [_StubBox(1, 0.9, [5.0, 5.0, 60.0, 60.0])])]
+
+
+def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
+    """A reproduction detected on the crop must reach the officer as a flag even
+    though the issuer has no reference logo yet (§5 Stage 4b)."""
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        app.state.registry._models["stamp_classifier"] = _StubStampClassifier(0.05)
+
+        body = client.post("/v1/validate", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["stages"]["stamp"]["stamp_tampered"] is True
+    assert "stamp_tampered" in body["flags"]
+    assert "unreferenced_logo" in body["flags"]
 
 
 def test_validate_rejects_malformed_reference(client, jpeg_bytes):

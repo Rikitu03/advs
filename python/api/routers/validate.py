@@ -203,9 +203,14 @@ async def validate(
                 stages["stamp"] = run_stamp_verify(
                     stamp_model, _crop(first_page, stamp_box["box"]),
                     logo_reference, settings, document_type, city,
+                    classifier=registry.get("stamp_classifier"),
                 )
                 if stages["stamp"].get("reason"):
                     flags.append(stages["stamp"]["reason"])
+                # A reproduction is a fraud signal in its own right, independent
+                # of whether an issuer reference existed to compare against.
+                if stages["stamp"].get("stamp_tampered") is True:
+                    flags.append("stamp_tampered")
             except Exception as exc:
                 logger.exception("stamp stage failed")
                 stages["stamp"] = _skipped(f"error: {exc}")

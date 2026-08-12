@@ -219,6 +219,12 @@ class MlPipelineService
         // ── Stage 4b issuer logo ───────────────────────────────────────────────
         $stamp = $stages['stamp'] ?? null;
         $issuerScope = $context['issuer_scope'] ?? null;
+        // §5 Stage 4b's texture check runs reference or not, so its verdict is
+        // read before the reference branch below. Null means the classifier
+        // could not run — leave the column alone rather than recording "clean".
+        if ($this->ran($stamp) && ($stamp['stamp_tampered'] ?? null) !== null) {
+            $columns['stamp_tampered'] = (bool) $stamp['stamp_tampered'];
+        }
         if ($this->ran($stamp) && ($stamp['reason'] ?? null) === null) {
             $similarity = $this->float($stamp['similarity_score'] ?? null);
             $columns['stamp_detected'] = true;
