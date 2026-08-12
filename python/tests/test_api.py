@@ -739,6 +739,107 @@ def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
     assert "unreferenced_logo" in body["flags"]
 
 
+def test_canonical_city_matches_the_form_laravel_stores():
+    from api.routers.validate import canonical_city
+
+    assert canonical_city("CITY OF DIGOS") == "City Of Digos"
+    assert canonical_city("City of  Digos ") == "City Of Digos"
+    assert canonical_city("") is None
+    assert canonical_city(None) is None
+
+
+def test_resolve_issuer_reference_uses_the_national_sentinel():
+    """logo_references.city is '' for a national issuer (one logo agency-wide),
+    so the city read off the page is irrelevant to the lookup (§5 Stage 4b)."""
+    from api.routers.validate import resolve_issuer_reference
+
+    references = {"": [1.0, 2.0], "Pasig": [3.0, 4.0]}
+
+    vector, flag = resolve_issuer_reference(references, None, "national", "Pasig")
+
+    assert vector == [1.0, 2.0]
+    assert flag is None
+
+
+def test_resolve_issuer_reference_scopes_an_lgu_issuer_by_city():
+    from api.routers.validate import resolve_issuer_reference
+
+    references = {"Pasig": [3.0, 4.0], "Quezon City": [5.0, 6.0]}
+
+    assert resolve_issuer_reference(references, None, "lgu", "quezon  CITY")[0] == [5.0, 6.0]
+    # An LGU city with no seeded reference yet is a miss, not a mis-scope.
+    assert resolve_issuer_reference(references, None, "lgu", "Makati") == (None, None)
+
+
+def test_resolve_issuer_reference_flags_an_unreadable_lgu_city():
+    """§5 Stage 4b failure path: 'City not identified' — the lookup cannot be
+    scoped, so verification is skipped rather than compared to a wrong city."""
+    from api.routers.validate import resolve_issuer_reference
+
+    assert resolve_issuer_reference({"Pasig": [3.0]}, None, "lgu", None) == (None, "city_not_identified")
+
+
+def test_validate_verifies_an_lgu_logo_against_the_matching_city_reference(tmp_path, jpeg_bytes):
+    """The whole city→vector set travels with the request; this service picks
+    the one for the document's city (§5 Stage 2 → Stage 4b)."""
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+
+        vector = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()["vector"]
+
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={
+                "issuer_scope": "lgu",
+                "city": "PASIG  CITY",
+                "stamp_references": json.dumps({
+                    "Pasig City": vector,
+                    "Makati": [-v for v in vector],
+                }),
+            },
+        ).json()
+
+    stamp = body["stages"]["stamp"]
+    assert stamp["city"] == "Pasig City"
+    assert stamp["match"] is True
+    assert stamp["similarity_score"] == pytest.approx(1.0)
+    assert "unreferenced_logo" not in body["flags"]
+
+
+def test_validate_flags_an_lgu_document_with_no_readable_city(tmp_path, jpeg_bytes):
+    """§5 Stage 4b: no city → 'City not identified'; the tamper check still ran."""
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"issuer_scope": "lgu",
+                  "stamp_references": json.dumps({"Pasig City": [1.0, 2.0, 3.0]})},
+        ).json()
+
+    assert body["stages"]["stamp"]["reason"] == "city_not_identified"
+    assert "city_not_identified" in body["flags"]
+    assert "stamp_tampered" in body["stages"]["stamp"]  # the check still ran
+
+
+def test_validate_rejects_a_malformed_reference_map(client, jpeg_bytes):
+    response = client.post(
+        "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"stamp_references": "[1, 2, 3]"},
+    )
+    assert response.status_code == 422
+
+
 def test_validate_rejects_malformed_reference(client, jpeg_bytes):
     response = client.post(
         "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),

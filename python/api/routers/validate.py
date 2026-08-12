@@ -57,6 +57,71 @@ def _parse_forensics(raw: str | None) -> dict:
     return {key: parsed[key] for key in ("weights", "tamper_threshold") if parsed.get(key) is not None}
 
 
+def canonical_city(value: str | None) -> str | None:
+    """The single canonical form of a city name, shared with Laravel.
+
+    ``logo_references.city`` is half of the unique ``(document_type_id, city)``
+    key and Laravel writes it as ``Str::title(Str::squish($city))``, so "CITY OF
+    DIGOS" and "City of  Digos" must resolve to one issuer here too. Returns
+    ``None`` for an empty read — note that ``''`` is NOT "no city", it is the
+    national-issuer sentinel.
+    """
+    if value is None:
+        return None
+    squished = " ".join(str(value).split())
+
+    return squished.title() if squished else None
+
+
+def parse_reference_map(raw: str | None) -> dict[str, list[float]]:
+    """Every reference logo the caller holds for this issuer, keyed by city.
+
+    An ``lgu`` issuer's city is printed on the document, so it does not exist
+    until Stage 2 runs INSIDE this call — the caller therefore sends the whole
+    set and this service picks with the city it read. The ``''`` key is the
+    national sentinel, exactly as stored in ``logo_references.city``.
+    """
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid stamp_references: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="stamp_references must be a JSON object.")
+
+    return {
+        (canonical_city(key) or ""): [float(v) for v in value]
+        for key, value in parsed.items()
+        if isinstance(value, list) and value
+    }
+
+
+def resolve_issuer_reference(
+    references: dict[str, list[float]],
+    single: list[float] | None,
+    issuer_scope: str | None,
+    city: str | None,
+) -> tuple[list[float] | None, str | None]:
+    """The issuer's reference logo for this document (§5 Stage 4b), or why not.
+
+    Returns ``(vector, flag)``. ``flag`` is ``city_not_identified`` when an LGU
+    document's issuing city could not be read: the lookup cannot be scoped, so
+    the comparison is skipped rather than run against another city's seal. A
+    ``None`` vector with no flag simply means this issuer has no reference yet.
+    """
+    if issuer_scope == "lgu":
+        key = canonical_city(city)
+        if key is None:
+            return None, "city_not_identified"
+
+        return references.get(key), None
+
+    # national (the '' sentinel) or an unscoped caller; `single` is the legacy
+    # one-vector form of the same thing.
+    return references.get("", single), None
+
+
 def _crop(page: Image.Image, box: list[float]) -> Image.Image:
     x1, y1, x2, y2 = (max(0, int(v)) for v in box)
     return page.crop((x1, y1, x2, y2))
@@ -82,6 +147,8 @@ async def validate(
     template: str = Form("bir"),
     document_type: str | None = Form(None),
     city: str | None = Form(None),
+    issuer_scope: str | None = Form(None),
+    stamp_references: str | None = Form(None),
     issue_date: str | None = Form(None),
     signature_reference: str | None = Form(None),
     stamp_reference: str | None = Form(None),
@@ -91,7 +158,8 @@ async def validate(
     registry: ModelRegistry = request.app.state.registry
 
     sig_reference = emb.parse_reference(signature_reference, "signature_reference") if signature_reference else None
-    logo_reference = emb.parse_reference(stamp_reference, "stamp_reference") if stamp_reference else None
+    single_logo_reference = emb.parse_reference(stamp_reference, "stamp_reference") if stamp_reference else None
+    logo_references = parse_reference_map(stamp_references)
     forensics_ctx = _parse_forensics(forensics)
 
     stages: dict[str, dict] = {}
@@ -152,6 +220,12 @@ async def validate(
             logger.exception("ocr stage failed")
             stages["ocr"] = _skipped(f"error: {exc}")
 
+        # §5 Stage 2 → 4b: the issuing city is printed on the document, so an
+        # LGU issuer can only be scoped after OCR has read it. An explicit
+        # caller value wins (the '' national sentinel canonicalises to None).
+        detected_city = canonical_city(ocr_context.get("fields", {}).get("city_issued"))
+        resolved_city = canonical_city(city) or detected_city
+
         # ── Stage 4: detection ─────────────────────────────────────────────
         detections: list[dict] = []
         detector = registry.get("detector")
@@ -192,6 +266,9 @@ async def validate(
         # ── Stage 4b: issuer logo verify ───────────────────────────────────
         stamp_model = registry.get("stamp")
         stamp_box = _best_box(detections, ("stamp", "logo"))
+        logo_reference, reference_flag = resolve_issuer_reference(
+            logo_references, single_logo_reference, issuer_scope, resolved_city
+        )
         if stamp_model is None:
             stages["stamp"] = _skipped("model_not_loaded")
         elif not stages.get("detection") or stages["detection"].get("skipped"):
@@ -202,8 +279,12 @@ async def validate(
             try:
                 stages["stamp"] = run_stamp_verify(
                     stamp_model, _crop(first_page, stamp_box["box"]),
-                    logo_reference, settings, document_type, city,
+                    logo_reference, settings, document_type, resolved_city,
                     classifier=registry.get("stamp_classifier"),
+                    # Why there is no reference: an unseeded issuer, or an LGU
+                    # city OCR could not read. Either way the texture check above
+                    # still runs — only the comparison is skipped.
+                    missing_reason=reference_flag or "unreferenced_logo",
                 )
                 if stages["stamp"].get("reason"):
                     flags.append(stages["stamp"]["reason"])
