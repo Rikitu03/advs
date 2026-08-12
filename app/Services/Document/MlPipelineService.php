@@ -32,7 +32,7 @@ class MlPipelineService
     /**
      * Send a document to the ML API and return its fail-forward result.
      *
-     * @return array{stages: array<string, mixed>, flags: list<string>, context: array{issuer_scope: string|null, logo_reference_id: int|null}}
+     * @return array{stages: array<string, mixed>, flags: list<string>, context: array{issuer_scope: string|null, logo_reference_ids: array<string, int>}}
      *
      * @throws RuntimeException on any transport or non-2xx failure (the caller fails forward).
      */
@@ -42,19 +42,23 @@ class MlPipelineService
 
         $type = $this->resolveDocumentType($document);
         $issuerScope = $type['issuer_scope'] ?? null;
-        // Only a national issuer can be scoped before OCR (its city is the '' sentinel);
-        // an LGU city is unknown until OCR runs, so its logo can't be resolved in one pass.
+        // Only a national issuer has a city knowable here (the '' sentinel); an LGU
+        // city prints on the document, so it does not exist until the API's own
+        // Stage 2 reads it — which is why the whole reference set is sent below and
+        // the API, not this service, picks the row to compare against.
         $city = $issuerScope === 'national' ? '' : null;
-        [$stampReference, $logoReferenceId] = $this->resolveLogoReference(
-            $document->document_type_id, $issuerScope, $city
+        [$stampReferences, $logoReferenceIds] = $this->resolveLogoReferences(
+            $document->document_type_id, $issuerScope
         );
 
         $form = array_filter([
             'template' => $this->ocrTemplateFor($type['code'] ?? null),
             'document_type' => $type['code'] ?? null,
+            // The API needs the scope to know whether to key the lookup by city.
+            'issuer_scope' => $issuerScope,
             'city' => $city,
             'signature_reference' => $this->resolveSignatureReference($document),
-            'stamp_reference' => $stampReference,
+            'stamp_references' => $stampReferences,
             'forensics' => json_encode($this->forensicsContext(), JSON_THROW_ON_ERROR),
         ], static fn ($value): bool => $value !== null);
 
@@ -78,7 +82,7 @@ class MlPipelineService
         return [
             'stages' => $body['stages'],
             'flags' => array_values($body['flags'] ?? []),
-            'context' => ['issuer_scope' => $issuerScope, 'logo_reference_id' => $logoReferenceId],
+            'context' => ['issuer_scope' => $issuerScope, 'logo_reference_ids' => $logoReferenceIds],
         ];
     }
 
@@ -145,7 +149,7 @@ class MlPipelineService
      * Project the API's per-stage result onto ValidationResult column values.
      *
      * @param  array<string, mixed>  $stages
-     * @param  array{issuer_scope?: string|null, logo_reference_id?: int|null}  $context
+     * @param  array{issuer_scope?: string|null, logo_reference_ids?: array<string, int>}  $context
      * @return array{columns: array<string, mixed>, flags: list<string>}
      */
     public function mapStages(array $stages, array $context = []): array
@@ -231,7 +235,9 @@ class MlPipelineService
             $columns['stamp_similarity'] = $similarity;
             $columns['stamp_score'] = $similarity;
             $columns['stamp_passed'] = $stamp['match'] ?? null;
-            $columns['logo_reference_id'] = $context['logo_reference_id'] ?? null;
+            $columns['logo_reference_id'] = $this->matchedLogoReferenceId(
+                $context['logo_reference_ids'] ?? [], $issuerScope, $stamp['city'] ?? null
+            );
             if (($stamp['match'] ?? null) === false) {
                 $flags[] = 'stamp_mismatch';
             }
@@ -366,27 +372,57 @@ class MlPipelineService
     }
 
     /**
-     * The issuer's reference logo vector (raw JSON array string) + its row id, or
-     * [null, null] when the issuer isn't resolvable in one pass or has no reference.
+     * Every reference logo this issuer has, keyed by city, plus each row's id.
      *
-     * @return array{0: string|null, 1: int|null}
+     * A `national` issuer has exactly one row under the `''` city sentinel; an
+     * `lgu` issuer has one per city, and which one applies depends on the city
+     * printed on the document — which does not exist until Stage 2 OCR runs,
+     * inside the same API call. So the whole set travels with the request and
+     * the API picks; {@see matchedLogoReferenceId()} then records which.
+     *
+     * @return array{0: string|null, 1: array<string, int>} [JSON {city: vector}, city => id]
      */
-    private function resolveLogoReference(?int $documentTypeId, ?string $issuerScope, ?string $city): array
+    private function resolveLogoReferences(?int $documentTypeId, ?string $issuerScope): array
     {
-        if ($documentTypeId === null || $issuerScope !== 'national' || $city === null) {
-            return [null, null];
+        if ($documentTypeId === null || $issuerScope === null) {
+            return [null, []];
         }
 
-        $row = DB::table('logo_references')
+        $vectors = [];
+        $ids = [];
+
+        $rows = DB::table('logo_references')
             ->where('document_type_id', $documentTypeId)
-            ->where('city', $city)
-            ->first(['id', 'feature_vector']);
+            ->whereNotNull('feature_vector')
+            ->get(['id', 'city', 'feature_vector']);
 
-        if ($row === null || $row->feature_vector === null) {
-            return [null, null];
+        foreach ($rows as $row) {
+            $vector = json_decode((string) $row->feature_vector, true);
+            if (! is_array($vector) || $vector === []) {
+                continue;
+            }
+            $vectors[$row->city] = $vector;
+            $ids[$row->city] = (int) $row->id;
         }
 
-        return [$row->feature_vector, (int) $row->id];
+        return [$vectors === [] ? null : json_encode($vectors, JSON_THROW_ON_ERROR), $ids];
+    }
+
+    /**
+     * The `logo_references` row the API actually compared against: the `''`
+     * sentinel row for a national issuer, or the row for the city Stage 2 read.
+     *
+     * @param  array<string, int>  $ids  city => logo_references.id
+     */
+    private function matchedLogoReferenceId(array $ids, ?string $issuerScope, ?string $city): ?int
+    {
+        if ($issuerScope === 'national') {
+            return $ids[''] ?? null;
+        }
+
+        $key = Str::title(Str::squish((string) $city));
+
+        return $key === '' ? null : ($ids[$key] ?? null);
     }
 
     /**

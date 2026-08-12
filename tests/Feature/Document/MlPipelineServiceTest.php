@@ -9,6 +9,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
@@ -54,7 +55,10 @@ class MlPipelineServiceTest extends TestCase
             'stamp' => ['match' => true, 'similarity_score' => 0.95, 'reason' => null],
         ];
 
-        $mapped = $this->service()->mapStages($stages, ['issuer_scope' => 'national', 'logo_reference_id' => 42]);
+        $mapped = $this->service()->mapStages($stages, [
+            'issuer_scope' => 'national',
+            'logo_reference_ids' => ['' => 42],
+        ]);
         $columns = $mapped['columns'];
 
         $this->assertSame('BIR Permit', $columns['classification_label']);
@@ -216,6 +220,21 @@ class MlPipelineServiceTest extends TestCase
         $this->assertArrayNotHasKey('stamp_tampered', $mapped['columns']);
     }
 
+    public function test_logo_reference_id_follows_the_city_the_api_matched(): void
+    {
+        $stages = [
+            'stamp' => ['match' => true, 'similarity_score' => 0.95, 'reason' => null,
+                'city' => 'Pasig City', 'stamp_tampered' => false],
+        ];
+
+        $mapped = $this->service()->mapStages($stages, [
+            'issuer_scope' => 'lgu',
+            'logo_reference_ids' => ['Pasig City' => 7, 'Makati' => 9],
+        ]);
+
+        $this->assertSame(7, $mapped['columns']['logo_reference_id']);
+    }
+
     /**
      * A region YOLOv8 actually found (signature_bbox populated) but the vendor has
      * no enrolled reference yet must be distinguishable from a genuine detection
@@ -355,8 +374,43 @@ class MlPipelineServiceTest extends TestCase
             return str_contains($body, 'name="document_type"')
                 && str_contains($body, 'bir_permit')
                 && str_contains($body, '[0.1,0.2,0.3]')   // signature_reference
-                && str_contains($body, '[0.4,0.5]')       // stamp_reference (national, city '')
+                && str_contains($body, '{"":[0.4,0.5]}')  // stamp_references, '' = national sentinel
+                && $this->multipartField($body, 'issuer_scope') === 'national'
                 && str_contains($body, 'name="forensics"');
+        });
+    }
+
+    public function test_sends_every_city_reference_for_an_lgu_issuer(): void
+    {
+        Http::fake(['*/v1/validate' => Http::response(['stages' => [], 'flags' => []])]);
+
+        $typeId = DB::table('document_types')->insertGetId([
+            'name' => 'Business Permit', 'code' => 'business_permit',
+            'issuer_scope' => 'lgu', 'is_required' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        foreach ([['Pasig City', [0.1, 0.2]], ['Makati', [0.3, 0.4]]] as [$city, $vector]) {
+            DB::table('logo_references')->insert([
+                'document_type_id' => $typeId, 'city' => $city, 'label' => $city,
+                'feature_vector' => json_encode($vector),
+                'reference_image_path' => 'refs/'.Str::slug($city).'.png',
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $this->service()->validate($this->document(['document_type_id' => $typeId]));
+
+        // multipartField() is this file's existing helper for reading one
+        // form-data field out of the raw Guzzle body.
+        Http::assertSent(function (Request $request) {
+            $body = $request->body();
+
+            // Loose comparison: the map is a JSON object the API looks up by key,
+            // and the query returns the rows in (document_type_id, city) index
+            // order — so which city comes first is not part of the contract.
+            return $this->multipartField($body, 'issuer_scope') === 'lgu'
+                && json_decode($this->multipartField($body, 'stamp_references'), true)
+                    == ['Pasig City' => [0.1, 0.2], 'Makati' => [0.3, 0.4]];
         });
     }
 }
