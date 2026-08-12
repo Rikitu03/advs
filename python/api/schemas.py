@@ -26,6 +26,9 @@ class HealthResponse(BaseModel):
 class ClassifyResponse(BaseModel):
     label: str
     confidence: float
+    # 1 - P(fake): the Stage 3 authenticity the risk blend consumes. Equals
+    # confidence when the model has no `fake` class.
+    authenticity: float
     probabilities: dict[str, float]
     threshold: float
     passed_threshold: bool

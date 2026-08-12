@@ -42,9 +42,21 @@ def run_classification(entry: dict, image: Image.Image, threshold: float) -> dic
     label = class_names[index] if index < len(class_names) else str(index)
     confidence = float(probabilities[index])
 
+    # The classifier's `fake` class IS the fraud signal, so the Stage 3
+    # component the risk blend consumes is "probability this is a genuine
+    # document of a known type" — not the winning class's confidence, which is
+    # just as high for a confidently-detected forgery.
+    fake_index = class_names.index("fake") if "fake" in class_names else None
+    fake_probability = (
+        float(probabilities[fake_index])
+        if fake_index is not None and fake_index < len(probabilities)
+        else 0.0
+    )
+
     return {
         "label": label,
         "confidence": confidence,
+        "authenticity": round(1.0 - fake_probability, 6),
         "probabilities": {
             class_names[i] if i < len(class_names) else str(i): float(score)
             for i, score in enumerate(probabilities)

@@ -204,6 +204,45 @@ def test_classify_rejects_unreadable_image(tmp_path):
     assert response.status_code == 422
 
 
+def _classifier_entry(probabilities: list[float], class_names: list[str]) -> dict:
+    class _StubModel:
+        input_shape = (None, 64, 64, 3)
+
+        def predict(self, batch, verbose=0):
+            return np.array([probabilities])
+
+    return {"model": _StubModel(), "class_names": class_names}
+
+
+CLASSES = ["bir_certificate", "business_permit", "dti_registration", "fake"]
+
+
+def test_classification_authenticity_discounts_the_fake_probability(tmp_path, jpeg_bytes):
+    """A confident 'fake' must not reach the risk blend as high authenticity —
+    the classification component is (1 - risk), so P(fake) is what matters."""
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = _classifier_entry(
+            [0.01, 0.01, 0.00, 0.98], CLASSES
+        )
+        body = client.post("/v1/classify", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["label"] == "fake"
+    assert body["confidence"] == pytest.approx(0.98)
+    assert body["authenticity"] == pytest.approx(0.02)
+
+
+def test_classification_authenticity_equals_confidence_without_a_fake_class(tmp_path, jpeg_bytes):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = _classifier_entry(
+            [0.15, 0.85], ["bir_certificate", "business_permit"]
+        )
+        body = client.post("/v1/classify", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["authenticity"] == pytest.approx(1.0)
+
+
 @pytest.mark.skipif(
     not os.environ.get("ADVS_API_REAL_MODEL_TESTS")
     or not (PY_ROOT / "models" / "resnet50_best.keras").is_file(),
@@ -777,6 +816,40 @@ def test_resolve_issuer_reference_flags_an_unreadable_lgu_city():
     from api.routers.validate import resolve_issuer_reference
 
     assert resolve_issuer_reference({"Pasig": [3.0]}, None, "lgu", None) == (None, "city_not_identified")
+
+
+def test_classification_flags_a_fake_verdict():
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "fake", "confidence": 0.98, "passed_threshold": True}
+
+    assert classification_flags(stage, "bir_certificate", CLASSES) == ["classified_as_fake"]
+
+
+def test_classification_flags_a_confident_disagreement_with_the_declared_type():
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "business_permit", "confidence": 0.93, "passed_threshold": True}
+
+    assert classification_flags(stage, "bir_certificate", CLASSES) == ["document_type_mismatch"]
+
+
+def test_classification_does_not_flag_a_type_the_model_never_learned():
+    """sanitary_permit has no class, so the model CANNOT agree with it — that is
+    an untrained type, not vendor misdeclaration."""
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "business_permit", "confidence": 0.93, "passed_threshold": True}
+
+    assert classification_flags(stage, "sanitary_permit", CLASSES) == []
+
+
+def test_classification_does_not_flag_a_mismatch_it_is_unsure_about():
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "business_permit", "confidence": 0.41, "passed_threshold": False}
+
+    assert classification_flags(stage, "bir_certificate", CLASSES) == []
 
 
 def test_validate_verifies_an_lgu_logo_against_the_matching_city_reference(tmp_path, jpeg_bytes):

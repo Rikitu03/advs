@@ -122,6 +122,38 @@ def resolve_issuer_reference(
     return references.get("", single), None
 
 
+def classification_flags(stage: dict, document_type: str | None,
+                         class_names: list[str]) -> list[str]:
+    """Stage 3 signals beyond the confidence gate (§5 Stage 3).
+
+    ``classified_as_fake``     — the model's fraud class won the softmax. Raised
+                                 at any confidence: a forgery verdict is news
+                                 whether or not it cleared the type-confidence
+                                 gate.
+    ``document_type_mismatch`` — a CONFIDENT prediction disagrees with the type
+                                 the vendor declared. Only meaningful for a
+                                 declared type the model was trained on; a type
+                                 outside ``class_names`` (sanitary permit, an
+                                 ID, a contract) can never match, and flagging
+                                 it would punish the vendor for a gap in the
+                                 training corpus.
+    """
+    flags = []
+    label = stage.get("label")
+
+    if label == "fake":
+        flags.append("classified_as_fake")
+    elif (
+        stage.get("passed_threshold")
+        and document_type is not None
+        and document_type in class_names
+        and label != document_type
+    ):
+        flags.append("document_type_mismatch")
+
+    return flags
+
+
 def _crop(page: Image.Image, box: list[float]) -> Image.Image:
     x1, y1, x2, y2 = (max(0, int(v)) for v in box)
     return page.crop((x1, y1, x2, y2))
@@ -187,6 +219,9 @@ async def validate(
                 stages["classification"] = stage
                 if not stage["passed_threshold"]:
                     flags.append("low_classification_confidence")
+                flags.extend(classification_flags(
+                    stage, document_type, classifier.get("class_names") or []
+                ))
             except Exception as exc:
                 logger.exception("classification stage failed")
                 stages["classification"] = _skipped(f"error: {exc}")
