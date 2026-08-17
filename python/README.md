@@ -25,18 +25,20 @@ computed by Laravel's `RiskScoreService`, never here.
 
 | Endpoint | Stage | Status | Notes |
 |---|---|---|---|
-| `GET /health` | — | live, **no auth** | model availability report; keep-warm ping target |
+| `GET /health` | — | live, **no auth** | liveness and model load report; keep-warm ping target |
+| `GET /ready` | — | live, **no auth** | deployment readiness; 503 when required artifacts or `manifest.json` are missing/incompatible |
 | `GET /v1/config` | — | **live** | current/effective thresholds, overrides, and boot defaults |
 | `PATCH /v1/config` | — | **live** | runtime threshold changes from the admin ML Models page (partial body; `null` resets a key) |
 | `POST /v1/classify` | 3 | **live** | ResNet-50 → `{label, confidence, probabilities, passed_threshold}` |
 | `POST /v1/ocr` | 2 | **live** | multipart `file` (+ `template=bir\|none`) → per-page `{text, words, fields, quality}` |
 | `POST /v1/tamper` | T | **live** | original upload (+ optional JSON `context`) → forensic verdict |
 | `POST /v1/detect` | 4 | 503 until weights | YOLOv8 boxes → `{detections, flags}` |
-| `POST /v1/signature/embed` | 4a | 503 until weights | crop → 128-D embedding (registration enrollment) |
+| `POST /v1/signature/enroll` | registration | 503 until detector + Siamese weights | three-signature photo → crops, embeddings, consistency, centroid, forensics |
+| `POST /v1/signature/embed` | 4a | 503 until weights | crop → 128-D embedding |
 | `POST /v1/signature/verify` | 4a | 503 until weights | crop + `reference_embedding` (JSON array form field) |
 | `POST /v1/stamp/embed` | 4b | 503 until weights | crop → issuer feature vector (EnrollReferenceJob seeding) |
 | `POST /v1/stamp/verify` | 4b | 503 until weights | crop + `reference_vector`; omitted reference → `unreferenced_logo` |
-| `POST /v1/validate` | all | **live (fail-forward)** | full pipeline, one round trip; unavailable stages report `{skipped, reason}` |
+| `POST /v1/validate` | all | **live (fail-forward)** | versioned full pipeline; aggregate `stages`/`flags` plus per-page stages, artifact provenance, settings hash, and timings |
 
 All `/v1/*` routes require `Authorization: Bearer <API_TOKEN>`. Interactive
 docs at `/docs` once running.
@@ -49,15 +51,20 @@ See `.env.api.example` for the full annotated surface. Highlights:
 |---|---|---|
 | `API_TOKEN` | — (**required**) | bearer token; a HF *Repository secret* on a Space |
 | `MODEL_DIR` | `./models` (`/app/models` in Docker) | weight-file root |
+| `MODEL_MANIFEST_PATH` | `MODEL_DIR/manifest.json` | artifact versions, SHA-256 hashes, shapes, classes, metrics, training dates, and calibrated thresholds used by `/ready` |
 | `CLASSIFIER_MODEL_PATH` | `MODEL_DIR/resnet50_best.keras` | trained ✔ |
-| `DETECTOR_MODEL_PATH` | `MODEL_DIR/yolov8_document.pt` | configure after training |
+| `DETECTOR_MODEL_PATH` | `MODEL_DIR/yolov8_nano_moredata_best.pt` | trained YOLOv8 signature/stamp detector |
+| `SIGNATURE_ENROLL_DETECTOR_MODEL_PATH` | unset | optional dedicated detector for blank-paper registration photos; falls back to `DETECTOR_MODEL_PATH` |
 | `SIAMESE_MODEL_PATH` | `MODEL_DIR/siamese_encoder.h5` | the encoder train_signature.py saves (the API only embeds) |
 | `STAMP_MODEL_PATH` | `MODEL_DIR/efficientnet_feature_extractor.h5` | what train_stamp.py saves |
 | `CLASSIFICATION_CONFIDENCE_THRESHOLD` | `0.70` | §9 |
 | `YOLO_DETECTION_CONFIDENCE` | `0.50` | §9 |
+| `SIGNATURE_ENROLL_DETECTION_CONFIDENCE` | `0.20` | registration-only threshold; does not affect document detection |
+| `SIGNATURE_ENROLL_DETECTION_IMGSZ` | `1280` | registration-only inference size for thin handwritten strokes |
 | `STAMP_SIMILARITY_THRESHOLD` | `0.85` | §9 (training-produced `stamp_threshold.txt` wins) |
 | `SIGNATURE_DISTANCE_THRESHOLD` | unset | empirical/EER; falls back to `signature_threshold.txt` |
 | `PDF_DPI` / `MAX_PDF_PAGES` | `300` / `2` | §2 PDF handling |
+| `MAX_FILE_SIZE_MB` | `10` | validated before inference; PDF/PNG/JPEG only, with MIME and magic-byte checks |
 | `TROCR_MODEL_PATH` | `MODEL_DIR/trocr-base-printed` | default/fast recognizer; local snapshot dir only (never a bare HF Hub id — no network fetch from inside a request-serving container); missing dir = fall back to the accurate one, or skip the ROI pass if neither is loaded |
 | `TROCR_ACCURATE_MODEL_PATH` | `MODEL_DIR/trocr-large-printed` | recognizer for `TROCR_ACCURATE_TEMPLATES` |
 | `TROCR_ACCURATE_TEMPLATES` | `bir` | comma-separated templates that need the accurate recognizer |
@@ -70,6 +77,29 @@ A model whose weight file is missing is simply reported as not loaded by
 `/health`; its endpoints return `503 {"reason": "model_not_loaded", ...}` and
 `/v1/validate` marks that stage skipped. **Drop in the weights, set the path,
 restart — no code changes.**
+
+### Full validation contract
+
+`POST /v1/validate` accepts an optional multipart `settings_snapshot` JSON
+object. Laravel may send its complete settings snapshot; Python applies the
+known threshold/page aliases and hashes the complete object as `settings_hash`
+for audit provenance. Vector form fields must contain finite JSON arrays and,
+when the loaded model or manifest exposes a dimension, must match it exactly.
+
+The response preserves the legacy top-level `stages` and `flags` surface and
+adds `schema_version`, `pages`, `models`, `settings_hash`, and `timings`. Each
+stage has a typed `status` (`completed`, `skipped`, or `failed`); skipped stages
+also retain `skipped: true` and `reason`. The supported classification/OCR
+intersection is `bir_certificate`, `business_permit`, and `dti_registration`.
+Other declared types use OCR template `none`, return
+`unsupported_document_type`, and continue through detection, verification,
+and forensics without fabricating a classification contribution.
+
+For PDFs, every rendered page (first two by default) runs independently. The
+aggregate picks the lowest classification authenticity (with any `fake` page
+dominant), the minimum successful signature/stamp score, the highest tamper
+score, and the highest-confidence valid OCR field. Conflicting OCR values add
+`ocr_field_conflict`.
 
 ### Stage 2 cost model — the ROI+TrOCR field-recognition pass
 
@@ -108,7 +138,7 @@ BIR page took **410 s** and blew Laravel's then-180 s `ML_API_TIMEOUT`, which
 failed the whole call and blanked Stage 2 *and* Stage 3 in the officer
 drill-down. `config/advs.php` now allows 300 s.
 
-> The <60 s end-to-end target in CLAUDE.md §10 is **not** reachable for BIR
+> The historical <60 s end-to-end target is **not** reachable for BIR
 > with any TrOCR configuration measured here, **including ONNX** — see below.
 > The remaining levers are a >=16GB build machine for a properly optimized
 > ONNX export, or fewer ROI fields per page. Not a smaller budget.
@@ -165,7 +195,7 @@ remain canonical and should re-push after a rebuild.
 
 ## Run locally
 
-Always the repo ML venv (never bare `python` — see CLAUDE.md):
+Always use the repo ML venv (never bare `python`; see the root `README.md`):
 
 ```powershell
 cd python
@@ -178,6 +208,7 @@ Smoke checks:
 
 ```bash
 curl http://localhost:7860/health
+curl http://localhost:7860/ready
 curl -H "Authorization: Bearer <token>" -F "file=@sample_bir.jpg" http://localhost:7860/v1/classify
 curl -H "Authorization: Bearer <token>" -F "file=@sample_bir.jpg" http://localhost:7860/v1/validate
 ```
@@ -284,4 +315,4 @@ No cold-start retry budget is needed here (the VM doesn't sleep), but keep a
 reasonable request timeout regardless — ROI+TrOCR adds real per-field
 inference time on top of Tesseract's existing OCR pass (see the module
 docstring in `scripts/roi_field_ocr.py`); benchmark on the actual VM against
-the <60s end-to-end target (CLAUDE.md §10) before relying on it.
+the historical <60-second end-to-end target before relying on it.

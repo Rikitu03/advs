@@ -87,6 +87,21 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame([], $mapped['flags']);
     }
 
+    public function test_maps_classification_authenticity_separately_from_confidence(): void
+    {
+        $stages = [
+            'classification' => ['label' => 'fake', 'confidence' => 0.98,
+                'authenticity' => 0.02, 'passed_threshold' => true],
+        ];
+
+        $columns = $this->service()->mapStages($stages)['columns'];
+
+        // The drill-down still shows what the model was confident ABOUT...
+        $this->assertEqualsWithDelta(0.98, $columns['classification_confidence'], 1e-6);
+        // ...while the risk blend gets 1 - P(fake).
+        $this->assertEqualsWithDelta(0.02, $columns['classification_authenticity'], 1e-6);
+    }
+
     /**
      * @return array<string, array{0: string, 1: string}>
      */
@@ -286,6 +301,36 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame(['low_classification_confidence'], $response['flags']);
     }
 
+    public function test_validate_maps_versioned_metadata_and_sends_the_typed_settings_snapshot(): void
+    {
+        Http::fake(['*/v1/validate' => Http::response([
+            'schema_version' => '1.0',
+            'status' => 'completed',
+            'stages' => [],
+            'flags' => [],
+            'pages' => [['page_index' => 1, 'status' => 'completed', 'stages' => [], 'flags' => [], 'timings' => []]],
+            'models' => ['classifier' => ['loaded' => true, 'version' => 'v1']],
+            'settings_hash' => str_repeat('b', 64),
+            'timings' => ['total_ms' => 42],
+        ], 200)]);
+
+        $response = $this->service()->validate($this->document());
+
+        $this->assertSame('1.0', $response['schema_version']);
+        $this->assertCount(1, $response['pages']);
+        $this->assertTrue($response['models']['classifier']['loaded']);
+        $this->assertSame(42, $response['timings']['total_ms']);
+
+        Http::assertSent(function (Request $request): bool {
+            $snapshot = json_decode((string) $this->multipartField($request->body(), 'settings_snapshot'), true);
+
+            return is_array($snapshot)
+                && $snapshot['RISK_WEIGHT_TAMPER'] === 0.20
+                && $snapshot['STAMP_TAMPER_THRESHOLD'] === 0.50
+                && $snapshot['MAX_PDF_PAGES'] === 2;
+        });
+    }
+
     public function test_validate_throws_on_http_error(): void
     {
         Http::fake(['*/v1/validate' => Http::response('', 500)]);
@@ -322,7 +367,7 @@ class MlPipelineServiceTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === $template);
     }
 
-    public function test_validate_falls_back_to_the_configured_template_for_an_unmapped_type(): void
+    public function test_validate_uses_no_ocr_template_for_an_unmapped_type(): void
     {
         config()->set('advs.ml.template', 'bir');
         $typeId = DB::table('document_types')->insertGetId([
@@ -334,7 +379,7 @@ class MlPipelineServiceTest extends TestCase
 
         $this->service()->validate($document);
 
-        Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === 'bir');
+        Http::assertSent(fn (Request $request): bool => $this->multipartField($request->body(), 'template') === 'none');
     }
 
     /**

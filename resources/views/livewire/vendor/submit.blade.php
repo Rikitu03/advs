@@ -4,6 +4,7 @@ use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use App\Models\Submission;
 use App\Services\NotificationService;
+use App\Services\SystemSettingsService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -34,8 +35,12 @@ new class extends Component
             abort(403);
         }
 
+        $settings = app(SystemSettingsService::class)->pipelineSnapshot();
+        $maxFileKilobytes = (int) $settings['MAX_FILE_SIZE_MB'] * 1024;
+        $maxBatchBytes = (int) $settings['MAX_BATCH_SIZE_MB'] * 1024 * 1024;
+
         $this->validate([
-            'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
+            'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:'.$maxFileKilobytes],
         ]);
 
         // The Alpine queue (names/types) and the Livewire temp uploads travel
@@ -100,25 +105,48 @@ new class extends Component
             return null;
         }
 
-        [$submission, $created] = DB::transaction(function () use ($vendor, $documents): array {
-            $submission = Submission::create([
-                'vendor_id' => $vendor->id,
-                'status' => Submission::STATUS_PROCESSING,
-            ]);
+        if (array_sum(array_column($documents, 'file_size_bytes')) > $maxBatchBytes) {
+            Storage::disk('local')->delete(array_column($documents, 'file_path'));
+            $this->addError('uploadedFiles', 'The upload batch exceeds the configured total-size limit.');
 
-            $created = collect($documents)->map(fn (array $document): Document => Document::create([
-                'submission_id' => $submission->id,
-                ...$document,
-            ]));
+            return null;
+        }
 
-            return [$submission, $created];
-        });
+        try {
+            [$submission, $created] = DB::transaction(function () use ($vendor, $documents): array {
+                $submission = Submission::create([
+                    'vendor_id' => $vendor->id,
+                    'status' => Submission::STATUS_PROCESSING,
+                ]);
+
+                $created = collect($documents)->map(fn (array $document): Document => Document::create([
+                    'submission_id' => $submission->id,
+                    ...$document,
+                ]));
+
+                $created->each(fn (Document $document) => ProcessDocumentJob::dispatch($document)->afterCommit());
+
+                return [$submission, $created];
+            });
+        } catch (\Throwable $error) {
+            Storage::disk('local')->delete(array_column($documents, 'file_path'));
+
+            throw $error;
+        }
 
         app(NotificationService::class)->submissionReceived($submission);
 
-        $created->each(fn (Document $document) => ProcessDocumentJob::dispatch($document));
-
         return redirect()->route('vendor.submissions')->with('status', 'Submission queued successfully.');
+    }
+
+    public function pipelineLimits(): array
+    {
+        $settings = app(SystemSettingsService::class)->pipelineSnapshot();
+
+        return [
+            'maxFileMb' => (int) $settings['MAX_FILE_SIZE_MB'],
+            'maxBatchMb' => (int) $settings['MAX_BATCH_SIZE_MB'],
+        ];
     }
 
     private function documentTypeIdFor(string $type): ?int
@@ -154,7 +182,8 @@ new class extends Component
         x-data="{
             files: [],
             allowed: ['pdf', 'png', 'jpg', 'jpeg'],
-            maxBytes: 10 * 1024 * 1024,
+            maxBytes: {{ $this->pipelineLimits()['maxFileMb'] }} * 1024 * 1024,
+            maxBatchBytes: {{ $this->pipelineLimits()['maxBatchMb'] }} * 1024 * 1024,
             dragActive: false,
             submitted: false,
             uploading: false,
@@ -187,7 +216,7 @@ new class extends Component
                     valid: validType && validSize,
                     error: ! validType
                         ? 'File must be a PDF, PNG, JPG, or JPEG.'
-                        : (! validSize ? 'File is larger than the 10 MB per-file limit.' : ''),
+                        : (! validSize ? `File is larger than the ${this.maxBytes / 1024 / 1024} MB per-file limit.` : ''),
                     type: '',
                     status: validType && validSize ? 'uploading' : 'invalid',
                     progress: 0,
@@ -341,6 +370,7 @@ new class extends Component
             get canSubmit() {
                 return ! this.uploading
                     && this.hasFiles
+                    && this.files.reduce((total, file) => total + (file.sizeBytes ?? 0), 0) <= this.maxBatchBytes
                     && this.files.every((file) => file.valid && file.type !== '' && file.status === 'completed');
             },
         }"
@@ -396,7 +426,7 @@ new class extends Component
                             <flux:icon icon="arrow-up-tray" class="size-5" />
                         </button>
                         <h3 class="mt-3 text-base font-semibold text-cu-text">Drop files here or click to upload</h3>
-                        <p class="mt-1 text-sm text-cu-muted">PDF, PNG, JPG, or JPEG files up to 10 MB each.</p>
+                        <p class="mt-1 text-sm text-cu-muted">PDF, PNG, JPG, or JPEG files up to {{ $this->pipelineLimits()['maxFileMb'] }} MB each.</p>
                         <button type="button" @click="$refs.upload.click()" class="mt-4 inline-flex items-center gap-2 rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-semibold text-cu-text transition hover:bg-black/5 dark:hover:bg-white/5">
                             <flux:icon icon="paper-clip" class="size-4" />
                             Choose files
@@ -532,7 +562,7 @@ new class extends Component
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="archive-box" color="amber" />
-                            <p class="text-cu-muted">Each file must be 10 MB or smaller.</p>
+                            <p class="text-cu-muted">Each file must be {{ $this->pipelineLimits()['maxFileMb'] }} MB or smaller; the batch limit is {{ $this->pipelineLimits()['maxBatchMb'] }} MB.</p>
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="photo" color="emerald" />

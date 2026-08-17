@@ -30,7 +30,7 @@ new #[Layout('components.layouts.auth')] class extends Component
     {
         return [
             // 10 MB cap (CLAUDE.md §5); min dimensions guard image quality so a
-            // tiny/blurry photo of three vertical signatures is rejected early.
+            // tiny/blurry photo of three separated signatures is rejected early.
             'photo' => ['required', 'image', 'mimes:jpeg,jpg,png', 'max:10240', 'dimensions:min_width=600,min_height=800'],
         ];
     }
@@ -200,7 +200,7 @@ new #[Layout('components.layouts.auth')] class extends Component
         <p class="mb-2.5 font-jakarta text-sm font-semibold text-ink">{{ __('How to capture your signatures') }}</p>
         <ul class="flex flex-col gap-2 font-jakarta text-xs leading-[1.5] text-ink/70">
             @foreach ([
-                __('Sign 3 times, stacked vertically, on white bond paper.'),
+                __('Sign 3 times on white bond paper, spaced apart in one row or one column.'),
                 __('Photograph the whole page, straight-on, in good lighting.'),
                 __('Use the original photo — no filters, cropping, or editing apps.'),
                 __('JPG or PNG, up to 10 MB, at least 600 × 800 px.'),

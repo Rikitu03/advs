@@ -5,6 +5,7 @@ namespace App\Services\Document;
 use App\Jobs\EnrollReferenceJob;
 use App\Models\Document;
 use App\Models\ValidationResult;
+use App\Services\SystemSettingsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,8 @@ use RuntimeException;
  */
 class MlPipelineService
 {
+    public function __construct(private readonly SystemSettingsService $settings) {}
+
     /**
      * Send a document to the ML API and return its fail-forward result.
      *
@@ -36,9 +39,10 @@ class MlPipelineService
      *
      * @throws RuntimeException on any transport or non-2xx failure (the caller fails forward).
      */
-    public function validate(Document $document): array
+    public function validate(Document $document, ?array $settingsSnapshot = null): array
     {
         $ml = config('advs.ml');
+        $settingsSnapshot ??= $this->settings->pipelineSnapshot();
 
         $type = $this->resolveDocumentType($document);
         $issuerScope = $type['issuer_scope'] ?? null;
@@ -59,7 +63,8 @@ class MlPipelineService
             'city' => $city,
             'signature_reference' => $this->resolveSignatureReference($document),
             'stamp_references' => $stampReferences,
-            'forensics' => json_encode($this->forensicsContext(), JSON_THROW_ON_ERROR),
+            'forensics' => json_encode($this->forensicsContext($settingsSnapshot), JSON_THROW_ON_ERROR),
+            'settings_snapshot' => json_encode($settingsSnapshot, JSON_THROW_ON_ERROR),
         ], static fn ($value): bool => $value !== null);
 
         try {
@@ -80,8 +85,14 @@ class MlPipelineService
         }
 
         return [
+            'schema_version' => is_string($body['schema_version'] ?? null) ? $body['schema_version'] : null,
+            'status' => is_string($body['status'] ?? null) ? $body['status'] : 'completed',
             'stages' => $body['stages'],
             'flags' => array_values($body['flags'] ?? []),
+            'pages' => is_array($body['pages'] ?? null) ? array_values($body['pages']) : [],
+            'models' => is_array($body['models'] ?? null) ? $body['models'] : [],
+            'settings_hash' => is_string($body['settings_hash'] ?? null) ? $body['settings_hash'] : null,
+            'timings' => is_array($body['timings'] ?? null) ? $body['timings'] : [],
             'context' => ['issuer_scope' => $issuerScope, 'logo_reference_ids' => $logoReferenceIds],
         ];
     }
@@ -142,7 +153,7 @@ class MlPipelineService
             ->withToken((string) $ml['token'])
             ->connectTimeout((int) ($ml['connect_timeout'] ?? 10))
             ->timeout((int) ($ml['timeout'] ?? 180))
-            ->retry(max(1, (int) ($ml['retries'] ?? 1)), 200, throw: false);
+            ->retry(1, 0, throw: false);
     }
 
     /**
@@ -167,6 +178,9 @@ class MlPipelineService
         if ($this->ran($classification)) {
             $columns['classification_label'] = $classification['label'] ?? null;
             $columns['classification_confidence'] = $this->float($classification['confidence'] ?? null);
+            // 1 - P(fake). Distinct from confidence: a document confidently
+            // classified `fake` is 0.98 confident and 0.02 authentic.
+            $columns['classification_authenticity'] = $this->float($classification['authenticity'] ?? null);
         }
 
         // ── Stage 2 OCR + field extraction ─────────────────────────────────────
@@ -349,7 +363,7 @@ class MlPipelineService
             'bir_certificate' => 'bir',
             'business_permit' => 'business_permit',
             'dti_registration' => 'dti',
-            default => (string) (config('advs.ml.template') ?? 'bir'),
+            default => 'none',
         };
     }
 
@@ -446,11 +460,18 @@ class MlPipelineService
      *
      * @return array<string, mixed>
      */
-    private function forensicsContext(): array
+    private function forensicsContext(array $snapshot): array
     {
         return [
-            'weights' => config('advs.forensics.weights'),
-            'tamper_threshold' => config('advs.forensics.tamper_authenticity_threshold'),
+            'weights' => [
+                'metadata' => (float) ($snapshot['TAMPER_WEIGHT_METADATA'] ?? 0.20),
+                'ela' => (float) ($snapshot['TAMPER_WEIGHT_ELA'] ?? 0.25),
+                'copy_move' => (float) ($snapshot['TAMPER_WEIGHT_COPY_MOVE'] ?? 0.25),
+                'font' => (float) ($snapshot['TAMPER_WEIGHT_FONT'] ?? 0.15),
+                'cross_reference' => (float) ($snapshot['TAMPER_WEIGHT_CROSS_REFERENCE'] ?? 0.15),
+            ],
+            'tamper_threshold' => (float) ($snapshot['TAMPER_AUTHENTICITY_THRESHOLD'] ?? 0.50),
+            'hard_confidence' => (float) ($snapshot['TAMPER_HARD_THRESHOLD'] ?? 0.80),
         ];
     }
 }

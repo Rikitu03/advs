@@ -81,6 +81,36 @@ class SystemSettingsService
     }
 
     /**
+     * Complete typed snapshot used by one document-pipeline attempt.
+     *
+     * @return array<string, string|int|float|bool>
+     */
+    public function pipelineSnapshot(): array
+    {
+        $persisted = SystemSetting::query()->pluck('value', 'key');
+        $snapshot = [];
+
+        foreach (SystemSetting::schema() as $fields) {
+            foreach ($fields as $field) {
+                $raw = (string) ($persisted->get($field['key']) ?? $field['default']);
+                $snapshot[mb_strtoupper($field['key'])] = $this->coerce($field['type'], $raw);
+            }
+        }
+
+        ksort($snapshot);
+
+        return $snapshot;
+    }
+
+    /** @param array<string, string|int|float|bool> $snapshot */
+    public function pipelineSnapshotHash(array $snapshot): string
+    {
+        ksort($snapshot);
+
+        return hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
      * Persist a batch of setting updates inside a single transaction.
      *
      * Validation is performed up-front via {@see validate()} so any failure
@@ -182,6 +212,7 @@ class SystemSettingsService
             'risk_weight_classification',
             'risk_weight_signature',
             'risk_weight_stamp',
+            'risk_weight_tamper',
         ];
 
         if (count(array_intersect($weights, array_keys($values))) === count($weights)) {

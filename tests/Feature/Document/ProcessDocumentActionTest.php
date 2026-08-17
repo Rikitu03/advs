@@ -6,8 +6,8 @@ use App\Actions\ProcessDocumentAction;
 use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -37,7 +37,22 @@ class ProcessDocumentActionTest extends TestCase
     private function fakeMl(array $stages, array $flags = []): void
     {
         Http::fake([
-            '*/v1/validate' => Http::response(['stages' => $stages, 'flags' => $flags], 200),
+            '*/v1/validate' => Http::response([
+                'schema_version' => '1.0',
+                'status' => 'completed',
+                'stages' => $stages,
+                'flags' => $flags,
+                'pages' => [[
+                    'page_index' => 1,
+                    'status' => 'completed',
+                    'stages' => $stages,
+                    'flags' => $flags,
+                    'timings' => ['total_ms' => 12],
+                ]],
+                'models' => ['classifier' => ['loaded' => true, 'version' => 'test']],
+                'settings_hash' => str_repeat('a', 64),
+                'timings' => ['total_ms' => 12],
+            ], 200),
         ]);
     }
 
@@ -112,11 +127,38 @@ class ProcessDocumentActionTest extends TestCase
         $this->assertNotNull($result->document_risk_score);
         $this->assertLessThan(31, $result->document_risk_score);
         $this->assertDatabaseHas('tamper_analyses', ['document_id' => $document->id]);
+        $this->assertDatabaseHas('pipeline_runs', ['document_id' => $document->id, 'status' => 'completed']);
+        $this->assertDatabaseHas('pipeline_page_results', ['document_id' => $document->id, 'page_index' => 1]);
 
         $submission = $document->submission->fresh();
         $this->assertSame('pending_review', $submission->status);
         $this->assertSame('low', $submission->risk_level);
         $this->assertEqualsWithDelta($result->document_risk_score, $submission->composite_risk_score, 0.01);
+    }
+
+    public function test_a_document_the_classifier_calls_fake_outranks_a_genuine_one_on_risk(): void
+    {
+        $genuine = $this->document();
+        // A sequence, not two fakeMl() calls — fake() MERGES stubs and the first
+        // match wins, so a second fake() of the same URL would never take effect.
+        Http::fakeSequence('*/v1/validate')
+            ->push(['stages' => $this->cleanStages(), 'flags' => []], 200)
+            ->push(['stages' => $this->cleanStages(['classification' => [
+                'label' => 'fake', 'confidence' => 0.98, 'authenticity' => 0.02,
+                'passed_threshold' => true,
+            ]]), 'flags' => []], 200);
+
+        $clean = app(ProcessDocumentAction::class)->execute($genuine->fresh());
+
+        $suspect = $this->document();
+        $result = app(ProcessDocumentAction::class)->execute($suspect->fresh());
+
+        // Both runs are equally CONFIDENT (0.95 vs 0.98) — only authenticity
+        // moved. Before this change the forgery scored LOWER risk than the
+        // genuine document, because confidence was feeding the blend.
+        $this->assertEqualsWithDelta(0.02, $result->classification_authenticity, 1e-6);
+        // 0.20 weight × (0.98 - 0.05) ≈ 18.6 points of separation.
+        $this->assertGreaterThan($clean->document_risk_score + 15, $result->document_risk_score);
     }
 
     public function test_high_confidence_tamper_hard_overrides_submission_to_high(): void
@@ -157,18 +199,22 @@ class ProcessDocumentActionTest extends TestCase
         $this->assertGreaterThanOrEqual(30, $result->document_risk_score);
     }
 
-    public function test_ml_api_failure_fails_forward_and_still_finalizes(): void
+    public function test_ml_api_failure_is_recorded_and_rethrown_for_queue_retry(): void
     {
         $document = $this->document();
         Http::fake(['*/v1/validate' => Http::response('', 500)]);
 
-        $result = app(ProcessDocumentAction::class)->execute($document->fresh());
+        try {
+            app(ProcessDocumentAction::class)->execute($document->fresh(), 2);
+            $this->fail('The HTTP failure should be rethrown.');
+        } catch (\RuntimeException) {
+        }
 
-        $this->assertSame(Document::STATUS_COMPLETED, $document->fresh()->processing_status);
-        $this->assertContains('ML pipeline unavailable', $result->flags);
+        $this->assertSame(Document::STATUS_VERIFYING, $document->fresh()->processing_status);
+        $this->assertDatabaseHas('pipeline_runs', ['document_id' => $document->id, 'attempt' => 2, 'status' => 'failed']);
         // No component scores + no forensic verdict → nothing persisted for Stage T.
         $this->assertDatabaseMissing('tamper_analyses', ['document_id' => $document->id]);
-        $this->assertNotNull($result->document_risk_score);
+        $this->assertDatabaseMissing('validation_results', ['document_id' => $document->id]);
     }
 
     /**
@@ -186,15 +232,15 @@ class ProcessDocumentActionTest extends TestCase
         // A sequence, not two fake() calls — fake() MERGES stubs and the first
         // match wins, so a second fake() of the same URL would never take effect.
         Http::fakeSequence('*/v1/validate')
-            ->push('', 500)
+            ->push(['stages' => $this->cleanStages(), 'flags' => ['transient_stage_flag']], 200)
             ->push(['stages' => $this->cleanStages(), 'flags' => []], 200);
 
         $failed = app(ProcessDocumentAction::class)->execute($document->fresh());
-        $this->assertContains('ML pipeline unavailable', $failed->flags);
+        $this->assertContains('transient_stage_flag', $failed->flags);
 
         $result = app(ProcessDocumentAction::class)->execute($document->fresh());
 
-        $this->assertNotContains('ML pipeline unavailable', $result->flags);
+        $this->assertNotContains('transient_stage_flag', $result->flags);
         $this->assertNotContains('Text validation unavailable', $result->flags);
         $this->assertSame(1.0, (float) $result->text_validation_score);
     }
@@ -206,19 +252,22 @@ class ProcessDocumentActionTest extends TestCase
         (new ProcessDocumentJob($document))->failed(new \RuntimeException('boom'));
 
         $this->assertSame(Document::STATUS_FAILED, $document->fresh()->processing_status);
+        $this->assertContains('processing_failed', $document->validationResult->flags);
     }
 
     public function test_job_is_queued_on_the_document_processing_queue(): void
     {
-        Bus::fake();
+        Queue::fake();
         $document = Document::factory()->create();
 
         ProcessDocumentJob::dispatch($document);
 
-        Bus::assertDispatched(ProcessDocumentJob::class, function (ProcessDocumentJob $job) {
+        Queue::assertPushed(ProcessDocumentJob::class, function (ProcessDocumentJob $job) use ($document) {
             return $job->queue === 'document-processing'
                 && $job->tries === 3
-                && $job->timeout === 300;
+                && $job->timeout === 360
+                && $job->backoff === [10, 30, 60]
+                && $job->uniqueId() === (string) $document->id;
         });
     }
 }

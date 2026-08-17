@@ -66,7 +66,8 @@ class SignatureEnrollmentTest extends TestCase
         $this->actingAs($user)
             ->get(route('signature.create'))
             ->assertOk()
-            ->assertSee('Enroll your signature');
+            ->assertSee('Enroll your signature')
+            ->assertSee('spaced apart in one row or one column');
     }
 
     public function test_unenrolled_vendor_is_gated_to_the_signature_step(): void

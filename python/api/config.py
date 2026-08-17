@@ -1,6 +1,6 @@
 """Env-driven settings for the ADVS ML API.
 
-Every tunable mirrors ADVS_System_Reference.md §9 (never invent thresholds);
+Every tunable mirrors docs/ADVS_REFERENCE.md §9 (never invent thresholds);
 model paths default to the canonical weight filenames under ``MODEL_DIR`` and
 are meant to be (re)configured via env once training produces each model —
 a missing file is reported by /health and yields 503 ``model_not_loaded`` on
@@ -34,11 +34,16 @@ class Settings(BaseSettings):
     classifier_model_path: Path | None = None   # default: MODEL_DIR/resnet50_best.keras
     class_names_path: Path | None = None        # default: MODEL_DIR/class_names.json
     detector_model_path: Path | None = None     # default: MODEL_DIR/yolov8_document.pt
+    # Optional single-purpose detector for the registration photo. When unset,
+    # enrollment falls back to the document detector with enrollment-only
+    # inference settings.
+    signature_enroll_detector_model_path: Path | None = None
     siamese_model_path: Path | None = None      # default: MODEL_DIR/siamese_encoder.h5
     stamp_model_path: Path | None = None        # default: MODEL_DIR/efficientnet_feature_extractor.h5
     stamp_classifier_model_path: Path | None = None  # default: MODEL_DIR/stamp_classifier.pkl
     signature_threshold_path: Path | None = None  # default: MODEL_DIR/signature_threshold.txt
     stamp_threshold_path: Path | None = None      # default: MODEL_DIR/stamp_threshold.txt
+    model_manifest_path: Path | None = None       # default: MODEL_DIR/manifest.json
     # ROI+TrOCR field-recognition fallback (Stage 2 augmentation, see
     # roi_field_ocr.py). Same convention as every other model: a LOCAL
     # snapshot directory (transformers' save_pretrained() layout), gated on
@@ -57,6 +62,11 @@ class Settings(BaseSettings):
     # --- §9 tunables ---
     classification_confidence_threshold: float = 0.70
     yolo_detection_confidence: float = 0.50
+    # Registration photos contain three large signatures on otherwise blank
+    # paper, unlike the full document pages used by Stage 4. Keep their detector
+    # calibration isolated from document validation.
+    signature_enroll_detection_confidence: float = Field(default=0.20, ge=0.0, le=1.0)
+    signature_enroll_detection_imgsz: int = Field(default=1280, ge=320, le=4096)
     stamp_similarity_threshold: float = 0.85
     # NOT a new §9 parameter. train_stamp.py fits a binary LogisticRegression
     # (class 1 = genuine wet ink, class 0 = photocopy/edit) whose own predict()
@@ -67,6 +77,7 @@ class Settings(BaseSettings):
     signature_distance_threshold: float | None = None
     pdf_dpi: int = 300
     max_pdf_pages: int = 2
+    max_file_size_mb: int = 10
 
     # --- Stage 2 ROI+TrOCR pass (roi_field_ocr.py) ---
     # Not §9 parameters — these bound the *cost* of the field-recognition pass,
@@ -133,6 +144,10 @@ class Settings(BaseSettings):
     @property
     def store_path(self) -> Path:
         return self.threshold_store_path or PY_ROOT / ".thresholds.json"
+
+    @property
+    def manifest_path(self) -> Path:
+        return self.model_manifest_path or self.model_dir / "manifest.json"
 
     @property
     def trocr_path(self) -> Path:

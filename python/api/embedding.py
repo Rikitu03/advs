@@ -6,17 +6,23 @@ the routers gate every call behind ``registry.require``.
 from __future__ import annotations
 
 import json
+import math
 
 from fastapi import HTTPException
 from PIL import Image
 
 
-def parse_reference(raw: str, field: str) -> list[float]:
+def parse_reference(raw: str, field: str, expected_length: int | None = None) -> list[float]:
     try:
         vector = json.loads(raw)
         if not isinstance(vector, list) or not vector:
             raise ValueError("expected a non-empty JSON array of numbers")
-        return [float(v) for v in vector]
+        parsed = [float(v) for v in vector]
+        if not all(math.isfinite(value) for value in parsed):
+            raise ValueError("all values must be finite numbers")
+        if expected_length is not None and len(parsed) != expected_length:
+            raise ValueError(f"expected {expected_length} values, received {len(parsed)}")
+        return parsed
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid {field}: {exc}") from exc
 

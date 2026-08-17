@@ -9,10 +9,10 @@
 > - Model training → [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md)
 >
 > Sources this plan integrates:
-> - **Dashboard structure & behavior** — [ADVS_System_Reference.md](../../ADVS_System_Reference.md) (§4 navigation, §6 risk-score drill-down, §7 notifications).
-> - **How we build the frontend** — [CLAUDE.md](../../CLAUDE.md) (§4 Blade/Tailwind/Flux + Livewire/Volt conventions, §8 dashboard/portal phase).
+> - **Dashboard structure & behavior** — [ADVS reference](../ADVS_REFERENCE.md) (§4 navigation, §6 risk-score drill-down, §7 notifications).
+> - **How we build the frontend** — [README.md](../../README.md) and [AGENTS.md](../../AGENTS.md).
 > - **New client direction** — [CLIENT_INTERVIEW_GAP_PLAN.md](../CLIENT_INTERVIEW_GAP_PLAN.md) §4 (checklist + extracted-fields panels, lifecycle KPI cards, resubmission, requirement-profile CRUD).
-> - **Theme tokens** — [color_pallete.md](../../color_pallete.md).
+> - **Theme tokens** — `resources/css/app.css` and the frontend rules in [AGENTS.md](../../AGENTS.md).
 >
 > **Build skills:** `fluxui-development`, `volt-development`, `tailwindcss-development`, `frontend-design`.
 
@@ -76,7 +76,7 @@ demo data to real models one at a time.
 **Tasks:**
 - Make the sidebar **role-aware** for all current + planned items (vendor / officer / admin),
   gated by `hasRole(...)` / `role:` middleware.
-- Land the theme tokens from [color_pallete.md](../../color_pallete.md) in `resources/css/app.css`
+- Maintain the theme tokens in `resources/css/app.css`
   (`@theme`) so brand color/surface/gradient are reusable utilities (no per-component hex).
 - Introduce a thin read-model boundary (e.g. a query/repository the views call) so swapping
   `VendorDemoData`/DemoStore for Eloquent is a localized change per screen, not a rewrite.
@@ -150,7 +150,7 @@ all writing real decisions + `audit_logs`. Decisions never auto-fire (human-in-t
   "Beverage Distributor") and their items (`document_type`, `is_required`, `requires_expiry`, `renewal_window_days`).
 - **NEW — Document Types (food domain):** manage the Negofood taxonomy + each type's `issuer_scope` and
   `ocr_template_rules` (keep in lockstep with the classifier classes in [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md)).
-- **System Settings:** the tunable parameters from [ADVS_System_Reference.md §9](../../ADVS_System_Reference.md)
+- **System Settings:** the tunable parameters from [ADVS reference §9](../ADVS_REFERENCE.md)
   (file limits, OCR floor, classification/signature/stamp thresholds, risk weights, tamper thresholds,
   **renewal-window default**).
 - **ML Model Management:** per-model status, last-trained date, validation accuracy, file paths; trigger
@@ -167,7 +167,7 @@ retention/audit/settings operate on real models (demo store removed from admin s
 
 ## Phase U4 — Notifications, polish & UI verification
 
-**Goal:** Consistent notifications across roles and a verified, cache-safe UI (mirrors [CLAUDE.md §8/§9](../../CLAUDE.md) DoD).
+**Goal:** Consistent notifications across roles and a verified, cache-safe UI.
 
 **Tasks:**
 - In-dashboard notifications for every reference §7 event **+** lifecycle events (expiring/expired,
@@ -193,4 +193,4 @@ renewal reminder).
   live in the per-issuer reference library (reference §4 Vendor Profiles, §8).
 - **Real data only at "done":** no screen ships still reading the demo store.
 
-[livewire-v4-layout-override]: ../../CLAUDE.md
+[livewire-v4-layout-override]: ../../AGENTS.md

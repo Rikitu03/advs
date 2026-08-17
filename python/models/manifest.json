@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "models": {
+    "classifier": {
+      "version": "resnet50_best-2026-07-09",
+      "sha256": "ebc630074f87bd2872ac415e36a1b1e50516ab407e1d22527bf964111586a6cc",
+      "input_shape": [null, 512, 512, 3],
+      "output_shape": [null, 4],
+      "classes": [
+        "bir_certificate",
+        "business_permit",
+        "dti_registration",
+        "fake"
+      ],
+      "class_names_sha256": "163d655204d0fd96f9334e88aba62e16e2aab8e6b7eb3572095ed198a4052491",
+      "trained_at": null,
+      "metrics": {
+        "accuracy": null,
+        "macro_f1": null
+      },
+      "calibrated_threshold": 0.7
+    },
+    "detector": {
+      "version": "yolov8_nano_moredata_best-2026-07-20",
+      "sha256": "6a830e77c32ad3daedf7a70a19725fef3ab1737eccff63b0ce5a2a6542ec369c",
+      "input_shape": [null, 3, 640, 640],
+      "output_shape": null,
+      "classes": ["logo", "signature", "stamp_seal"],
+      "trained_at": null,
+      "metrics": {
+        "map50": null
+      },
+      "calibrated_threshold": 0.5
+    },
+    "siamese": {
+      "version": "siamese_encoder-2026-07-20",
+      "sha256": "b93c2900ea2086a6a18610b9f92cdf677bf676fcc582de63e6dfe848bce6c7aa",
+      "input_shape": [null, 224, 224, 3],
+      "output_shape": [null, 128],
+      "classes": null,
+      "trained_at": null,
+      "metrics": {
+        "eer": 0.032,
+        "far": 0.027,
+        "frr": 0.036
+      },
+      "calibrated_threshold": 1.243976
+    },
+    "stamp": {
+      "version": "efficientnet_feature_extractor-2026-07-18",
+      "sha256": "97489709807ee55dabd6ae69c9196fa8041bf0d0cfb605e91532d943eac7ac8d",
+      "input_shape": [null, 224, 224, 3],
+      "output_shape": [null, 1280],
+      "classes": null,
+      "trained_at": null,
+      "metrics": {
+        "texture_classifier_accuracy": 0.9
+      },
+      "calibrated_threshold": 0.8
+    },
+    "stamp_classifier": {
+      "version": "stamp_classifier-2026-07-18",
+      "sha256": "35eda071235cd8573acff6b66d9cdd28e8e16445e8ac7b096477f36a5749fc1e",
+      "input_shape": [null, 1280],
+      "output_shape": [null, 2],
+      "classes": ["reproduction", "genuine"],
+      "trained_at": null,
+      "metrics": {
+        "accuracy": 0.9
+      },
+      "calibrated_threshold": 0.5
+    }
+  }
+}

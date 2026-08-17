@@ -16,6 +16,14 @@ class ModelStatus(BaseModel):
     error: str | None = None
 
 
+class ReadinessResponse(BaseModel):
+    status: str
+    service: str
+    version: str
+    errors: list[str]
+    artifacts: dict
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str

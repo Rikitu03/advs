@@ -43,8 +43,10 @@ class _StubDetector:
 
     def __init__(self, boxes: list[_StubBox]) -> None:
         self._boxes = boxes
+        self.calls: list[dict] = []
 
     def predict(self, source, conf, verbose=False, **kwargs):  # noqa: ANN001
+        self.calls.append({"source": source, "conf": conf, "verbose": verbose, **kwargs})
         return [_StubResult(self.names, self._boxes)]
 
 
@@ -77,3 +79,15 @@ def test_signature_detection_passes_through_unaliased():
     # stamp + logo remain undetected -> both flagged (stamp via its canonical name).
     assert "no_stamp_detected" in out["flags"]
     assert "no_logo_detected" in out["flags"]
+    assert model.calls[0]["conf"] == 0.5
+    assert "imgsz" not in model.calls[0]
+
+
+def test_enrollment_overrides_are_forwarded_without_changing_defaults():
+    model = _StubDetector([_StubBox(cls=1, conf=0.25, xyxy=[5, 5, 40, 20])])
+
+    out = run_detection(model, _IMAGE, _SETTINGS, confidence=0.20, imgsz=1280)
+
+    assert out["detections"][0]["label"] == "signature"
+    assert model.calls[0]["conf"] == 0.20
+    assert model.calls[0]["imgsz"] == 1280

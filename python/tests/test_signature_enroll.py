@@ -90,12 +90,27 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 
 @pytest.fixture(scope="module")
 def jpeg_bytes() -> bytes:
-    from PIL import Image
+    """Sanitized landscape equivalent of a three-signature enrollment photo."""
+    from PIL import Image, ImageDraw
 
-    rng = np.random.default_rng(0)
-    base = rng.integers(0, 255, (320, 320, 3), dtype=np.uint8)
+    image = Image.new("RGB", (1946, 1460), "white")
+    draw = ImageDraw.Draw(image)
+    for offset in (250, 800, 1350):
+        draw.line(
+            [
+                (offset, 700),
+                (offset + 90, 560),
+                (offset + 170, 850),
+                (offset + 250, 590),
+                (offset + 360, 820),
+            ],
+            fill="black",
+            width=12,
+            joint="curve",
+        )
+
     buffer = io.BytesIO()
-    Image.fromarray(base).save(buffer, format="JPEG", quality=90)
+    image.save(buffer, format="JPEG", quality=90)
     return buffer.getvalue()
 
 
@@ -123,8 +138,10 @@ class _StubDetector:
 
     def __init__(self, boxes: list[_StubBox]) -> None:
         self._boxes = boxes
+        self.calls: list[dict] = []
 
     def predict(self, source, conf, verbose=False, **kwargs):  # noqa: ANN001
+        self.calls.append({"source": source, "conf": conf, "verbose": verbose, **kwargs})
         return [_StubResult(self.names, self._boxes)]
 
 
@@ -141,9 +158,9 @@ class _StubEmbedderModel:
 
 def _three_signature_detector() -> _StubDetector:
     return _StubDetector([
-        _StubBox(cls=1, conf=0.95, xyxy=[10, 10, 120, 60]),
-        _StubBox(cls=1, conf=0.90, xyxy=[10, 80, 120, 130]),
-        _StubBox(cls=1, conf=0.88, xyxy=[10, 150, 120, 200]),
+        _StubBox(cls=1, conf=0.95, xyxy=[220, 500, 700, 950]),
+        _StubBox(cls=1, conf=0.90, xyxy=[770, 500, 1250, 950]),
+        _StubBox(cls=1, conf=0.88, xyxy=[1320, 500, 1800, 950]),
     ])
 
 
@@ -167,8 +184,9 @@ def test_enroll_counts_embeds_and_scores_three_signatures(tmp_path, jpeg_bytes):
     pytest.importorskip("tensorflow")  # resnet50 preprocess_input in embed_signature
 
     app = create_app(_settings(tmp_path))
+    detector = _three_signature_detector()
     with TestClient(app) as client:
-        app.state.registry._models["detector"] = _three_signature_detector()
+        app.state.registry._models["detector"] = detector
         app.state.registry._models["siamese"] = _StubEmbedderModel()
         response = client.post("/v1/signature/enroll", headers=AUTH, files=_upload(jpeg_bytes))
 
@@ -177,6 +195,8 @@ def test_enroll_counts_embeds_and_scores_three_signatures(tmp_path, jpeg_bytes):
 
     assert body["count"] == 3
     assert len(body["signatures"]) == 3
+    assert detector.calls[0]["conf"] == pytest.approx(0.20)
+    assert detector.calls[0]["imgsz"] == 1280
     for sample in body["signatures"]:
         assert len(sample["box"]) == 4
         assert 0.0 <= sample["confidence"] <= 1.0
@@ -195,6 +215,25 @@ def test_enroll_counts_embeds_and_scores_three_signatures(tmp_path, jpeg_bytes):
     # A clean synthetic JPEG (no editor metadata, no clone) must not hard-flag,
     # and a merely stripped-EXIF photo is tolerated (lenient gate).
     assert forensics["hard_flag"] is False
+
+
+def test_enroll_prefers_a_dedicated_detector_when_configured(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    shared_detector = _StubDetector([])
+    enrollment_detector = _three_signature_detector()
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = shared_detector
+        app.state.registry._models["signature_enroll_detector"] = enrollment_detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        body = client.post(
+            "/v1/signature/enroll", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()
+
+    assert body["count"] == 3
+    assert shared_detector.calls == []
+    assert enrollment_detector.calls[0]["imgsz"] == 1280
 
 
 def test_enroll_counts_only_signatures_not_stamps(tmp_path, jpeg_bytes):

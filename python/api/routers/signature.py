@@ -139,13 +139,19 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
     """
     registry = request.app.state.registry
     settings: Settings = request.app.state.settings
-    detector = registry.require("detector")
+    detector = registry.get("signature_enroll_detector") or registry.require("detector")
     siamese = registry.require("siamese")
 
     data = await file.read()
     image = _decode_image(data)
 
-    detection = run_detection(detector, image, settings)
+    detection = run_detection(
+        detector,
+        image,
+        settings,
+        confidence=settings.signature_enroll_detection_confidence,
+        imgsz=settings.signature_enroll_detection_imgsz,
+    )
     signature_boxes = sorted(
         (d for d in detection["detections"] if d["label"] == "signature"),
         key=lambda d: d["confidence"],

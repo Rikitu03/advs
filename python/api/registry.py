@@ -16,11 +16,12 @@ from fastapi import HTTPException
 
 from .compat import load_script
 from .config import Settings
+from .manifest import ArtifactManifest
 
 logger = logging.getLogger("advs.api.registry")
 
-MODEL_NAMES = ("classifier", "detector", "siamese", "stamp", "stamp_classifier",
-               "rapid_detector", "trocr", "trocr_accurate")
+MODEL_NAMES = ("classifier", "detector", "signature_enroll_detector", "siamese", "stamp",
+               "stamp_classifier", "rapid_detector", "trocr", "trocr_accurate")
 
 
 class ModelRegistry:
@@ -28,6 +29,7 @@ class ModelRegistry:
         self.settings = settings
         self._models: dict[str, Any] = {}
         self._status: dict[str, dict[str, Any]] = {}
+        self.manifest = ArtifactManifest(settings.manifest_path)
 
     # ------------------------------------------------------------- lifecycle
     def load_all(self) -> None:
@@ -53,6 +55,20 @@ class ModelRegistry:
         for name, (path, loader) in loaders.items():
             is_dir = name in ("trocr", "trocr_accurate")
             self._load(name, path, loader, is_dir=is_dir)
+
+        enrollment_path = self.settings.signature_enroll_detector_model_path
+        if enrollment_path is None:
+            self._status["signature_enroll_detector"] = {
+                "loaded": False,
+                "path": None,
+                "error": "not_configured",
+            }
+        else:
+            self._load(
+                "signature_enroll_detector",
+                str(enrollment_path),
+                self._load_signature_enroll_detector,
+            )
 
         # RapidOCR bundles its own PP-OCRv4 detector ONNX weights inside the
         # pip package — no local path to gate on. Always attempt; it's a
@@ -97,6 +113,35 @@ class ModelRegistry:
     def status(self) -> dict[str, dict[str, Any]]:
         return self._status
 
+    def model_paths(self) -> dict[str, Any]:
+        return {
+            "classifier": self.settings.classifier_path,
+            "detector": self.settings.detector_path,
+            "siamese": self.settings.siamese_path,
+            "stamp": self.settings.stamp_path,
+            "stamp_classifier": self.settings.stamp_classifier_path,
+            "trocr": self.settings.trocr_path,
+            "trocr_accurate": self.settings.trocr_accurate_path,
+        }
+
+    def artifact_report(self) -> dict:
+        return self.manifest.report(self.model_paths(), self._status)
+
+    def readiness_errors(self) -> list[str]:
+        return self.manifest.readiness_errors(self.model_paths(), self._status)
+
+    def output_dimension(self, name: str) -> int | None:
+        model = self._models.get(name)
+        shape = getattr(model, "output_shape", None)
+        if isinstance(shape, list) and shape and isinstance(shape[0], (list, tuple)):
+            shape = shape[0]
+        if isinstance(shape, (list, tuple)) and shape:
+            try:
+                return int(shape[-1])
+            except (TypeError, ValueError):
+                pass
+        return self.manifest.output_dimension(name)
+
     def get(self, name: str) -> Any | None:
         return self._models.get(name)
 
@@ -129,6 +174,11 @@ class ModelRegistry:
         from ultralytics import YOLO
 
         return YOLO(str(self.settings.detector_path))
+
+    def _load_signature_enroll_detector(self) -> Any:
+        from ultralytics import YOLO
+
+        return YOLO(str(self.settings.signature_enroll_detector_model_path))
 
     def _load_siamese(self) -> Any:
         # SIAMESE_MODEL_PATH defaults to the encoder (siamese_encoder.h5), not
