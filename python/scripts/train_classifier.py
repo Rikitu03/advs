@@ -185,7 +185,7 @@ def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
     (models_out / "class_names.json").write_text(json.dumps(class_names, indent=2))
     log(f"Saved resnet50_classifier.keras + class_names.json ({num_classes} classes)")
 
-    test_dir = data_root / "test" / "classifier_data"
+    test_dir = train_dir.parent.parent / "test" / "classifier_data"
     if test_dir.exists():
         log("Evaluating final model on held-out test split...")
         test_ds = tf.keras.utils.image_dataset_from_directory(

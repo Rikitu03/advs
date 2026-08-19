@@ -223,7 +223,7 @@ new class extends Component {
                 @forelse ($rows as $submission)
                     <div wire:key="vendor-submission-{{ $submission['id'] }}" class="grid gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 lg:grid-cols-[1.1fr_.6fr_.7fr_.7fr_.7fr] lg:items-center">
                         <div class="flex min-w-0 gap-3">
-                            <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700">
+                            <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue">
                                 <flux:icon icon="document-text" class="size-5" />
                             </span>
                             <div class="min-w-0">

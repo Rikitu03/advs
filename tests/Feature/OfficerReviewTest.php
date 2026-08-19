@@ -144,6 +144,258 @@ class OfficerReviewTest extends TestCase
             ->assertSee('No signature detected');
     }
 
+    public function test_flag_humaniser_renders_per_type_field_acronyms(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'flags' => ['missing_required_fields:ocn,trn_no,certificate_no,business_name,tax_types'],
+        ]);
+
+        $this->assertSame(
+            ['Missing required fields: OCN, TRN, Certificate No, Business Name, Registered Activities'],
+            SubmissionPresenter::flags($submission->fresh()),
+        );
+    }
+
+    /**
+     * A region YOLOv8 actually found, but with no vendor reference enrolled yet
+     * (or no issuer reference logo yet), must not be reported to the officer as
+     * "no region detected" — that blames the detector for a missing-enrollment
+     * condition it has nothing to do with.
+     */
+    public function test_drill_down_distinguishes_a_detected_but_unreferenced_region_from_a_true_detection_miss(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => false,
+            'signature_bbox' => [10, 20, 30, 40],
+            'signature_passed' => null,
+            'signature_score' => null,
+            'stamp_detected' => false,
+            'stamp_bbox' => [50, 60, 70, 80],
+            'stamp_passed' => null,
+            'stamp_score' => null,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertTrue($components['signature']['detected']);
+        $this->assertFalse($components['signature']['verified']);
+        $this->assertSame(
+            'Signature region detected, but no reference is enrolled for this vendor yet.',
+            $components['signature']['detail'],
+        );
+        $this->assertSame(
+            route('admin.documents.show', $document->id),
+            $components['signature']['crop']['url'],
+        );
+        $this->assertSame([10, 20, 30, 40], $components['signature']['crop']['box']);
+
+        $this->assertTrue($components['stamp']['detected']);
+        $this->assertFalse($components['stamp']['verified']);
+        $this->assertSame(
+            'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
+            $components['stamp']['detail'],
+        );
+        $this->assertSame([50, 60, 70, 80], $components['stamp']['crop']['box']);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertDontSee('No signature region was detected by YOLOv8')
+            ->assertDontSee('No stamp region was detected by YOLOv8')
+            ->assertSee('no reference is enrolled for this vendor yet')
+            ->assertSee('no reference logo is on file for this issuer yet')
+            ->assertSee(route('admin.documents.show', $document->id));
+    }
+
+    /**
+     * A region detected on a PDF upload has no accurate crop preview (its box
+     * is relative to the 300-DPI rendered page, not the PDF bytes an <img>
+     * would load), so the drill-down must fall back to text only — no broken
+     * image reference.
+     */
+    public function test_drill_down_omits_the_crop_preview_for_a_pdf_upload(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'mime_type' => 'application/pdf',
+        ]);
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => false,
+            'signature_bbox' => [10, 20, 30, 40],
+            'signature_passed' => null,
+            'signature_score' => null,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertTrue($components['signature']['detected']);
+        $this->assertNull($components['signature']['crop']);
+    }
+
+    /**
+     * A genuine detection miss (no bbox at all) must keep its original, accurate
+     * "no region detected" wording — only the misattributed case changes.
+     */
+    public function test_drill_down_keeps_the_original_message_for_a_true_detection_miss(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => false,
+            'signature_bbox' => null,
+            'signature_passed' => null,
+            'signature_score' => null,
+            'stamp_detected' => false,
+            'stamp_bbox' => null,
+            'stamp_passed' => null,
+            'stamp_score' => null,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertFalse($components['signature']['detected']);
+        $this->assertSame('No signature region detected.', $components['signature']['detail']);
+
+        $this->assertFalse($components['stamp']['detected']);
+        $this->assertSame('No stamp/logo region detected.', $components['stamp']['detail']);
+    }
+
+    public function test_drill_down_provides_per_document_ocr_text_with_filters(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+
+        $bir = Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'bir-certificate.png',
+        ]);
+        ValidationResult::factory()->for($bir)->create([
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+        ]);
+
+        $permit = Document::factory()->for($vendor)->for($submission)->create([
+            'original_filename' => 'business-permit.png',
+        ]);
+        ValidationResult::factory()->for($permit)->create([
+            'ocr_extracted_text' => 'CITY OF DIGOS BUSINESS PERMIT',
+        ]);
+
+        $detail = SubmissionPresenter::detail($submission->fresh());
+
+        $this->assertSame(
+            [
+                ['key' => (string) $bir->id, 'label' => 'bir-certificate.png'],
+                ['key' => (string) $permit->id, 'label' => 'business-permit.png'],
+            ],
+            $detail['ocr_filters'],
+        );
+        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $bir->id]);
+        $this->assertSame('CITY OF DIGOS BUSINESS PERMIT', $detail['ocr_by_document'][(string) $permit->id]);
+    }
+
+    public function test_drill_down_ocr_text_falls_back_when_ocr_not_yet_available(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create(['ocr_extracted_text' => null]);
+
+        $detail = SubmissionPresenter::detail($submission->fresh());
+
+        $this->assertSame(
+            'OCR stage not yet available — no extracted text for this document.',
+            $detail['ocr_by_document'][(string) $document->id],
+        );
+    }
+
+    public function test_drill_down_builds_ocr_field_rows_from_the_persisted_field_map(): void
+    {
+        $detail = $this->detailForOcrFields([
+            'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+            'revenue_district_officer' => ['name' => 'Revenue District Officer', 'value' => null,
+                'required' => false, 'matched' => false, 'confidence' => null, 'warnings' => []],
+        ], $document);
+
+        $rows = $detail['ocr_fields_by_document'][(string) $document->id];
+
+        // Template order is preserved, and an unmatched optional field still gets
+        // a row — "not found" is information the officer needs.
+        $this->assertSame(['tin', 'revenue_district_officer'], array_column($rows, 'key'));
+        $this->assertSame('TIN', $rows[0]['label']);
+        $this->assertSame('009-028-463-000', $rows[0]['value']);
+        $this->assertTrue($rows[0]['required']);
+        $this->assertNull($rows[0]['warning']);
+        $this->assertNull($rows[1]['value']);
+        $this->assertNull($rows[1]['warning']);
+    }
+
+    public function test_drill_down_marks_suspect_ocr_values_with_a_warning(): void
+    {
+        $detail = $this->detailForOcrFields([
+            'rdo_code' => ['name' => 'Revenue District No. (RDO)', 'value' => 'REVENUE DISTRICT',
+                'required' => false, 'matched' => true, 'confidence' => 41.0,
+                'warnings' => ['format_mismatch', 'low_confidence']],
+            'trade_name' => ['name' => 'Trade Name', 'value' => 'EE Bincn', 'required' => true,
+                'matched' => true, 'confidence' => 88.0, 'warnings' => ['noisy_text']],
+            'line_of_business' => ['name' => 'Line of Business / PSIC', 'value' => null,
+                'required' => true, 'matched' => false, 'confidence' => null,
+                'warnings' => ['not_found']],
+        ], $document);
+
+        $rows = collect($detail['ocr_fields_by_document'][(string) $document->id])->keyBy('key');
+
+        // The chip shows the highest-priority reason; the tooltip lists them all,
+        // and the low-confidence reason carries the measured percentage.
+        $this->assertSame('Format', $rows['rdo_code']['warning']['label']);
+        $this->assertCount(2, $rows['rdo_code']['warning']['reasons']);
+        $this->assertStringContainsString('(41%)', $rows['rdo_code']['warning']['reasons'][1]);
+
+        $this->assertSame('Noisy', $rows['trade_name']['warning']['label']);
+        $this->assertSame('Not found', $rows['line_of_business']['warning']['label']);
+    }
+
+    public function test_drill_down_has_no_ocr_field_rows_when_the_field_map_is_absent(): void
+    {
+        // Results written before the ocr_fields column existed keep only their
+        // raw text; the panel falls back to it rather than rendering nothing.
+        $detail = $this->detailForOcrFields(null, $document);
+
+        $this->assertSame([], $detail['ocr_fields_by_document'][(string) $document->id]);
+        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $document->id]);
+    }
+
+    /**
+     * A one-document pending submission whose validation result carries the given
+     * field map, presented through the drill-down.
+     *
+     * @param  array<string, mixed>|null  $fields
+     * @return array<string, mixed>
+     */
+    private function detailForOcrFields(?array $fields, ?Document &$document = null): array
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+
+        ValidationResult::factory()->for($document)->create([
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+            'ocr_fields' => $fields,
+        ]);
+
+        return SubmissionPresenter::detail($submission->fresh());
+    }
+
     public function test_drill_down_marks_each_document_with_a_preview_kind(): void
     {
         $vendor = Vendor::factory()->create();

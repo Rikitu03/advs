@@ -32,7 +32,7 @@ PY_ROOT = Path(__file__).resolve().parents[1]
 CONFIG: dict = {
     "weights": "yolov8n.pt",
     "epochs": 50,
-    "imgsz": 640,
+    "imgsz": 1280,
     "batch": 16,
     "patience": 10,
 }

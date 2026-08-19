@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool|null $stamp_detected
  * @property float|null $stamp_score
  * @property float|null $document_risk_score
+ * @property array<string, array<string, mixed>>|null $ocr_fields
  * @property array<int, string>|null $flags
  */
 class ValidationResult extends Model
@@ -41,6 +42,7 @@ class ValidationResult extends Model
         'submission_id',
         'ocr_extracted_text',
         'ocr_confidence',
+        'ocr_fields',
         'detected_city',
         'text_validation_score',
         'text_fields_matched',
@@ -70,6 +72,7 @@ class ValidationResult extends Model
     {
         return [
             'ocr_confidence' => 'float',
+            'ocr_fields' => 'array',
             'text_validation_score' => 'float',
             'classification_confidence' => 'float',
             'signature_detected' => 'boolean',

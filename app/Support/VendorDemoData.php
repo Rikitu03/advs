@@ -34,7 +34,7 @@ class VendorDemoData
                 'documents' => [
                     ['type' => 'Business Permit', 'file_name' => 'business_permit_2026.pdf', 'size' => '2.4 MB'],
                     ['type' => 'BIR Permit', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
-                    ['type' => 'Financial Statement', 'file_name' => 'audited_financial_statement_2025.pdf', 'size' => '3.8 MB'],
+                    ['type' => 'DTI Registration', 'file_name' => 'dti_business_name_registration_2026.png', 'size' => '1.4 MB'],
                 ],
             ],
             [
@@ -67,7 +67,7 @@ class VendorDemoData
                 'status_tone' => 'resubmission_requested',
                 'note' => 'A clearer scan is required — please resubmit before this submission can be accepted.',
                 'documents' => [
-                    ['type' => 'Financial Statement', 'file_name' => 'audited_financial_statement_2025.pdf', 'size' => '3.8 MB'],
+                    ['type' => 'DTI Registration', 'file_name' => 'dti_business_name_registration_2025.png', 'size' => '1.4 MB'],
                     ['type' => 'Business Permit', 'file_name' => 'business_permit_2025.pdf', 'size' => '2.1 MB'],
                 ],
             ],

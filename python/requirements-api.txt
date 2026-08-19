@@ -34,3 +34,22 @@ ultralytics>=8.1
 # --- Stage T: forensics (metadata reads) ---
 pikepdf>=8.0
 piexif>=1.1
+
+# --- Stage 2: ROI+TrOCR field-recognition fallback (roi_field_ocr.py) ---
+# rapidocr-onnxruntime: PP-OCRv4 text DETECTOR only (recognition unused, TrOCR
+# replaces it) — pulls onnxruntime, which (unlike onnxruntime-gpu) ships
+# official CPU wheels for both x86_64 and aarch64 (Oracle Ampere A1 target).
+rapidocr-onnxruntime>=1.4
+# <5: transformers 5.x's rewritten tokenizer loader (TokenizersBackend) fails
+# to load microsoft/trocr-large-printed's tokenizer ("need sentencepiece or
+# tiktoken" even with both installed) - confirmed against 5.14.1; 4.57.6 works.
+transformers>=4.40,<5          # microsoft/trocr-large-printed (VisionEncoderDecoderModel)
+sentencepiece>=0.2             # TrOCR's tokenizer
+
+# --- OPTIONAL: ONNX recognizer export/inference (scripts/export_trocr_onnx.py)
+# Not installed by default and NOT needed to serve: roi_field_ocr.load_trocr()
+# imports optimum only when a configured TrOCR path holds an ONNX export.
+# Measured 2026-07-25 — ONNX did not pay off on an 8GB box (fp32 4x slower
+# unoptimized; INT8 corrupted field values). See the script docstring before
+# reaching for it, and note optimum's exporter needs ~2x each 1.2GB graph in RAM.
+# optimum[onnxruntime]>=2.1

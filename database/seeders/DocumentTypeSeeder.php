@@ -50,8 +50,11 @@ class DocumentTypeSeeder extends Seeder
             ['name' => 'FDA Registration', 'code' => 'fda_registration', 'description' => 'FDA License to Operate / Certificate of Product Registration', 'is_required' => true, 'issuer_scope' => 'national'],
             ['name' => 'Food Handler Certificate', 'code' => 'food_handler_certificate', 'description' => "Food Handler's Certificate / Health Card", 'is_required' => true, 'issuer_scope' => 'lgu'],
 
-            // --- Financial / contractual ---
-            ['name' => 'Financial Statement', 'code' => 'financial_statement', 'description' => 'Audited financial statement', 'is_required' => true, 'issuer_scope' => null],
+            // --- Contractual ---
+            // NOTE: Financial Statement was removed from the vendor-submittable
+            // taxonomy (not one of the three supported types: BIR / Business
+            // Permit / DTI). Existing documents were re-pointed to DTI by the
+            // 2026_07_22 repoint migration.
             ['name' => 'Signed Contract', 'code' => 'signed_contract', 'description' => 'Signed accreditation contract/agreement', 'is_required' => false, 'issuer_scope' => null],
 
             // --- Government IDs of the authorized representative (one type per ID; single national issuing agency each) ---

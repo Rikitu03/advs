@@ -66,7 +66,6 @@ def load_image(path: Path, target_size: tuple[int, int]) -> np.ndarray:
 
 def predict(image_path: Path, model_path: Path, class_names_path: Path) -> dict:
     import tensorflow as tf
-    from tensorflow.keras.applications.resnet50 import preprocess_input
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Model not found: {model_path}")
@@ -78,9 +77,10 @@ def predict(image_path: Path, model_path: Path, class_names_path: Path) -> dict:
     if len(input_shape) < 3 or input_shape[1] is None or input_shape[2] is None:
         raise ValueError(f"Unexpected model input shape: {input_shape}")
 
+    # Raw 0-255 input: the saved graph embeds resnet50.preprocess_input
+    # (train_classifier.py), so preprocessing again here would corrupt it.
     target_size = (int(input_shape[1]), int(input_shape[2]))
     batch = load_image(image_path, target_size)
-    batch = preprocess_input(batch)
 
     probabilities = model.predict(batch, verbose=0)[0]
     predicted_index = int(np.argmax(probabilities))

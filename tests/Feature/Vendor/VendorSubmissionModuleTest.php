@@ -39,7 +39,7 @@ class VendorSubmissionModuleTest extends TestCase
             ->assertSee('Drop files here or click to upload')
             ->assertSee('BIR Permit')
             ->assertSee('Business Permit')
-            ->assertSee('Financial Statement')
+            ->assertSee('DTI Registration')
             ->assertSee('Submit')
             ->assertSee('Remove file')
             ->assertSee('File type not allowed')
@@ -67,7 +67,7 @@ class VendorSubmissionModuleTest extends TestCase
             ->get(route('vendor.submissions'))
             ->assertOk()
             ->assertSee('business_permit_2026.pdf')
-            ->assertSee('audited_financial_statement_2025.pdf');
+            ->assertSee('dti_business_name_registration_2026.png');
 
         $this->assertSame(0, $vendor->submissions()->count());
     }
@@ -80,7 +80,7 @@ class VendorSubmissionModuleTest extends TestCase
         $this->assertSame(0, $vendor->submissions()->count());
 
         // The showcase demo submission bundles three documents (Business
-        // Permit + BIR Permit + Financial Statement) under a single batch,
+        // Permit + BIR Permit + DTI Registration) under a single batch,
         // mirroring the real Submission → hasMany(Document) model.
         $this->actingAs($user)
             ->get(route('vendor.submissions'))
@@ -89,7 +89,7 @@ class VendorSubmissionModuleTest extends TestCase
             ->assertSee('Included files')
             ->assertSee('business_permit_2026.pdf')
             ->assertSee('bir_certificate_registration.pdf')
-            ->assertSee('audited_financial_statement_2025.pdf')
+            ->assertSee('dti_business_name_registration_2026.png')
             ->assertDontSee('1 files');
     }
 
@@ -103,13 +103,13 @@ class VendorSubmissionModuleTest extends TestCase
         $vendor = Vendor::factory()->for($user)->create();
 
         $birContent = "%PDF-1.4\n%fake fixture bir\n%%EOF";
-        $financialContent = "%PDF-1.4\n%fake fixture fs\n%%EOF";
+        $dtiContent = "%PDF-1.4\n%fake fixture dti\n%%EOF";
 
         $component = Livewire::actingAs($user)
             ->test('vendor.submit')
             ->set('uploadedFiles', [
                 UploadedFile::fake()->createWithContent('bir_certificate.pdf', $birContent),
-                UploadedFile::fake()->createWithContent('financial_statement.pdf', $financialContent),
+                UploadedFile::fake()->createWithContent('dti_registration.pdf', $dtiContent),
             ])
             ->call('submitBatch', [[
                 'name' => 'bir_certificate.pdf',
@@ -117,8 +117,8 @@ class VendorSubmissionModuleTest extends TestCase
                 'extension' => 'pdf',
                 'sizeBytes' => 2_048_000,
             ], [
-                'name' => 'financial_statement.pdf',
-                'type' => 'Financial Statement',
+                'name' => 'dti_registration.pdf',
+                'type' => 'DTI Registration',
                 'extension' => 'pdf',
                 'sizeBytes' => 1_024_000,
             ]]);
@@ -126,7 +126,7 @@ class VendorSubmissionModuleTest extends TestCase
         $component->assertRedirect(route('vendor.submissions'));
 
         $birCertificateId = DB::table('document_types')->where('code', 'bir_certificate')->value('id');
-        $financialStatementId = DB::table('document_types')->where('code', 'financial_statement')->value('id');
+        $dtiRegistrationId = DB::table('document_types')->where('code', 'dti_registration')->value('id');
 
         $this->assertDatabaseHas('submissions', [
             'vendor_id' => $vendor->id,
@@ -145,9 +145,9 @@ class VendorSubmissionModuleTest extends TestCase
         ]);
         $this->assertDatabaseHas('documents', [
             'vendor_id' => $vendor->id,
-            'original_filename' => 'financial_statement.pdf',
-            'document_type_id' => $financialStatementId,
-            'file_size_bytes' => strlen($financialContent),
+            'original_filename' => 'dti_registration.pdf',
+            'document_type_id' => $dtiRegistrationId,
+            'file_size_bytes' => strlen($dtiContent),
         ]);
 
         $vendor->documents()->get()->each(function (Document $document): void {
@@ -225,7 +225,7 @@ class VendorSubmissionModuleTest extends TestCase
         $vendor = Vendor::factory()->for($user)->create();
         $otherVendor = Vendor::factory()->create();
         $businessPermitId = DB::table('document_types')->where('code', 'business_permit')->value('id');
-        $financialStatementId = DB::table('document_types')->where('code', 'financial_statement')->value('id');
+        $dtiRegistrationId = DB::table('document_types')->where('code', 'dti_registration')->value('id');
 
         $submission = Submission::factory()->for($vendor)->create([
             'status' => Submission::STATUS_PENDING_REVIEW,
@@ -238,10 +238,10 @@ class VendorSubmissionModuleTest extends TestCase
             'mime_type' => 'application/pdf',
         ]);
 
-        $financialStatement = Document::factory()->for($submission)->for($vendor)->create([
-            'document_type_id' => $financialStatementId,
-            'original_filename' => 'audited-financial-statement.pdf',
-            'file_path' => "vendor{$vendor->id}/financial_statement00001.pdf",
+        $dtiRegistration = Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $dtiRegistrationId,
+            'original_filename' => 'dti-business-name-registration.pdf',
+            'file_path' => "vendor{$vendor->id}/dti_registration00001.pdf",
             'mime_type' => 'application/pdf',
         ]);
 
@@ -260,14 +260,14 @@ class VendorSubmissionModuleTest extends TestCase
             ->assertSee("Document Submission #{$submission->id}")
             ->assertSee('2 files')
             ->assertSee('pasig-business-permit.pdf')
-            ->assertSee('audited-financial-statement.pdf')
+            ->assertSee('dti-business-name-registration.pdf')
             ->assertSee('Business Permit')
-            ->assertSee('Financial Statement')
+            ->assertSee('DTI Business Name Registration')
             ->assertSee('Pending Review')
             ->assertSee('70%')
             ->assertSee('Included files')
             ->assertSee(route('vendor.documents.show', $businessPermit), false)
-            ->assertSee(route('vendor.documents.show', $financialStatement), false)
+            ->assertSee(route('vendor.documents.show', $dtiRegistration), false)
             ->assertSee('target="_blank"', false)
             ->assertSee('Showing 1 of 1 submissions.')
             ->assertDontSee('Unassigned document')

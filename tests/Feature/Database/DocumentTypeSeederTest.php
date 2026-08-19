@@ -29,8 +29,9 @@ class DocumentTypeSeederTest extends TestCase
     {
         $types = $this->seedTypes();
 
-        // 20 real, submittable document types (fake/other are classifier-only).
-        $this->assertSame(20, $types->count());
+        // 19 real, submittable document types (fake/other are classifier-only;
+        // financial_statement was removed from the vendor-submittable taxonomy).
+        $this->assertSame(19, $types->count());
         $this->assertArrayNotHasKey('fake', $types->all());
         $this->assertArrayNotHasKey('other', $types->all());
     }
@@ -43,15 +44,16 @@ class DocumentTypeSeederTest extends TestCase
         foreach ([
             'bir_certificate', 'sec_registration', 'sec_gis', 'dti_registration', 'business_permit',
             'sanitary_permit', 'fda_registration', 'food_handler_certificate',
-            'financial_statement', 'signed_contract',
+            'signed_contract',
             'national_id', 'philhealth_id', 'sss_id', 'umid', 'postal_id',
             'drivers_license', 'passport', 'prc_id', 'voters_id', 'tin_id',
         ] as $code) {
             $this->assertArrayHasKey($code, $types->all(), "missing document type: {$code}");
         }
 
-        // Pre-Negofood codes must be gone (renamed to match the folders).
-        foreach (['bir_permit', 'financial_stmt', 'gis'] as $legacy) {
+        // Removed / pre-Negofood codes must be gone (financial_statement was
+        // dropped from the taxonomy; the others were renamed to match the folders).
+        foreach (['bir_permit', 'financial_statement', 'financial_stmt', 'gis'] as $legacy) {
             $this->assertArrayNotHasKey($legacy, $types->all(), "legacy code still seeded: {$legacy}");
         }
     }
@@ -63,7 +65,7 @@ class DocumentTypeSeederTest extends TestCase
         $this->assertSame('national', $types['bir_certificate']);
         $this->assertSame('lgu', $types['business_permit']);
         $this->assertSame('lgu', $types['sanitary_permit']);
-        $this->assertNull($types['financial_statement']);
+        $this->assertNull($types['signed_contract']); // no official issuer logo to verify
         $this->assertSame('national', $types['national_id']); // gov IDs verify the issuing-agency logo
     }
 
@@ -83,6 +85,6 @@ class DocumentTypeSeederTest extends TestCase
         $this->seed(DocumentTypeSeeder::class);
         $this->seed(DocumentTypeSeeder::class);
 
-        $this->assertSame(20, DB::table('document_types')->count());
+        $this->assertSame(19, DB::table('document_types')->count());
     }
 }
