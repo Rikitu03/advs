@@ -8,11 +8,14 @@ use App\Models\ValidationResult;
 use App\Services\SystemSettingsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * HTTP client for the FastAPI document-validation service (python/api). The whole
@@ -55,28 +58,49 @@ class MlPipelineService
             $document->document_type_id, $issuerScope
         );
 
-        $form = array_filter([
-            'template' => $this->ocrTemplateFor($type['code'] ?? null),
-            'document_type' => $type['code'] ?? null,
-            // The API needs the scope to know whether to key the lookup by city.
-            'issuer_scope' => $issuerScope,
-            'city' => $city,
-            'signature_reference' => $this->resolveSignatureReference($document),
-            'stamp_references' => $stampReferences,
-            'forensics' => json_encode($this->forensicsContext($settingsSnapshot), JSON_THROW_ON_ERROR),
-            'settings_snapshot' => json_encode($settingsSnapshot, JSON_THROW_ON_ERROR),
-        ], static fn ($value): bool => $value !== null);
+        // Build form data explicitly to ensure signature reference is properly handled
+        $form = [];
+
+        if (($typeCode = $type['code'] ?? null) !== null) {
+            $form['template'] = $this->ocrTemplateFor($typeCode);
+            $form['document_type'] = $typeCode;
+        }
+
+        if ($issuerScope !== null) {
+            $form['issuer_scope'] = $issuerScope;
+        }
+
+        if ($city !== null) {
+            $form['city'] = $city;
+        }
+
+        // Handle signature reference explicitly - ensure it's sent even if it's an empty string
+        $signatureReference = $this->resolveSignatureReference($document);
+        if ($signatureReference !== null) {
+            $form['signature_reference'] = $signatureReference;
+        }
+
+        if ($stampReferences !== null) {
+            $form['stamp_references'] = $stampReferences;
+        }
+
+        $form['forensics'] = json_encode($this->forensicsContext($settingsSnapshot), JSON_THROW_ON_ERROR);
+        $form['settings_snapshot'] = json_encode($settingsSnapshot, JSON_THROW_ON_ERROR);
 
         try {
             $response = $this->client()
                 ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
                 ->post('/v1/validate', $form);
         } catch (ConnectionException $exc) {
-            throw new RuntimeException("ML API unreachable at {$ml['base_url']}: {$exc->getMessage()}", previous: $exc);
+            throw new MlApiException(
+                "ML API /v1/validate unreachable at {$ml['base_url']} for document {$document->id}: {$exc->getMessage()}",
+                retryable: true,
+                previous: $exc,
+            );
         }
 
         if ($response->failed()) {
-            throw new RuntimeException("ML API /v1/validate returned HTTP {$response->status()}.");
+            $this->throwForFailure('/v1/validate', $response, "document {$document->id}");
         }
 
         $body = $response->json();
@@ -121,11 +145,15 @@ class MlPipelineService
                 ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
                 ->post('/v1/stamp/embed', ['box' => json_encode(array_values($box), JSON_THROW_ON_ERROR)]);
         } catch (ConnectionException $exc) {
-            throw new RuntimeException("ML API unreachable at {$ml['base_url']}: {$exc->getMessage()}", previous: $exc);
+            throw new MlApiException(
+                "ML API /v1/stamp/embed unreachable at {$ml['base_url']} for document {$document->id}: {$exc->getMessage()}",
+                retryable: true,
+                previous: $exc,
+            );
         }
 
         if ($response->failed()) {
-            throw new RuntimeException("ML API /v1/stamp/embed returned HTTP {$response->status()}.");
+            $this->throwForFailure('/v1/stamp/embed', $response, "document {$document->id}");
         }
 
         $vector = $response->json('vector');
@@ -148,12 +176,40 @@ class MlPipelineService
     private function client(): PendingRequest
     {
         $ml = config('advs.ml');
+        $attempts = max(1, (int) ($ml['retries'] ?? 1) + 1);
 
         return Http::baseUrl($ml['base_url'])
             ->withToken((string) $ml['token'])
             ->connectTimeout((int) ($ml['connect_timeout'] ?? 10))
             ->timeout((int) ($ml['timeout'] ?? 180))
-            ->retry(1, 0, throw: false);
+            ->retry(
+                $attempts,
+                static fn (int $attempt): int => min(1000 * (2 ** max(0, $attempt - 1)), 5000),
+                static function (Throwable $exception): bool {
+                    if ($exception instanceof ConnectionException) {
+                        return true;
+                    }
+
+                    return $exception instanceof RequestException
+                        && $exception->response?->serverError() === true;
+                },
+                throw: false,
+            );
+    }
+
+    private function throwForFailure(string $endpoint, Response $response, string $context): never
+    {
+        $detail = $response->json('detail');
+        $message = is_scalar($detail)
+            ? (string) $detail
+            : (is_array($detail) ? json_encode($detail) : trim($response->body()));
+        $message = $message !== '' ? Str::limit($message, 500) : 'no response body';
+
+        throw new MlApiException(
+            "ML API {$endpoint} returned HTTP {$response->status()} for {$context}: {$message}",
+            retryable: $response->serverError(),
+            status: $response->status(),
+        );
     }
 
     /**

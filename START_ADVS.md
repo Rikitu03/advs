@@ -100,7 +100,8 @@ This starts:
 
 - Laravel at `http://127.0.0.1:8000`
 - Vite development assets
-- Queue listener for `document-processing`, `mail`, and `default`
+- Queue worker for `document-processing`, `mail`, and `default` with a
+  360-second job timeout
 
 ### Terminal 2: Python ML API
 
@@ -192,7 +193,7 @@ php artisan optimize:clear
 
 ### Documents stay queued
 
-Confirm Terminal 1 is running and includes the queue listener. The required
+Confirm Terminal 1 is running and includes the queue worker. The required
 queue is `document-processing`.
 
 ### ML API is unreachable
@@ -202,6 +203,7 @@ Python `API_TOKEN`.
 
 ```powershell
 curl.exe http://127.0.0.1:7860/health
+curl.exe http://127.0.0.1:7860/ready
 ```
 
 ### `/ready` returns 503

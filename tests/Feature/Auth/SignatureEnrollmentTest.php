@@ -197,6 +197,24 @@ class SignatureEnrollmentTest extends TestCase
         $this->assertDatabaseCount('vendor_embeddings', 0);
     }
 
+    public function test_zero_signatures_shows_clear_detection_message(): void
+    {
+        Storage::fake('local');
+        $this->fakeEnrollApi(['count' => 0, 'consistency' => null, 'signatures' => []]);
+
+        $user = User::factory()->unenrolled()->unverified()->create();
+        Vendor::factory()->create(['user_id' => $user->id]);
+
+        Volt::actingAs($user)
+            ->test('auth.signature-enroll')
+            ->set('photo', $this->fakePng('signatures.png'))
+            ->call('enroll')
+            ->assertDispatched('toast-show', fn ($event, $params) => str_contains($params['slots']['text'] ?? '', 'No signatures were detected'));
+
+        $this->assertNull($user->refresh()->signature_enrolled_at);
+        $this->assertDatabaseCount('vendor_embeddings', 0);
+    }
+
     public function test_dissimilar_signatures_are_rejected_and_not_enrolled(): void
     {
         Storage::fake('local');

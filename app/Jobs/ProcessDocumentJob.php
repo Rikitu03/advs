@@ -5,12 +5,14 @@ namespace App\Jobs;
 use App\Actions\ProcessDocumentAction;
 use App\Models\Document;
 use App\Models\PipelineRun;
+use App\Services\Document\MlApiException;
 use App\Services\Document\SubmissionFinalizer;
 use App\Services\SystemSettingsService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -38,7 +40,27 @@ class ProcessDocumentJob implements ShouldBeUnique, ShouldQueue
 
     public function handle(ProcessDocumentAction $action): void
     {
-        $action->execute($this->document->freshOrFail(), $this->attempts());
+        $document = $this->document->fresh();
+
+        if ($document === null) {
+            throw new RuntimeException("Document #{$this->document->getKey()} no longer exists.");
+        }
+
+        try {
+            $action->execute($document, $this->attempts());
+        } catch (MlApiException $error) {
+            if ($error->retryable) {
+                throw $error;
+            }
+
+            if ($this->job === null) {
+                $this->failed($error);
+
+                return;
+            }
+
+            $this->fail($error);
+        }
     }
 
     public function uniqueId(): string
@@ -48,18 +70,19 @@ class ProcessDocumentJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $e): void
     {
+        $attempt = max(1, $this->attempts());
         $this->document->update(['processing_status' => Document::STATUS_FAILED]);
 
         if (! $this->document->pipelineRuns()
             ->where('status', PipelineRun::STATUS_FAILED)
-            ->where('attempt', $this->tries)
+            ->where('attempt', $attempt)
             ->exists()) {
             $settings = app(SystemSettingsService::class);
             $snapshot = $settings->pipelineSnapshot();
             PipelineRun::query()->create([
                 'document_id' => $this->document->id,
                 'submission_id' => $this->document->submission_id,
-                'attempt' => max(1, $this->tries),
+                'attempt' => $attempt,
                 'status' => PipelineRun::STATUS_FAILED,
                 'schema_version' => null,
                 'settings_snapshot' => $snapshot,

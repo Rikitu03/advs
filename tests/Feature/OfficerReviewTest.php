@@ -241,6 +241,114 @@ class OfficerReviewTest extends TestCase
         $this->assertNull($components['signature']['crop']);
     }
 
+    public function test_drill_down_uses_private_reference_images_for_signature_and_logo_comparisons(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $documentTypeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'document_type_id' => $documentTypeId,
+            'mime_type' => 'image/png',
+            'file_path' => 'documents/submission.png',
+        ]);
+        Storage::put('signatures/'.$vendor->id.'/reference.png', 'enrolled-signature');
+        Storage::put('documents/submission.png', 'uploaded-document');
+        DB::table('vendor_embeddings')->insert([
+            'vendor_id' => $vendor->id,
+            'signature_embedding' => json_encode([0.1, 0.2]),
+            'signature_image_path' => 'signatures/'.$vendor->id.'/reference.png',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $logoReferenceId = DB::table('logo_references')->insertGetId([
+            'document_type_id' => $documentTypeId,
+            'city' => '',
+            'feature_vector' => json_encode([0.1, 0.2]),
+            'reference_image_path' => 'logo_references/bir/national.png',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        Storage::put('logo_references/bir/national.png', 'issuer-logo');
+        ValidationResult::factory()->for($document)->create([
+            'submission_id' => $submission->id,
+            'logo_reference_id' => $logoReferenceId,
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertSame(
+            route('admin.signature.show', $vendor->id),
+            $components['signature']['reference_image_url'],
+        );
+        $this->assertSame(
+            route('admin.logo-references.show', $logoReferenceId),
+            $components['stamp']['reference_image_url'],
+        );
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.signature.show', $vendor->id))
+            ->assertOk()
+            ->assertHeader('content-type', 'image/png')
+            ->assertHeader('cache-control', 'max-age=0, no-store, private')
+            ->assertHeader('x-content-type-options', 'nosniff');
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.logo-references.show', $logoReferenceId))
+            ->assertOk()
+            ->assertHeader('content-type', 'image/png')
+            ->assertHeader('cache-control', 'max-age=0, no-store, private')
+            ->assertHeader('x-content-type-options', 'nosniff');
+    }
+
+    public function test_reference_image_routes_return_not_found_for_stale_storage_paths(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        DB::table('vendor_embeddings')->insert([
+            'vendor_id' => $vendor->id,
+            'signature_image_path' => 'signatures/missing.png',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $documentTypeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $logoReferenceId = DB::table('logo_references')->insertGetId([
+            'document_type_id' => $documentTypeId,
+            'city' => '',
+            'feature_vector' => json_encode([0.1, 0.2]),
+            'reference_image_path' => 'logo_references/bir/missing.png',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.signature.show', $vendor->id))
+            ->assertNotFound();
+        $this->actingAs($this->officer)
+            ->get(route('admin.logo-references.show', $logoReferenceId))
+            ->assertNotFound();
+    }
+
+    public function test_drill_down_ignores_malformed_detection_boxes(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create(['mime_type' => 'image/png']);
+        ValidationResult::factory()->for($document)->create([
+            'signature_bbox' => [10, 20, 5, 40],
+            'stamp_bbox' => ['bad', 0, 20, 20],
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertNull($components['signature']['crop']);
+        $this->assertNull($components['stamp']['crop']);
+    }
+
     /**
      * A genuine detection miss (no bbox at all) must keep its original, accurate
      * "no region detected" wording — only the misattributed case changes.
@@ -522,6 +630,8 @@ class OfficerReviewTest extends TestCase
         $this->actingAs($user)->get(route('admin.pending'))->assertForbidden();
         $this->actingAs($user)->get(route('admin.submissions.show', 1042))->assertForbidden();
         $this->actingAs($user)->get(route('admin.documents.show', $document->id))->assertForbidden();
+        $this->actingAs($user)->get(route('admin.signature.show', 1))->assertForbidden();
+        $this->actingAs($user)->get(route('admin.logo-references.show', 1))->assertForbidden();
         $this->actingAs($user)->get(route('admin.archived'))->assertForbidden();
         $this->actingAs($user)->get(route('admin.vendors'))->assertForbidden();
         $this->actingAs($user)->get(route('admin.vendors.show', 1))->assertForbidden();
@@ -536,5 +646,7 @@ class OfficerReviewTest extends TestCase
         $this->get(route('admin.vendors'))->assertRedirect('/login');
         $this->get(route('admin.risk-logs'))->assertRedirect('/login');
         $this->get(route('admin.notifications'))->assertRedirect('/login');
+        $this->get(route('admin.signature.show', 1))->assertRedirect('/login');
+        $this->get(route('admin.logo-references.show', 1))->assertRedirect('/login');
     }
 }

@@ -265,3 +265,67 @@ def test_enroll_rejects_unreadable_image(tmp_path):
             files={"file": ("x.jpg", b"not-an-image", "image/jpeg")},
         )
     assert response.status_code == 422
+
+
+def test_enroll_zero_signatures_returns_null_consistency_and_centroid(tmp_path, jpeg_bytes):
+    """No signatures detected → count=0, consistency=None, centroid=None."""
+    pytest.importorskip("tensorflow")
+
+    detector = _StubDetector([])  # No detections at all
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        body = client.post(
+            "/v1/signature/enroll", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()
+
+    assert body["count"] == 0
+    assert body["signatures"] == []
+    assert body["consistency"] is None
+    assert body["centroid"] is None
+    # Forensics still runs even with zero signatures
+    assert "forensics" in body
+    assert isinstance(body["forensics"]["hard_flag"], bool)
+
+
+def test_enroll_contrast_enhancement_fallback_detects_signatures(tmp_path, jpeg_bytes):
+    """When initial detection finds no signatures, contrast enhancement is tried."""
+    pytest.importorskip("tensorflow")
+
+    # First call (normal image) returns no detections
+    # Second call (enhanced image) returns 3 signatures
+    class _FallbackDetector:
+        names = {0: "logo", 1: "signature", 2: "stamp_seal"}
+        
+        def __init__(self):
+            self.calls = []
+        
+        def predict(self, source, conf, verbose=False, **kwargs):
+            self.calls.append({"source": source, "conf": conf})
+            # First call: no detections; second call (enhanced): 3 signatures
+            if len(self.calls) == 1:
+                return [_StubResult(self.names, [])]
+            else:
+                return [_StubResult(self.names, [
+                    _StubBox(cls=1, conf=0.95, xyxy=[10, 10, 120, 60]),
+                    _StubBox(cls=1, conf=0.90, xyxy=[10, 80, 120, 130]),
+                    _StubBox(cls=1, conf=0.88, xyxy=[10, 150, 120, 200]),
+                ])]
+
+    detector = _FallbackDetector()
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        body = client.post(
+            "/v1/signature/enroll", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()
+
+    # Should have made 2 detection calls (original + enhanced)
+    assert len(detector.calls) == 2
+    # Enhanced detection found 3 signatures
+    assert body["count"] == 3
+    assert len(body["signatures"]) == 3
+    assert body["consistency"] is not None
+    assert body["centroid"] is not None

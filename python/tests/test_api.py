@@ -101,7 +101,7 @@ def test_health_is_open_and_reports_missing_models(client):
     assert body["status"] == "ok"
     assert set(body["models"]) == {
         "classifier", "detector", "siamese", "stamp", "stamp_classifier",
-        "rapid_detector", "trocr", "trocr_accurate",
+        "signature_enroll_detector", "rapid_detector", "trocr", "trocr_accurate",
     }
     # File/dir-gated models: an empty tmp model_dir means none of these are
     # configured, so all report "not loaded" the same way.
@@ -113,6 +113,11 @@ def test_health_is_open_and_reports_missing_models(client):
     # rapid_detector (RapidOCR) bundles its own weights inside the pip
     # package — no path to gate on, so it always loads.
     assert body["models"]["rapid_detector"]["loaded"] is True
+    assert body["models"]["signature_enroll_detector"] == {
+        "loaded": False,
+        "path": None,
+        "error": "not_configured",
+    }
 
 
 def test_readiness_fails_when_required_artifacts_or_manifest_are_missing(client):

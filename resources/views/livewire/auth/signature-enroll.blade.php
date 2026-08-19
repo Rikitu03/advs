@@ -171,10 +171,12 @@ new #[Layout('components.layouts.auth')] class extends Component
     private function rejectionMessage(SignatureEnrollmentResult $result): string
     {
         return match ($result->reason) {
-            SignatureEnrollmentService::REASON_COUNT => __(
-                'We detected :count signature(s). Please upload a photo with exactly :expected signatures.',
-                ['count' => $result->count, 'expected' => (int) config('advs.signature.expected_count')],
-            ),
+            SignatureEnrollmentService::REASON_COUNT => $result->count === 0
+                ? __('No signatures were detected. Please retake the photo with three signatures clearly visible on blank paper.')
+                : __(
+                    'We detected :count signature(s). Please upload a photo with exactly :expected signatures.',
+                    ['count' => $result->count, 'expected' => (int) config('advs.signature.expected_count')],
+                ),
             SignatureEnrollmentService::REASON_SIMILARITY => __('Signatures are not similar enough'),
             SignatureEnrollmentService::REASON_EDITED => __('This image appears edited, or a signature was placed on top of another file. Please upload a genuine, unedited photo.'),
             default => __('We could not accept this photo. Please retake it and upload again.'),

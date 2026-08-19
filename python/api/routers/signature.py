@@ -12,6 +12,7 @@ Siamese weights (SIAMESE_MODEL_PATH — defaults to the encoder,
 from __future__ import annotations
 
 import io
+import logging
 import tempfile
 from pathlib import Path
 
@@ -24,12 +25,34 @@ from ..schemas import SignatureEmbedResponse, SignatureEnrollResponse, Signature
 from ..uploads import save_upload
 from .detect import run_detection
 
+logger = logging.getLogger("advs.api.signature")
 router = APIRouter()
 
 # Safety ceiling on how many signature crops one enrollment photo may embed. The
 # registration flow expects exactly 3 (Laravel enforces the count); this only
 # bounds the work if the detector floods the page with boxes.
 MAX_ENROLL_SIGNATURES = 10
+
+
+def _normalize_contrast(image: Image.Image) -> Image.Image:
+    """Enhance contrast for blank-paper signature photos.
+
+    Registration photos are often low-contrast (dark ink on white paper).
+    CLAHE (Contrast Limited Adaptive Histogram Equalization) on the luminance
+    channel can make signature strokes more distinct to the detector without
+    altering the signature geometry. This is a lightweight preprocessing step
+    that only runs when the initial detection finds no signatures.
+    """
+    from PIL import ImageEnhance, ImageFilter
+
+    # Convert to grayscale for luminance-based enhancement
+    enhanced = image.convert("L")
+    # Apply autocontrast to stretch the histogram
+    enhanced = ImageEnhance.Contrast(enhanced).enhance(1.5)
+    # Sharpen to emphasize strokes
+    enhanced = enhanced.filter(ImageFilter.SHARPEN)
+    # Convert back to RGB for the detector
+    return enhanced.convert("RGB")
 
 
 def _resnet_preprocess(batch):
@@ -141,9 +164,18 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
     settings: Settings = request.app.state.settings
     detector = registry.get("signature_enroll_detector") or registry.require("detector")
     siamese = registry.require("siamese")
+    
+    detector_name = "signature_enroll_detector" if registry.get("signature_enroll_detector") else "detector"
 
     data = await file.read()
     image = _decode_image(data)
+    
+    logger.info(
+        "signature_enroll: image=%dx%d, detector=%s, confidence=%.2f, imgsz=%d",
+        image.width, image.height, detector_name,
+        settings.signature_enroll_detection_confidence,
+        settings.signature_enroll_detection_imgsz,
+    )
 
     detection = run_detection(
         detector,
@@ -152,11 +184,43 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
         confidence=settings.signature_enroll_detection_confidence,
         imgsz=settings.signature_enroll_detection_imgsz,
     )
+    
     signature_boxes = sorted(
         (d for d in detection["detections"] if d["label"] == "signature"),
         key=lambda d: d["confidence"],
         reverse=True,
     )[:MAX_ENROLL_SIGNATURES]
+    
+    logger.info(
+        "signature_enroll: raw_detections=%d, signature_detections=%d",
+        len(detection["detections"]), len(signature_boxes)
+    )
+    
+    # Preprocessing fallback: if no signatures detected, try contrast enhancement
+    # This helps with low-contrast blank-paper photos that are out-of-distribution
+    # for the document-trained detector.
+    if not signature_boxes:
+        logger.info("signature_enroll: no signatures found, attempting contrast enhancement fallback")
+        enhanced_image = _normalize_contrast(image)
+        
+        enhanced_detection = run_detection(
+            detector,
+            enhanced_image,
+            settings,
+            confidence=settings.signature_enroll_detection_confidence,
+            imgsz=settings.signature_enroll_detection_imgsz,
+        )
+        
+        signature_boxes = sorted(
+            (d for d in enhanced_detection["detections"] if d["label"] == "signature"),
+            key=lambda d: d["confidence"],
+            reverse=True,
+        )[:MAX_ENROLL_SIGNATURES]
+        
+        logger.info(
+            "signature_enroll: enhanced raw_detections=%d, signature_detections=%d",
+            len(enhanced_detection["detections"]), len(signature_boxes)
+        )
 
     samples: list[dict] = []
     embeddings: list[list[float]] = []

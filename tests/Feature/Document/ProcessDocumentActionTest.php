@@ -5,10 +5,12 @@ namespace Tests\Feature\Document;
 use App\Actions\ProcessDocumentAction;
 use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
+use App\Services\Document\MlApiException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Tests\TestCase;
 
 class ProcessDocumentActionTest extends TestCase
@@ -37,23 +39,33 @@ class ProcessDocumentActionTest extends TestCase
     private function fakeMl(array $stages, array $flags = []): void
     {
         Http::fake([
-            '*/v1/validate' => Http::response([
-                'schema_version' => '1.0',
+            '*/v1/validate' => Http::response($this->mlResponse($stages, $flags), 200),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $stages
+     * @param  list<string>  $flags
+     * @return array<string, mixed>
+     */
+    private function mlResponse(array $stages, array $flags = []): array
+    {
+        return [
+            'schema_version' => '1.0',
+            'status' => 'completed',
+            'stages' => $stages,
+            'flags' => $flags,
+            'pages' => [[
+                'page_index' => 1,
                 'status' => 'completed',
                 'stages' => $stages,
                 'flags' => $flags,
-                'pages' => [[
-                    'page_index' => 1,
-                    'status' => 'completed',
-                    'stages' => $stages,
-                    'flags' => $flags,
-                    'timings' => ['total_ms' => 12],
-                ]],
-                'models' => ['classifier' => ['loaded' => true, 'version' => 'test']],
-                'settings_hash' => str_repeat('a', 64),
                 'timings' => ['total_ms' => 12],
-            ], 200),
-        ]);
+            ]],
+            'models' => ['classifier' => ['loaded' => true, 'version' => 'test']],
+            'settings_hash' => str_repeat('a', 64),
+            'timings' => ['total_ms' => 12],
+        ];
     }
 
     /**
@@ -207,7 +219,7 @@ class ProcessDocumentActionTest extends TestCase
         try {
             app(ProcessDocumentAction::class)->execute($document->fresh(), 2);
             $this->fail('The HTTP failure should be rethrown.');
-        } catch (\RuntimeException) {
+        } catch (RuntimeException) {
         }
 
         $this->assertSame(Document::STATUS_VERIFYING, $document->fresh()->processing_status);
@@ -215,6 +227,47 @@ class ProcessDocumentActionTest extends TestCase
         // No component scores + no forensic verdict → nothing persisted for Stage T.
         $this->assertDatabaseMissing('tamper_analyses', ['document_id' => $document->id]);
         $this->assertDatabaseMissing('validation_results', ['document_id' => $document->id]);
+    }
+
+    public function test_ml_api_retries_a_transient_service_failure(): void
+    {
+        $document = $this->document();
+        config(['advs.ml.retries' => 1]);
+        Http::preventStrayRequests();
+        Http::fakeSequence('*/v1/validate')
+            ->push(['detail' => 'models are warming'], 503)
+            ->push($this->mlResponse($this->cleanStages()), 200);
+
+        $result = app(ProcessDocumentAction::class)->execute($document->fresh());
+
+        $this->assertSame(Document::STATUS_COMPLETED, $document->fresh()->processing_status);
+        $this->assertSame('BIR Permit', $result->classification_label);
+        Http::assertSentCount(2);
+    }
+
+    public function test_ml_api_does_not_retry_a_contract_failure_and_preserves_details(): void
+    {
+        $document = $this->document();
+        config(['advs.ml.retries' => 2]);
+        Http::preventStrayRequests();
+        Http::fakeSequence('*/v1/validate')
+            ->push(['detail' => [['loc' => ['body', 'file'], 'msg' => 'Field required']]], 422)
+            ->push($this->mlResponse($this->cleanStages()), 200);
+
+        try {
+            app(ProcessDocumentAction::class)->execute($document->fresh());
+            $this->fail('The contract failure should be rethrown.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('HTTP 422', $exception->getMessage());
+            $this->assertStringContainsString('Field required', $exception->getMessage());
+            $this->assertStringContainsString("document {$document->id}", $exception->getMessage());
+        }
+
+        Http::assertSentCount(1);
+        $this->assertDatabaseHas('pipeline_runs', [
+            'document_id' => $document->id,
+            'status' => 'failed',
+        ]);
     }
 
     /**
@@ -249,10 +302,50 @@ class ProcessDocumentActionTest extends TestCase
     {
         $document = Document::factory()->create(['processing_status' => Document::STATUS_VERIFYING]);
 
-        (new ProcessDocumentJob($document))->failed(new \RuntimeException('boom'));
+        (new ProcessDocumentJob($document))->failed(new RuntimeException('boom'));
 
         $this->assertSame(Document::STATUS_FAILED, $document->fresh()->processing_status);
         $this->assertContains('processing_failed', $document->validationResult->flags);
+    }
+
+    public function test_job_fails_terminal_ml_contract_errors_without_queue_retry(): void
+    {
+        $document = $this->document();
+        config(['advs.ml.retries' => 2]);
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/v1/validate' => Http::response(['detail' => 'invalid multipart contract'], 422),
+        ]);
+
+        (new ProcessDocumentJob($document))->handle(app(ProcessDocumentAction::class));
+
+        Http::assertSentCount(1);
+        $this->assertSame(Document::STATUS_FAILED, $document->fresh()->processing_status);
+        $this->assertContains('processing_failed', $document->validationResult->flags);
+    }
+
+    public function test_job_rethrows_retryable_ml_service_errors_for_queue_retry(): void
+    {
+        $document = $this->document();
+        config(['advs.ml.retries' => 0]);
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/v1/validate' => Http::response(['detail' => 'service unavailable'], 503),
+        ]);
+
+        try {
+            (new ProcessDocumentJob($document))->handle(app(ProcessDocumentAction::class));
+            $this->fail('The retryable ML failure should be rethrown.');
+        } catch (MlApiException $exception) {
+            $this->assertTrue($exception->retryable);
+        }
+
+        $this->assertSame(Document::STATUS_VERIFYING, $document->fresh()->processing_status);
+        $this->assertDatabaseHas('pipeline_runs', [
+            'document_id' => $document->id,
+            'attempt' => 1,
+            'status' => 'failed',
+        ]);
     }
 
     public function test_job_is_queued_on_the_document_processing_queue(): void
@@ -269,5 +362,46 @@ class ProcessDocumentActionTest extends TestCase
                 && $job->backoff === [10, 30, 60]
                 && $job->uniqueId() === (string) $document->id;
         });
+
+        $this->assertGreaterThan(
+            360,
+            (int) config('queue.connections.database.retry_after'),
+            'The database queue retry_after must exceed the document job timeout.',
+        );
+    }
+
+    /**
+     * Regression: handle() used to call the non-existent Document::freshOrFail(),
+     * which threw immediately and exhausted every job into failed_jobs before the
+     * pipeline ever ran. The job must reload a fresh model and process to completion.
+     */
+    public function test_job_handle_processes_document_to_completion(): void
+    {
+        $document = $this->document();
+        $this->fakeMl($this->cleanStages());
+
+        (new ProcessDocumentJob($document))->handle(app(ProcessDocumentAction::class));
+
+        $this->assertSame(Document::STATUS_COMPLETED, $document->fresh()->processing_status);
+        $this->assertDatabaseHas('validation_results', ['document_id' => $document->id]);
+        $this->assertDatabaseHas('pipeline_runs', ['document_id' => $document->id, 'status' => 'completed']);
+    }
+
+    /**
+     * When the document is deleted between dispatch and handle(), the job must
+     * throw rather than silently skip or pass null to execute().
+     */
+    public function test_job_handle_throws_when_document_no_longer_exists(): void
+    {
+        $document = Document::factory()->create(['processing_status' => Document::STATUS_QUEUED]);
+        $docId = $document->id;
+        $document->delete();
+
+        $job = new ProcessDocumentJob($document);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage("Document #{$docId} no longer exists.");
+
+        $job->handle(app(ProcessDocumentAction::class));
     }
 }

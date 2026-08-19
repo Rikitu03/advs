@@ -6,6 +6,7 @@ use App\Models\Submission;
 use App\Models\ValidationResult;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Maps Eloquent submissions onto the array shape the admin Volt pages render
@@ -80,6 +81,16 @@ class SubmissionPresenter
         $thresholds = config('advs.thresholds');
 
         $typeNames = self::typeNames();
+        $signatureReferenceUrl = self::signatureReferenceUrl($submission->vendor_id);
+        $logoReferenceUrls = self::logoReferenceUrls(
+            $submission->documents
+                ->pluck('validationResult.logo_reference_id')
+                ->filter()
+                ->map(fn ($id): int => (int) $id)
+                ->unique()
+                ->values()
+                ->all(),
+        );
 
         $summary['documents'] = $submission->documents->map(fn ($document): array => [
             'id' => $document->id,
@@ -105,7 +116,7 @@ class SubmissionPresenter
         // §6 drill-down filter: one component set per document type present in
         // the submission, plus 'all' (the highest-risk document overall).
         $filters = [['key' => 'all', 'label' => 'All']];
-        $sets = ['all' => self::components($result, $thresholds)];
+        $sets = ['all' => self::components($result, $thresholds, $signatureReferenceUrl, $logoReferenceUrls)];
 
         $byRisk
             ->groupBy(fn ($document) => $document->document_type_id ?? 0)
@@ -115,9 +126,9 @@ class SubmissionPresenter
                 'result' => $group->first()?->validationResult,
             ])
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
-            ->each(function (array $type) use (&$filters, &$sets, $thresholds): void {
+            ->each(function (array $type) use (&$filters, &$sets, $thresholds, $signatureReferenceUrl, $logoReferenceUrls): void {
                 $filters[] = ['key' => $type['key'], 'label' => $type['label']];
-                $sets[$type['key']] = self::components($type['result'], $thresholds);
+                $sets[$type['key']] = self::components($type['result'], $thresholds, $signatureReferenceUrl, $logoReferenceUrls);
             });
 
         $summary['component_filters'] = $filters;
@@ -134,8 +145,12 @@ class SubmissionPresenter
      * @param  array<string, float|string>  $thresholds
      * @return array<string, array<string, mixed>>
      */
-    private static function components(?ValidationResult $result, array $thresholds): array
-    {
+    private static function components(
+        ?ValidationResult $result,
+        array $thresholds,
+        ?string $signatureReferenceUrl = null,
+        array $logoReferenceUrls = [],
+    ): array {
         $signatureSimilarity = $result?->signature_score !== null ? (int) round($result->signature_score * 100) : null;
         $stampSimilarity = $result?->stamp_score !== null ? (int) round($result->stamp_score * 100) : null;
 
@@ -168,6 +183,7 @@ class SubmissionPresenter
                 'distance_threshold' => 'empirical',
                 'pass' => (bool) ($result?->signature_passed ?? false),
                 'crop' => self::cropData($result, $result?->signature_bbox),
+                'reference_image_url' => $signatureReferenceUrl,
                 'detail' => match (true) {
                     $result === null || $result->signature_detected === null => 'Stage not yet available.',
                     $result->signature_bbox === null => 'No signature region detected.',
@@ -180,8 +196,12 @@ class SubmissionPresenter
                 'verified' => (bool) ($result?->stamp_detected ?? false),
                 'similarity' => $stampSimilarity,
                 'cosine' => $result?->stamp_similarity !== null ? round($result->stamp_similarity, 3) : '—',
+                'similarity_threshold' => (int) round((float) $thresholds['stamp'] * 100),
                 'pass' => (bool) ($result?->stamp_passed ?? false),
                 'crop' => self::cropData($result, $result?->stamp_bbox),
+                'reference_image_url' => $result?->logo_reference_id === null
+                    ? null
+                    : ($logoReferenceUrls[$result->logo_reference_id] ?? null),
                 'detail' => match (true) {
                     $result === null || $result->stamp_detected === null => 'Stage not yet available.',
                     $result->stamp_bbox === null => 'No stamp/logo region detected.',
@@ -206,7 +226,7 @@ class SubmissionPresenter
     private static function cropData(?ValidationResult $result, ?array $box): ?array
     {
         $document = $box !== null ? $result?->document : null;
-        if ($document === null || self::previewKind($document->mime_type) !== 'image') {
+        if ($document === null || self::previewKind($document->mime_type) !== 'image' || ! self::validBoundingBox($box)) {
             return null;
         }
 
@@ -214,6 +234,55 @@ class SubmissionPresenter
             'url' => route('admin.documents.show', $document->id),
             'box' => $box,
         ];
+    }
+
+    /**
+     * Inference output is external input; malformed boxes must not break the
+     * officer report renderer or produce invalid CSS dimensions.
+     *
+     * @param  list<float>|null  $box
+     */
+    private static function validBoundingBox(?array $box): bool
+    {
+        if ($box === null || count($box) !== 4 || ! collect($box)->every(fn ($value): bool => is_numeric($value) && is_finite((float) $value))) {
+            return false;
+        }
+
+        return (float) $box[0] >= 0.0
+            && (float) $box[1] >= 0.0
+            && (float) $box[2] > (float) $box[0]
+            && (float) $box[3] > (float) $box[1];
+    }
+
+    private static function signatureReferenceUrl(int $vendorId): ?string
+    {
+        $path = DB::table('vendor_embeddings')
+            ->where('vendor_id', $vendorId)
+            ->value('signature_image_path');
+        $path = is_string($path) ? ltrim($path, '/') : null;
+
+        return $path !== null && str_starts_with($path, 'signatures/') && Storage::disk('local')->exists($path)
+            ? route('admin.signature.show', ['vendor' => $vendorId])
+            : null;
+    }
+
+    /**
+     * @param  list<int>  $logoReferenceIds
+     * @return array<int, string>
+     */
+    private static function logoReferenceUrls(array $logoReferenceIds): array
+    {
+        if ($logoReferenceIds === []) {
+            return [];
+        }
+
+        return DB::table('logo_references')
+            ->whereIn('id', $logoReferenceIds)
+            ->pluck('reference_image_path', 'id')
+            ->map(fn ($path): ?string => is_string($path) ? ltrim($path, '/') : null)
+            ->filter(fn ($path): bool => $path !== null && str_starts_with($path, 'logo_references/') && Storage::disk('local')->exists($path))
+            ->mapWithKeys(fn ($path, $id): array => [(int) $id => route('admin.logo-references.show', ['logoReference' => $id])])
+            ->all();
     }
 
     /**

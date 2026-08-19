@@ -30,11 +30,15 @@
             {{-- Reference --}}
             <div class="rounded-xl border border-cu-border bg-cu-surface p-4">
                 <div class="mb-2 flex items-center justify-between">
-                    <span class="text-xs font-medium text-cu-muted">Reference (enrolled)</span>
+                    <span class="text-xs font-medium text-cu-muted">Issuer reference logo</span>
                     <flux:icon icon="check-badge" class="size-4 text-cu-blue" />
                 </div>
                 <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] dark:bg-white/[0.03] text-cu-blue">
-                    <x-stamp-mark />
+                    @if ($data['reference_image_url'] ?? null)
+                        <img src="{{ $data['reference_image_url'] }}" alt="Issuer reference logo" class="max-h-full max-w-full object-contain" />
+                    @else
+                        <span class="text-xs text-cu-muted">Reference image unavailable</span>
+                    @endif
                 </div>
             </div>
 
@@ -44,8 +48,12 @@
                     <span class="text-xs font-medium text-cu-muted">Query (this submission)</span>
                     <x-pass-fail :pass="$pass" />
                 </div>
-                <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] dark:bg-white/[0.03] {{ $queryInk }}">
-                    <x-stamp-mark />
+                <div class="flex min-h-24 items-center justify-center rounded-lg bg-black/[0.03] p-2 dark:bg-white/[0.03] {{ $queryInk }}">
+                    @if ($data['crop'] ?? null)
+                        <x-detection-crop :url="$data['crop']['url']" :box="$data['crop']['box']" label="Detected stamp/logo" />
+                    @else
+                        <span class="text-xs text-cu-muted">Not available for this document</span>
+                    @endif
                 </div>
             </div>
         </div>
@@ -62,7 +70,7 @@
             </div>
             <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
                 <p class="text-xs text-cu-muted">Similarity threshold</p>
-                <p class="text-lg font-semibold text-cu-text">≥ 0.85</p>
+                <p class="text-lg font-semibold text-cu-text">≥ {{ $data['similarity_threshold'] ?? 85 }}%</p>
             </div>
         </div>
     </div>
