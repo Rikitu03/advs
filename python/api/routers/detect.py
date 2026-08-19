@@ -31,13 +31,24 @@ def _canonical(label: str) -> str:
     return LABEL_ALIASES.get(label, label)
 
 
-def run_detection(model, image: Image.Image, settings: Settings) -> dict:
+def run_detection(
+    model,
+    image: Image.Image,
+    settings: Settings,
+    *,
+    confidence: float | None = None,
+    imgsz: int | None = None,
+) -> dict:
     """Detect regions on one PIL page; no detection is a flag, never an error."""
-    results = model.predict(
-        source=image.convert("RGB"),
-        conf=settings.yolo_detection_confidence,
-        verbose=False,
-    )
+    prediction_options = {
+        "source": image.convert("RGB"),
+        "conf": settings.yolo_detection_confidence if confidence is None else confidence,
+        "verbose": False,
+    }
+    if imgsz is not None:
+        prediction_options["imgsz"] = imgsz
+
+    results = model.predict(**prediction_options)
 
     detections = []
     for result in results:

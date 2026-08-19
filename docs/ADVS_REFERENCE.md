@@ -4,7 +4,7 @@
 
 ---
 
-> **Implementation phase plans:** this reference defines *what* the system does; the *how/when* now lives in three concern-split phase plans under [`docs/phases/`](docs/phases/) — [pipeline integration](docs/phases/PIPELINE_INTEGRATION_PHASES.md) · [model training](docs/phases/MODEL_TRAINING_PHASES.md) · [UI functions](docs/phases/UI_FUNCTION_PHASES.md) — each folding in the Negofood client-interview direction ([gap plan](docs/CLIENT_INTERVIEW_GAP_PLAN.md)).
+> **Implementation phase plans:** this reference defines *what* the system does; the *how/when* now lives in three concern-split phase plans under [`phases/`](phases/) — [pipeline integration](phases/PIPELINE_INTEGRATION_PHASES.md) · [model training](phases/MODEL_TRAINING_PHASES.md) · [UI functions](phases/UI_FUNCTION_PHASES.md) — each folding in the Negofood client-interview direction ([gap plan](CLIENT_INTERVIEW_GAP_PLAN.md)).
 
 ---
 
@@ -14,7 +14,7 @@ The ADVS is a web-based system built on a **Laravel 11 backend with Python infer
 
 The system is **on-demand, not calendar-driven**. It activates whenever a vendor submits documents — whether that's an initial application, a renewal, or an update triggered by an expiring credential or new regulation. The implementing organization decides the cadence; ADVS simply processes whatever arrives.
 
-> **Approved update (Negofood client interview, 2026-06-29):** a **renewal scheduler** is being added that proactively flags expiring/expired credentials and sends renewal reminders — a deliberate **calendar-driven** dimension layered on top of the on-demand core. This is the one approved departure from the statement above. See the compliance-lifecycle plan in [`docs/phases/PIPELINE_INTEGRATION_PHASES.md`](docs/phases/PIPELINE_INTEGRATION_PHASES.md) (Phase P5) and [`docs/CLIENT_INTERVIEW_GAP_PLAN.md`](docs/CLIENT_INTERVIEW_GAP_PLAN.md).
+> **Approved update (Negofood client interview, 2026-06-29):** a **renewal scheduler** is being added that proactively flags expiring/expired credentials and sends renewal reminders — a deliberate **calendar-driven** dimension layered on top of the on-demand core. This is the one approved departure from the statement above. See the compliance-lifecycle plan in [`phases/PIPELINE_INTEGRATION_PHASES.md`](phases/PIPELINE_INTEGRATION_PHASES.md) (Phase P5) and [`CLIENT_INTERVIEW_GAP_PLAN.md`](CLIENT_INTERVIEW_GAP_PLAN.md).
 
 Three distinct user roles interact with the system: **Vendors** (who submit documents), **Compliance Officers** (who review validation results and render accreditation decisions), and **System Administrators** (who manage users, configure thresholds, and oversee the platform). Each role has a scoped view of the system enforced by role-based access control.
 
@@ -229,7 +229,9 @@ This section walks through exactly what happens from the moment a file enters th
 
 **Input**: Cropped signature region from YOLOv8.
 
-> **The signature reference is enrolled at vendor registration — not during the pipeline.** Every vendor captures a reference signature during sign-up (registration **step 2**, before email verification): they photograph three signatures on white bond paper, an authenticity check rejects software-edited/filtered images, and the accepted capture is embedded once into the vendor's **128-dimensional reference embedding** and stored on the vendor record (`users.signature_path` / `vendor_embeddings.signature_embedding`). Because the reference exists **before any document is ever submitted**, the pipeline **always runs in verification mode** — there is no "first submission auto-enrolls" branch here. (This is the opposite of the logo handling in §4b, where references are keyed by city and seeded on first approval.)
+> **The signature reference is enrolled at vendor registration — not during the pipeline.** Every vendor captures a reference signature during sign-up (registration **step 2**, before email verification): they photograph three separated signatures on white bond paper, arranged in one row or one column. An authenticity check rejects software-edited/filtered images, and the accepted capture is embedded once into the vendor's **128-dimensional reference embedding** and stored on the vendor record (`users.signature_path` / `vendor_embeddings.signature_embedding`). Because the reference exists **before any document is ever submitted**, the pipeline **always runs in verification mode** — there is no "first submission auto-enrolls" branch here. (This is the opposite of the logo handling in §4b, where references are keyed by city and seeded on first approval.)
+
+Registration detection is calibrated independently from Stage 4 document detection. It prefers an optional dedicated enrollment detector and otherwise falls back to the document detector using `SIGNATURE_ENROLL_DETECTION_CONFIDENCE` and `SIGNATURE_ENROLL_DETECTION_IMGSZ`. These settings must not change the document-wide `YOLO_DETECTION_CONFIDENCE` behavior.
 
 **Verification (every submission)**:
 1. The new cropped signature is preprocessed (resized to fixed input size, pixel values normalized).
@@ -519,6 +521,8 @@ All configurable parameters that the implementing organization would set:
 | `MORPH_KERNEL_SIZE` | 2 × 2 | Kernel dimensions for morphological opening |
 | `CLASSIFICATION_CONFIDENCE_THRESHOLD` | 0.70 | Minimum ResNet-50 confidence to pass |
 | `YOLO_DETECTION_CONFIDENCE` | 0.50 | Minimum YOLOv8 detection confidence |
+| `SIGNATURE_ENROLL_DETECTION_CONFIDENCE` | 0.20 | Registration-only minimum confidence for the three-signature capture; benchmarked separately from document detection |
+| `SIGNATURE_ENROLL_DETECTION_IMGSZ` | 1280 | Registration-only YOLO inference size for thin handwritten strokes on blank paper |
 | `SIGNATURE_DISTANCE_THRESHOLD` | Empirical | Maximum Euclidean distance for signature match |
 | `STAMP_SIMILARITY_THRESHOLD` | 0.85 | Minimum cosine similarity for a logo match against the detected city's reference (85%) |
 | `RISK_WEIGHT_TEXT` | 0.20 | Weight of text validation in composite risk |

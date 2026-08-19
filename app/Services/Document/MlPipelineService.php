@@ -2,13 +2,20 @@
 
 namespace App\Services\Document;
 
+use App\Jobs\EnrollReferenceJob;
 use App\Models\Document;
 use App\Models\ValidationResult;
+use App\Services\SystemSettingsService;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * HTTP client for the FastAPI document-validation service (python/api). The whole
@@ -26,49 +33,74 @@ use RuntimeException;
  */
 class MlPipelineService
 {
+    public function __construct(private readonly SystemSettingsService $settings) {}
+
     /**
      * Send a document to the ML API and return its fail-forward result.
      *
-     * @return array{stages: array<string, mixed>, flags: list<string>, context: array{issuer_scope: string|null, logo_reference_id: int|null}}
+     * @return array{stages: array<string, mixed>, flags: list<string>, context: array{issuer_scope: string|null, logo_reference_ids: array<string, int>}}
      *
      * @throws RuntimeException on any transport or non-2xx failure (the caller fails forward).
      */
-    public function validate(Document $document): array
+    public function validate(Document $document, ?array $settingsSnapshot = null): array
     {
         $ml = config('advs.ml');
+        $settingsSnapshot ??= $this->settings->pipelineSnapshot();
 
         $type = $this->resolveDocumentType($document);
         $issuerScope = $type['issuer_scope'] ?? null;
-        // Only a national issuer can be scoped before OCR (its city is the '' sentinel);
-        // an LGU city is unknown until OCR runs, so its logo can't be resolved in one pass.
+        // Only a national issuer has a city knowable here (the '' sentinel); an LGU
+        // city prints on the document, so it does not exist until the API's own
+        // Stage 2 reads it — which is why the whole reference set is sent below and
+        // the API, not this service, picks the row to compare against.
         $city = $issuerScope === 'national' ? '' : null;
-        [$stampReference, $logoReferenceId] = $this->resolveLogoReference(
-            $document->document_type_id, $issuerScope, $city
+        [$stampReferences, $logoReferenceIds] = $this->resolveLogoReferences(
+            $document->document_type_id, $issuerScope
         );
 
-        $form = array_filter([
-            'template' => $this->ocrTemplateFor($type['code'] ?? null),
-            'document_type' => $type['code'] ?? null,
-            'city' => $city,
-            'signature_reference' => $this->resolveSignatureReference($document),
-            'stamp_reference' => $stampReference,
-            'forensics' => json_encode($this->forensicsContext(), JSON_THROW_ON_ERROR),
-        ], static fn ($value): bool => $value !== null);
+        // Build form data explicitly to ensure signature reference is properly handled
+        $form = [];
+
+        if (($typeCode = $type['code'] ?? null) !== null) {
+            $form['template'] = $this->ocrTemplateFor($typeCode);
+            $form['document_type'] = $typeCode;
+        }
+
+        if ($issuerScope !== null) {
+            $form['issuer_scope'] = $issuerScope;
+        }
+
+        if ($city !== null) {
+            $form['city'] = $city;
+        }
+
+        // Handle signature reference explicitly - ensure it's sent even if it's an empty string
+        $signatureReference = $this->resolveSignatureReference($document);
+        if ($signatureReference !== null) {
+            $form['signature_reference'] = $signatureReference;
+        }
+
+        if ($stampReferences !== null) {
+            $form['stamp_references'] = $stampReferences;
+        }
+
+        $form['forensics'] = json_encode($this->forensicsContext($settingsSnapshot), JSON_THROW_ON_ERROR);
+        $form['settings_snapshot'] = json_encode($settingsSnapshot, JSON_THROW_ON_ERROR);
 
         try {
-            $response = Http::baseUrl($ml['base_url'])
-                ->withToken((string) $ml['token'])
-                ->connectTimeout((int) ($ml['connect_timeout'] ?? 10))
-                ->timeout((int) ($ml['timeout'] ?? 180))
-                ->retry(max(1, (int) ($ml['retries'] ?? 1)), 200, throw: false)
+            $response = $this->client()
                 ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
                 ->post('/v1/validate', $form);
         } catch (ConnectionException $exc) {
-            throw new RuntimeException("ML API unreachable at {$ml['base_url']}: {$exc->getMessage()}", previous: $exc);
+            throw new MlApiException(
+                "ML API /v1/validate unreachable at {$ml['base_url']} for document {$document->id}: {$exc->getMessage()}",
+                retryable: true,
+                previous: $exc,
+            );
         }
 
         if ($response->failed()) {
-            throw new RuntimeException("ML API /v1/validate returned HTTP {$response->status()}.");
+            $this->throwForFailure('/v1/validate', $response, "document {$document->id}");
         }
 
         $body = $response->json();
@@ -77,17 +109,114 @@ class MlPipelineService
         }
 
         return [
+            'schema_version' => is_string($body['schema_version'] ?? null) ? $body['schema_version'] : null,
+            'status' => is_string($body['status'] ?? null) ? $body['status'] : 'completed',
             'stages' => $body['stages'],
             'flags' => array_values($body['flags'] ?? []),
-            'context' => ['issuer_scope' => $issuerScope, 'logo_reference_id' => $logoReferenceId],
+            'pages' => is_array($body['pages'] ?? null) ? array_values($body['pages']) : [],
+            'models' => is_array($body['models'] ?? null) ? $body['models'] : [],
+            'settings_hash' => is_string($body['settings_hash'] ?? null) ? $body['settings_hash'] : null,
+            'timings' => is_array($body['timings'] ?? null) ? $body['timings'] : [],
+            'context' => ['issuer_scope' => $issuerScope, 'logo_reference_ids' => $logoReferenceIds],
         ];
+    }
+
+    /**
+     * Embed the issuer logo found at $box inside $document (Stage 4b reference
+     * seeding — {@see EnrollReferenceJob}).
+     *
+     * The FULL document is sent with the box rather than a PHP-side crop: the box
+     * comes from Stage 4 detection, whose coordinates are in the space of the page
+     * image the API rendered, so for a PDF only the API can reproduce that space.
+     * It returns the crop it embedded, which the caller persists as the issuer's
+     * `reference_image_path` — so the stored image is provably the embedded pixels.
+     *
+     * @param  list<float>  $box  [x1, y1, x2, y2] in page-image coordinates
+     * @return array{vector: list<float>, crop: string|null} crop = raw PNG bytes
+     *
+     * @throws RuntimeException on any transport or non-2xx failure (the job retries).
+     */
+    public function embedStamp(Document $document, array $box): array
+    {
+        $ml = config('advs.ml');
+
+        try {
+            $response = $this->client()
+                ->attach('file', Storage::disk('local')->get($document->file_path), $document->original_filename)
+                ->post('/v1/stamp/embed', ['box' => json_encode(array_values($box), JSON_THROW_ON_ERROR)]);
+        } catch (ConnectionException $exc) {
+            throw new MlApiException(
+                "ML API /v1/stamp/embed unreachable at {$ml['base_url']} for document {$document->id}: {$exc->getMessage()}",
+                retryable: true,
+                previous: $exc,
+            );
+        }
+
+        if ($response->failed()) {
+            $this->throwForFailure('/v1/stamp/embed', $response, "document {$document->id}");
+        }
+
+        $vector = $response->json('vector');
+        if (! is_array($vector) || $vector === []) {
+            throw new RuntimeException('ML API /v1/stamp/embed returned no feature vector.');
+        }
+
+        $crop = $response->json('crop_png_base64');
+
+        return [
+            'vector' => array_map(static fn (mixed $value): float => (float) $value, $vector),
+            'crop' => is_string($crop) && $crop !== '' ? base64_decode($crop, true) ?: null : null,
+        ];
+    }
+
+    /**
+     * The shared, env-configured ML API client (base URL, bearer token, timeouts,
+     * retries) used by every call in this service.
+     */
+    private function client(): PendingRequest
+    {
+        $ml = config('advs.ml');
+        $attempts = max(1, (int) ($ml['retries'] ?? 1) + 1);
+
+        return Http::baseUrl($ml['base_url'])
+            ->withToken((string) $ml['token'])
+            ->connectTimeout((int) ($ml['connect_timeout'] ?? 10))
+            ->timeout((int) ($ml['timeout'] ?? 180))
+            ->retry(
+                $attempts,
+                static fn (int $attempt): int => min(1000 * (2 ** max(0, $attempt - 1)), 5000),
+                static function (Throwable $exception): bool {
+                    if ($exception instanceof ConnectionException) {
+                        return true;
+                    }
+
+                    return $exception instanceof RequestException
+                        && $exception->response?->serverError() === true;
+                },
+                throw: false,
+            );
+    }
+
+    private function throwForFailure(string $endpoint, Response $response, string $context): never
+    {
+        $detail = $response->json('detail');
+        $message = is_scalar($detail)
+            ? (string) $detail
+            : (is_array($detail) ? json_encode($detail) : trim($response->body()));
+        $message = $message !== '' ? Str::limit($message, 500) : 'no response body';
+
+        throw new MlApiException(
+            "ML API {$endpoint} returned HTTP {$response->status()} for {$context}: {$message}",
+            retryable: $response->serverError(),
+            status: $response->status(),
+        );
     }
 
     /**
      * Project the API's per-stage result onto ValidationResult column values.
      *
      * @param  array<string, mixed>  $stages
-     * @param  array{issuer_scope?: string|null, logo_reference_id?: int|null}  $context
+     * @param  array{issuer_scope?: string|null, logo_reference_ids?: array<string, int>}  $context
      * @return array{columns: array<string, mixed>, flags: list<string>}
      */
     public function mapStages(array $stages, array $context = []): array
@@ -105,6 +234,9 @@ class MlPipelineService
         if ($this->ran($classification)) {
             $columns['classification_label'] = $classification['label'] ?? null;
             $columns['classification_confidence'] = $this->float($classification['confidence'] ?? null);
+            // 1 - P(fake). Distinct from confidence: a document confidently
+            // classified `fake` is 0.98 confident and 0.02 authentic.
+            $columns['classification_authenticity'] = $this->float($classification['authenticity'] ?? null);
         }
 
         // ── Stage 2 OCR + field extraction ─────────────────────────────────────
@@ -121,6 +253,15 @@ class MlPipelineService
             $columns['text_validation_score'] = $this->float($quality['text_validation_score'] ?? null);
             $columns['text_fields_matched'] = $quality['required_matched'] ?? null;
             $columns['text_fields_expected'] = $quality['required_total'] ?? null;
+
+            // The issuing city an LGU logo reference is keyed by (§5 Stage 4b). It is
+            // knowable only here — the city prints on the document, so it does not
+            // exist until Stage 2 has read it — which is why the pre-call lookup in
+            // validate() can scope national issuers but never LGU ones.
+            $city = $this->detectedCity($page['fields'] ?? null);
+            if ($city !== null) {
+                $columns['detected_city'] = $city;
+            }
         }
 
         // ── Stage 4a signature — calibrated authenticity, NOT raw similarity ───
@@ -152,13 +293,21 @@ class MlPipelineService
         // ── Stage 4b issuer logo ───────────────────────────────────────────────
         $stamp = $stages['stamp'] ?? null;
         $issuerScope = $context['issuer_scope'] ?? null;
+        // §5 Stage 4b's texture check runs reference or not, so its verdict is
+        // read before the reference branch below. Null means the classifier
+        // could not run — leave the column alone rather than recording "clean".
+        if ($this->ran($stamp) && ($stamp['stamp_tampered'] ?? null) !== null) {
+            $columns['stamp_tampered'] = (bool) $stamp['stamp_tampered'];
+        }
         if ($this->ran($stamp) && ($stamp['reason'] ?? null) === null) {
             $similarity = $this->float($stamp['similarity_score'] ?? null);
             $columns['stamp_detected'] = true;
             $columns['stamp_similarity'] = $similarity;
             $columns['stamp_score'] = $similarity;
             $columns['stamp_passed'] = $stamp['match'] ?? null;
-            $columns['logo_reference_id'] = $context['logo_reference_id'] ?? null;
+            $columns['logo_reference_id'] = $this->matchedLogoReferenceId(
+                $context['logo_reference_ids'] ?? [], $issuerScope, $stamp['city'] ?? null
+            );
             if (($stamp['match'] ?? null) === false) {
                 $flags[] = 'stamp_mismatch';
             }
@@ -230,6 +379,36 @@ class MlPipelineService
     }
 
     /**
+     * The issuing city read by Stage 2, canonicalised, or null when this run did
+     * not read one.
+     *
+     * Returns null rather than an empty value on a miss so the caller can leave the
+     * column untouched: a re-run whose OCR degraded must not erase a city an earlier
+     * run read off the same document. Note that `''` is NOT "no city" here — it is
+     * the national-issuer sentinel in `logo_references.city`, so it must never be
+     * written from a failed read.
+     *
+     * Case and spacing are canonicalised at this single writer because the value
+     * becomes half of the unique `(document_type_id, city)` key: "CITY OF DIGOS"
+     * and "City of  Digos" have to resolve to one issuer, and the stored form is
+     * what {@see EnrollReferenceJob} labels the reference with.
+     *
+     * @param  array<string, mixed>|null  $fields  the API's Stage-2 field map
+     */
+    private function detectedCity(?array $fields): ?string
+    {
+        $field = $fields['city_issued'] ?? null;
+
+        if (! is_array($field) || ($field['matched'] ?? false) !== true) {
+            return null;
+        }
+
+        $city = Str::title(Str::squish((string) ($field['value'] ?? '')));
+
+        return $city === '' ? null : $city;
+    }
+
+    /**
      * The OCR field template the API applies for a document type. The three
      * vendor-submittable types map to their own field template; anything else
      * (IDs, contracts, …) falls back to the configured default (see config/advs.php).
@@ -240,7 +419,7 @@ class MlPipelineService
             'bir_certificate' => 'bir',
             'business_permit' => 'business_permit',
             'dti_registration' => 'dti',
-            default => (string) (config('advs.ml.template') ?? 'bir'),
+            default => 'none',
         };
     }
 
@@ -263,27 +442,57 @@ class MlPipelineService
     }
 
     /**
-     * The issuer's reference logo vector (raw JSON array string) + its row id, or
-     * [null, null] when the issuer isn't resolvable in one pass or has no reference.
+     * Every reference logo this issuer has, keyed by city, plus each row's id.
      *
-     * @return array{0: string|null, 1: int|null}
+     * A `national` issuer has exactly one row under the `''` city sentinel; an
+     * `lgu` issuer has one per city, and which one applies depends on the city
+     * printed on the document — which does not exist until Stage 2 OCR runs,
+     * inside the same API call. So the whole set travels with the request and
+     * the API picks; {@see matchedLogoReferenceId()} then records which.
+     *
+     * @return array{0: string|null, 1: array<string, int>} [JSON {city: vector}, city => id]
      */
-    private function resolveLogoReference(?int $documentTypeId, ?string $issuerScope, ?string $city): array
+    private function resolveLogoReferences(?int $documentTypeId, ?string $issuerScope): array
     {
-        if ($documentTypeId === null || $issuerScope !== 'national' || $city === null) {
-            return [null, null];
+        if ($documentTypeId === null || $issuerScope === null) {
+            return [null, []];
         }
 
-        $row = DB::table('logo_references')
+        $vectors = [];
+        $ids = [];
+
+        $rows = DB::table('logo_references')
             ->where('document_type_id', $documentTypeId)
-            ->where('city', $city)
-            ->first(['id', 'feature_vector']);
+            ->whereNotNull('feature_vector')
+            ->get(['id', 'city', 'feature_vector']);
 
-        if ($row === null || $row->feature_vector === null) {
-            return [null, null];
+        foreach ($rows as $row) {
+            $vector = json_decode((string) $row->feature_vector, true);
+            if (! is_array($vector) || $vector === []) {
+                continue;
+            }
+            $vectors[$row->city] = $vector;
+            $ids[$row->city] = (int) $row->id;
         }
 
-        return [$row->feature_vector, (int) $row->id];
+        return [$vectors === [] ? null : json_encode($vectors, JSON_THROW_ON_ERROR), $ids];
+    }
+
+    /**
+     * The `logo_references` row the API actually compared against: the `''`
+     * sentinel row for a national issuer, or the row for the city Stage 2 read.
+     *
+     * @param  array<string, int>  $ids  city => logo_references.id
+     */
+    private function matchedLogoReferenceId(array $ids, ?string $issuerScope, ?string $city): ?int
+    {
+        if ($issuerScope === 'national') {
+            return $ids[''] ?? null;
+        }
+
+        $key = Str::title(Str::squish((string) $city));
+
+        return $key === '' ? null : ($ids[$key] ?? null);
     }
 
     /**
@@ -307,11 +516,18 @@ class MlPipelineService
      *
      * @return array<string, mixed>
      */
-    private function forensicsContext(): array
+    private function forensicsContext(array $snapshot): array
     {
         return [
-            'weights' => config('advs.forensics.weights'),
-            'tamper_threshold' => config('advs.forensics.tamper_authenticity_threshold'),
+            'weights' => [
+                'metadata' => (float) ($snapshot['TAMPER_WEIGHT_METADATA'] ?? 0.20),
+                'ela' => (float) ($snapshot['TAMPER_WEIGHT_ELA'] ?? 0.25),
+                'copy_move' => (float) ($snapshot['TAMPER_WEIGHT_COPY_MOVE'] ?? 0.25),
+                'font' => (float) ($snapshot['TAMPER_WEIGHT_FONT'] ?? 0.15),
+                'cross_reference' => (float) ($snapshot['TAMPER_WEIGHT_CROSS_REFERENCE'] ?? 0.15),
+            ],
+            'tamper_threshold' => (float) ($snapshot['TAMPER_AUTHENTICITY_THRESHOLD'] ?? 0.50),
+            'hard_confidence' => (float) ($snapshot['TAMPER_HARD_THRESHOLD'] ?? 0.80),
         ];
     }
 }

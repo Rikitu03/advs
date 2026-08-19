@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $submission_id
  * @property float|null $text_validation_score
  * @property float|null $classification_confidence
+ * @property float|null $classification_authenticity
  * @property bool|null $signature_detected
  * @property float|null $signature_score
  * @property bool|null $stamp_detected
@@ -49,6 +50,7 @@ class ValidationResult extends Model
         'text_fields_expected',
         'classification_label',
         'classification_confidence',
+        'classification_authenticity',
         'signature_detected',
         'signature_bbox',
         'stamp_detected',
@@ -75,6 +77,7 @@ class ValidationResult extends Model
             'ocr_fields' => 'array',
             'text_validation_score' => 'float',
             'classification_confidence' => 'float',
+            'classification_authenticity' => 'float',
             'signature_detected' => 'boolean',
             'signature_bbox' => 'array',
             'signature_score' => 'float',

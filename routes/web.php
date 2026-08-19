@@ -5,7 +5,9 @@ use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
 use App\Models\Document;
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
@@ -79,6 +81,44 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 'Content-Type' => $document->mime_type,
             ]);
         })->name('admin.documents.show');
+
+        // Enrollment photos and issuer reference logos are private evidence;
+        // keep them behind the same officer/admin boundary as document files.
+        Route::get('admin/signatures/{vendor}', function (Vendor $vendor) {
+            $path = DB::table('vendor_embeddings')
+                ->where('vendor_id', $vendor->id)
+                ->value('signature_image_path');
+            $path = is_string($path) ? ltrim($path, '/') : null;
+
+            abort_unless($path !== null && str_starts_with($path, 'signatures/') && Storage::disk('local')->exists($path), 404);
+
+            $disk = Storage::disk('local');
+
+            return $disk->response($path, 'enrolled-signature.'.(pathinfo($path, PATHINFO_EXTENSION) ?: 'bin'), [
+                'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+                'Cache-Control' => 'private, no-store, max-age=0',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        })->name('admin.signature.show');
+
+        Route::get('admin/logo-references/{logoReference}', function (int $logoReference) {
+            $path = DB::table('logo_references')
+                ->where('id', $logoReference)
+                ->value('reference_image_path');
+            $path = is_string($path) ? ltrim($path, '/') : null;
+
+            abort_unless($path !== null && str_starts_with($path, 'logo_references/') && Storage::disk('local')->exists($path), 404);
+
+            $disk = Storage::disk('local');
+
+            return $disk->response($path, 'issuer-logo.'.(pathinfo($path, PATHINFO_EXTENSION) ?: 'bin'), [
+                'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+                'Cache-Control' => 'private, no-store, max-age=0',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        })->name('admin.logo-references.show');
 
         // Archived Reports — searchable archive of decided submissions (§4).
         Volt::route('admin/archived', 'admin.archived')->name('admin.archived');

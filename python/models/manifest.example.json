@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "models": {
+    "classifier": {
+      "version": "replace-with-training-run-id",
+      "sha256": "replace-with-64-character-sha256",
+      "input_shape": [null, 512, 512, 3],
+      "output_shape": [null, 4],
+      "classes": [
+        "bir_certificate",
+        "business_permit",
+        "dti_registration",
+        "fake"
+      ],
+      "trained_at": "2026-08-14T00:00:00Z",
+      "metrics": {
+        "accuracy": null,
+        "macro_f1": null
+      },
+      "calibrated_threshold": 0.7
+    },
+    "detector": {
+      "version": "replace-with-training-run-id",
+      "sha256": "replace-with-64-character-sha256",
+      "input_shape": [null, 3, 640, 640],
+      "output_shape": null,
+      "classes": ["logo", "signature", "stamp_seal"],
+      "trained_at": "2026-08-14T00:00:00Z",
+      "metrics": {
+        "map50": null
+      },
+      "calibrated_threshold": 0.5
+    },
+    "siamese": {
+      "version": "replace-with-training-run-id",
+      "sha256": "replace-with-64-character-sha256",
+      "input_shape": [null, 224, 224, 3],
+      "output_shape": [null, 128],
+      "classes": null,
+      "trained_at": "2026-08-14T00:00:00Z",
+      "metrics": {
+        "eer": null
+      },
+      "calibrated_threshold": null
+    },
+    "stamp": {
+      "version": "replace-with-training-run-id",
+      "sha256": "replace-with-64-character-sha256",
+      "input_shape": [null, 224, 224, 3],
+      "output_shape": [null, 1280],
+      "classes": null,
+      "trained_at": "2026-08-14T00:00:00Z",
+      "metrics": {
+        "verification_accuracy": null
+      },
+      "calibrated_threshold": 0.85
+    },
+    "stamp_classifier": {
+      "version": "replace-with-training-run-id",
+      "sha256": "replace-with-64-character-sha256",
+      "input_shape": [null, 1280],
+      "output_shape": [null, 2],
+      "classes": ["reproduction", "genuine"],
+      "trained_at": "2026-08-14T00:00:00Z",
+      "metrics": {
+        "accuracy": null
+      },
+      "calibrated_threshold": 0.5
+    }
+  }
+}

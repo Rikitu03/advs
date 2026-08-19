@@ -100,18 +100,35 @@ def test_health_is_open_and_reports_missing_models(client):
     body = response.json()
     assert body["status"] == "ok"
     assert set(body["models"]) == {
-        "classifier", "detector", "siamese", "stamp", "rapid_detector",
-        "trocr", "trocr_accurate",
+        "classifier", "detector", "siamese", "stamp", "stamp_classifier",
+        "signature_enroll_detector", "rapid_detector", "trocr", "trocr_accurate",
     }
     # File/dir-gated models: an empty tmp model_dir means none of these are
     # configured, so all report "not loaded" the same way.
-    for name in ("classifier", "detector", "siamese", "stamp", "trocr", "trocr_accurate"):
+    for name in ("classifier", "detector", "siamese", "stamp", "stamp_classifier",
+                 "trocr", "trocr_accurate"):
         status = body["models"][name]
         assert status["loaded"] is False
         assert status["error"] == "weights_not_found"
     # rapid_detector (RapidOCR) bundles its own weights inside the pip
     # package — no path to gate on, so it always loads.
     assert body["models"]["rapid_detector"]["loaded"] is True
+    assert body["models"]["signature_enroll_detector"] == {
+        "loaded": False,
+        "path": None,
+        "error": "not_configured",
+    }
+
+
+def test_readiness_fails_when_required_artifacts_or_manifest_are_missing(client):
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "not_ready"
+    assert "manifest_not_found" in body["errors"]
+    assert "classifier:model_not_loaded" in body["errors"]
+    assert body["artifacts"]["path"].endswith("manifest.json")
 
 
 def test_v1_routes_require_bearer_token(client, jpeg_bytes):
@@ -201,6 +218,45 @@ def test_classify_rejects_unreadable_image(tmp_path):
             "/v1/classify", headers=AUTH, files={"file": ("x.jpg", b"not-an-image", "image/jpeg")}
         )
     assert response.status_code == 422
+
+
+def _classifier_entry(probabilities: list[float], class_names: list[str]) -> dict:
+    class _StubModel:
+        input_shape = (None, 64, 64, 3)
+
+        def predict(self, batch, verbose=0):
+            return np.array([probabilities])
+
+    return {"model": _StubModel(), "class_names": class_names}
+
+
+CLASSES = ["bir_certificate", "business_permit", "dti_registration", "fake"]
+
+
+def test_classification_authenticity_discounts_the_fake_probability(tmp_path, jpeg_bytes):
+    """A confident 'fake' must not reach the risk blend as high authenticity —
+    the classification component is (1 - risk), so P(fake) is what matters."""
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = _classifier_entry(
+            [0.01, 0.01, 0.00, 0.98], CLASSES
+        )
+        body = client.post("/v1/classify", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["label"] == "fake"
+    assert body["confidence"] == pytest.approx(0.98)
+    assert body["authenticity"] == pytest.approx(0.02)
+
+
+def test_classification_authenticity_equals_confidence_without_a_fake_class(tmp_path, jpeg_bytes):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = _classifier_entry(
+            [0.15, 0.85], ["bir_certificate", "business_permit"]
+        )
+        body = client.post("/v1/classify", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["authenticity"] == pytest.approx(1.0)
 
 
 @pytest.mark.skipif(
@@ -485,6 +541,18 @@ class _StubEmbedderModel:
         return batch.reshape(1, -1, 3).mean(axis=1)
 
 
+class _StubStampClassifier:
+    """sklearn-like binary classifier matching train_stamp.py's labelling:
+    column 1 = P(genuine wet ink), column 0 = P(reproduction)."""
+
+    def __init__(self, genuine_probability: float):
+        self._genuine = genuine_probability
+
+    def predict_proba(self, features):
+        assert np.asarray(features).shape[0] == 1
+        return np.array([[1.0 - self._genuine, self._genuine]])
+
+
 def test_signature_embed_and_verify_roundtrip(tmp_path, jpeg_bytes):
     pytest.importorskip("tensorflow")  # resnet50 preprocess_input
 
@@ -575,6 +643,8 @@ def test_stamp_verify_matches_genuine_and_rejects_mismatch(tmp_path, jpeg_bytes)
 
 
 def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")  # the crop is now always embedded
+
     app = create_app(_settings(tmp_path))
     with TestClient(app) as client:
         app.state.registry._models["stamp"] = _StubEmbedderModel()
@@ -587,6 +657,75 @@ def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_b
     assert body["reason"] == "unreferenced_logo"
     assert body["similarity_score"] is None
     assert body["city"] == "Makati"
+    # No stamp_classifier loaded -> the check could not run; not "clean".
+    assert body["stamp_tampered"] is None
+
+
+def test_stamp_verify_runs_the_tamper_check_without_a_reference(tmp_path, jpeg_bytes):
+    """§5 Stage 4b: 'Tamper check (always runs, reference or not)'. An issuer with
+    no reference logo yet must still get the wet-ink-vs-reproduction verdict."""
+    pytest.importorskip("tensorflow")  # efficientnet preprocess_input
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        app.state.registry._models["stamp_classifier"] = _StubStampClassifier(0.10)
+
+        body = client.post(
+            "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"document_type": "business_permit", "city": "Makati"},
+        ).json()
+
+    assert body["reason"] == "unreferenced_logo"      # unchanged
+    assert body["similarity_score"] is None           # unchanged
+    assert body["stamp_tampered"] is True
+    assert body["genuine_probability"] == pytest.approx(0.10)
+
+
+def test_stamp_embed_crops_the_requested_box_and_returns_it(tmp_path, jpeg_bytes):
+    """The issuer-reference seeding path (EnrollReferenceJob) sends the FULL document
+    plus Stage 4's detection box, because those coordinates are in the page space
+    this service rendered. The crop comes back so the caller can persist exactly
+    what was embedded as reference_image_path."""
+    import base64
+    import io as _io
+
+    from PIL import Image as _Image
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+
+        body = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"box": json.dumps([10, 20, 60, 90])},
+        ).json()
+
+    assert body["vector"]
+    crop = _Image.open(_io.BytesIO(base64.b64decode(body["crop_png_base64"])))
+    assert crop.size == (50, 70)  # x2-x1, y2-y1
+
+
+def test_stamp_embed_without_a_box_is_unchanged(tmp_path, jpeg_bytes):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        body = client.post("/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes)).json()
+
+    assert body["vector"]
+    assert body["crop_png_base64"] is None
+
+
+@pytest.mark.parametrize("box", ["not-json", "[1,2,3]", '["a","b","c","d"]'])
+def test_stamp_embed_rejects_a_malformed_box(tmp_path, jpeg_bytes, box):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        response = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes), data={"box": box},
+        )
+
+    assert response.status_code == 422
 
 
 # --------------------------------------------------------------------------- #
@@ -611,6 +750,197 @@ def test_validate_is_fail_forward_without_models(client, jpeg_bytes):
 
     assert isinstance(body["flags"], list)
     assert len(body["flags"]) == len(set(body["flags"]))  # deduped
+
+    assert body["schema_version"] == "1.0"
+    assert body["status"] == "completed"
+    assert len(body["settings_hash"]) == 64
+    assert len(body["pages"]) == 1
+    assert body["pages"][0]["page_index"] == 1
+    assert body["pages"][0]["status"] == "completed"
+    assert body["pages"][0]["stages"]["tamper"]["status"] == "completed"
+    assert "total_ms" in body["timings"]
+    assert "tamper_ms" in body["timings"]["stages"]
+    assert set(body["models"]) >= {"classifier", "detector", "siamese", "stamp"}
+
+
+class _StubBox:
+    def __init__(self, cls: int, conf: float, xyxy: list[float]):
+        self.cls = cls
+        self.conf = conf
+        # ultralytics hands back a tensor/array row, and run_detection calls
+        # .tolist() on it — a bare list would not survive that.
+        self.xyxy = [np.asarray(xyxy)]
+
+
+class _StubResult:
+    def __init__(self, names: dict[int, str], boxes: list[_StubBox]):
+        self.names = names
+        self.boxes = boxes
+
+
+class _StubDetector:
+    """Just enough of the ultralytics YOLO surface for run_detection."""
+
+    names = {0: "signature", 1: "stamp"}
+
+    def predict(self, source=None, conf=0.0, verbose=False):
+        return [_StubResult(self.names, [_StubBox(1, 0.9, [5.0, 5.0, 60.0, 60.0])])]
+
+
+def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
+    """A reproduction detected on the crop must reach the officer as a flag even
+    though the issuer has no reference logo yet (§5 Stage 4b)."""
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        app.state.registry._models["stamp_classifier"] = _StubStampClassifier(0.05)
+
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"issuer_scope": "national"},
+        ).json()
+
+    assert body["stages"]["stamp"]["stamp_tampered"] is True
+    assert "stamp_tampered" in body["flags"]
+    assert "unreferenced_logo" in body["flags"]
+
+
+def test_canonical_city_matches_the_form_laravel_stores():
+    from api.routers.validate import canonical_city
+
+    assert canonical_city("CITY OF DIGOS") == "City Of Digos"
+    assert canonical_city("City of  Digos ") == "City Of Digos"
+    assert canonical_city("") is None
+    assert canonical_city(None) is None
+
+
+def test_resolve_issuer_reference_uses_the_national_sentinel():
+    """logo_references.city is '' for a national issuer (one logo agency-wide),
+    so the city read off the page is irrelevant to the lookup (§5 Stage 4b)."""
+    from api.routers.validate import resolve_issuer_reference
+
+    references = {"": [1.0, 2.0], "Pasig": [3.0, 4.0]}
+
+    vector, flag = resolve_issuer_reference(references, None, "national", "Pasig")
+
+    assert vector == [1.0, 2.0]
+    assert flag is None
+
+
+def test_resolve_issuer_reference_scopes_an_lgu_issuer_by_city():
+    from api.routers.validate import resolve_issuer_reference
+
+    references = {"Pasig": [3.0, 4.0], "Quezon City": [5.0, 6.0]}
+
+    assert resolve_issuer_reference(references, None, "lgu", "quezon  CITY")[0] == [5.0, 6.0]
+    # An LGU city with no seeded reference yet is a miss, not a mis-scope.
+    assert resolve_issuer_reference(references, None, "lgu", "Makati") == (None, None)
+
+
+def test_resolve_issuer_reference_flags_an_unreadable_lgu_city():
+    """§5 Stage 4b failure path: 'City not identified' — the lookup cannot be
+    scoped, so verification is skipped rather than compared to a wrong city."""
+    from api.routers.validate import resolve_issuer_reference
+
+    assert resolve_issuer_reference({"Pasig": [3.0]}, None, "lgu", None) == (None, "city_not_identified")
+
+
+def test_classification_flags_a_fake_verdict():
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "fake", "confidence": 0.98, "passed_threshold": True}
+
+    assert classification_flags(stage, "bir_certificate", CLASSES) == ["classified_as_fake"]
+
+
+def test_classification_flags_a_confident_disagreement_with_the_declared_type():
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "business_permit", "confidence": 0.93, "passed_threshold": True}
+
+    assert classification_flags(stage, "bir_certificate", CLASSES) == ["document_type_mismatch"]
+
+
+def test_classification_does_not_flag_a_type_the_model_never_learned():
+    """sanitary_permit has no class, so the model CANNOT agree with it — that is
+    an untrained type, not vendor misdeclaration."""
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "business_permit", "confidence": 0.93, "passed_threshold": True}
+
+    assert classification_flags(stage, "sanitary_permit", CLASSES) == []
+
+
+def test_classification_does_not_flag_a_mismatch_it_is_unsure_about():
+    from api.routers.validate import classification_flags
+
+    stage = {"label": "business_permit", "confidence": 0.41, "passed_threshold": False}
+
+    assert classification_flags(stage, "bir_certificate", CLASSES) == []
+
+
+def test_validate_verifies_an_lgu_logo_against_the_matching_city_reference(tmp_path, jpeg_bytes):
+    """The whole city→vector set travels with the request; this service picks
+    the one for the document's city (§5 Stage 2 → Stage 4b)."""
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+
+        vector = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()["vector"]
+
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={
+                "issuer_scope": "lgu",
+                "city": "PASIG  CITY",
+                "stamp_references": json.dumps({
+                    "Pasig City": vector,
+                    "Makati": [-v for v in vector],
+                }),
+            },
+        ).json()
+
+    stamp = body["stages"]["stamp"]
+    assert stamp["city"] == "Pasig City"
+    assert stamp["match"] is True
+    assert stamp["similarity_score"] == pytest.approx(1.0)
+    assert "unreferenced_logo" not in body["flags"]
+
+
+def test_validate_flags_an_lgu_document_with_no_readable_city(tmp_path, jpeg_bytes):
+    """§5 Stage 4b: no city → 'City not identified'; the tamper check still ran."""
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"issuer_scope": "lgu",
+                  "stamp_references": json.dumps({"Pasig City": [1.0, 2.0, 3.0]})},
+        ).json()
+
+    assert body["stages"]["stamp"]["reason"] == "city_not_identified"
+    assert "city_not_identified" in body["flags"]
+    assert "stamp_tampered" in body["stages"]["stamp"]  # the check still ran
+
+
+def test_validate_rejects_a_malformed_reference_map(client, jpeg_bytes):
+    response = client.post(
+        "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"stamp_references": "[1, 2, 3]"},
+    )
+    assert response.status_code == 422
 
 
 def test_validate_rejects_malformed_reference(client, jpeg_bytes):
@@ -650,3 +980,237 @@ def test_validate_forwards_forensics_threshold_to_tamper(client, jpeg_bytes):
     # Same document → same authenticity; only the forwarded gate should move.
     assert passed(authenticity - 0.02) is True
     assert passed(authenticity + 0.02) is False
+
+
+def test_validate_rejects_extension_mime_and_magic_mismatches(client, jpeg_bytes):
+    wrong_mime = client.post(
+        "/v1/validate",
+        headers=AUTH,
+        files={"file": ("doc.jpg", jpeg_bytes, "image/png")},
+    )
+    wrong_magic = client.post(
+        "/v1/validate",
+        headers=AUTH,
+        files={"file": ("doc.png", jpeg_bytes, "image/png")},
+    )
+
+    assert wrong_mime.status_code == 422
+    assert wrong_magic.status_code == 422
+
+
+def test_validate_rejects_an_oversized_upload(tmp_path):
+    app = create_app(_settings(tmp_path, max_file_size_mb=1))
+    payload = b"\xff\xd8\xff" + (b"0" * (1024 * 1024))
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/validate", headers=AUTH,
+            files={"file": ("large.jpg", payload, "image/jpeg")},
+        )
+
+    assert response.status_code == 422
+    assert "exceeds" in response.json()["detail"]
+
+
+def test_validate_rejects_non_finite_reference_values(client, jpeg_bytes):
+    response = client.post(
+        "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"signature_reference": "[NaN, 0.5]"},
+    )
+
+    assert response.status_code == 422
+    assert "finite" in response.json()["detail"]
+
+
+def test_validate_rejects_reference_with_loaded_model_dimension(tmp_path, jpeg_bytes):
+    class _DimensionedEmbedder(_StubEmbedderModel):
+        output_shape = (None, 3)
+
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["siamese"] = _DimensionedEmbedder()
+        response = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"signature_reference": "[0.1, 0.2]"},
+        )
+
+    assert response.status_code == 422
+    assert "expected 3 values" in response.json()["detail"]
+
+
+def test_validate_unsupported_type_skips_classification_and_uses_no_template(tmp_path, jpeg_bytes):
+    stub = _StubKerasModel()
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = {
+            "model": stub,
+            "class_names": ["bir_certificate", "fake"],
+        }
+        response = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={"document_type": "sanitary_permit"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stages"]["classification"]["reason"] == "unsupported_document_type"
+    assert "unsupported_document_type" in body["flags"]
+    assert stub.last_batch is None
+
+
+def test_validate_settings_snapshot_is_hashed_and_applied(tmp_path, jpeg_bytes):
+    snapshot = {"CLASSIFICATION_CONFIDENCE_THRESHOLD": 0.90, "RISK_WEIGHT_TEXT": 0.20}
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = {
+            "model": _StubKerasModel(),
+            "class_names": ["bir_certificate", "fake"],
+        }
+        first = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={
+                "document_type": "bir_certificate",
+                "settings_snapshot": json.dumps(snapshot),
+            },
+        ).json()
+        second = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={
+                "document_type": "bir_certificate",
+                "settings_snapshot": json.dumps(snapshot),
+            },
+        ).json()
+
+    assert first["settings_hash"] == second["settings_hash"]
+    assert first["stages"]["classification"]["threshold"] == pytest.approx(0.90)
+    assert "low_classification_confidence" in first["flags"]
+
+
+def test_validate_rejects_invalid_settings_snapshot(client, jpeg_bytes):
+    response = client.post(
+        "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+        data={"settings_snapshot": json.dumps({"PDF_DPI": 20})},
+    )
+
+    assert response.status_code == 422
+    assert "PDF_DPI" in response.json()["detail"]
+
+
+def test_validate_aggregates_two_pages_and_forwards_page_context(
+    tmp_path, jpeg_bytes, monkeypatch,
+):
+    import importlib
+
+    module = importlib.import_module("api.routers.validate")
+
+    class _SequentialClassifier:
+        input_shape = (None, 8, 8, 3)
+
+        def __init__(self):
+            self.outputs = [
+                np.array([[0.90, 0.05, 0.03, 0.02]]),
+                np.array([[0.02, 0.03, 0.05, 0.90]]),
+            ]
+
+        def predict(self, batch, verbose=0):
+            return self.outputs.pop(0)
+
+    def ocr_page(value: str, confidence: float, date: str) -> dict:
+        return {
+            "text": f"Business {value}",
+            "words": [],
+            "fields": {
+                "registered_name": {
+                    "value": value,
+                    "matched": True,
+                    "required": True,
+                    "confidence": confidence,
+                },
+                "date_issued": {
+                    "value": date,
+                    "matched": True,
+                    "required": False,
+                    "confidence": confidence,
+                },
+            },
+            "roi": None,
+            "quality": {
+                "mean_confidence": confidence,
+                "required_total": 1,
+                "required_matched": 1,
+                "text_validation_score": 1.0,
+                "passes_text_validation": True,
+                "flags": [],
+            },
+        }
+
+    monkeypatch.setattr(
+        module,
+        "load_pages",
+        lambda original, tmp_dir, settings, strict=False: (
+            [np.zeros((20, 20, 3), dtype=np.uint8), np.ones((20, 20, 3), dtype=np.uint8)],
+            [Path(tmp_dir) / "page_1.png", Path(tmp_dir) / "page_2.png"],
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "run_ocr_stage",
+        lambda *args, **kwargs: {
+            "page_count": 2,
+            "pages": [ocr_page("Alpha", 60.0, "2025-01-01"),
+                      ocr_page("Beta", 95.0, "2025-02-02")],
+        },
+    )
+    tamper_contexts = []
+
+    def fake_tamper(original, page_paths, context):
+        tamper_contexts.append(context)
+        score = 0.15 if len(tamper_contexts) == 1 else 0.85
+        return {
+            "tamper_score": score,
+            "tamper_authenticity": 1.0 - score,
+            "tamper_confidence": score,
+            "hard_flag": score >= 0.80,
+            "tamper_passed": score < 0.50,
+            "techniques": {},
+            "flags": ["page_two_tamper"] if score > 0.80 else [],
+        }
+
+    monkeypatch.setattr(module, "run_tamper_stage", fake_tamper)
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["classifier"] = {
+            "model": _SequentialClassifier(),
+            "class_names": CLASSES,
+        }
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+            data={
+                "document_type": "bir_certificate",
+                "forensics": json.dumps({"hard_confidence": 0.75}),
+            },
+        ).json()
+
+    assert len(body["pages"]) == 2
+    assert body["stages"]["classification"]["label"] == "fake"
+    assert body["stages"]["classification"]["authenticity"] == pytest.approx(0.10)
+    assert body["stages"]["ocr"]["pages"][0]["fields"]["registered_name"]["value"] == "Beta"
+    assert "ocr_field_conflict" in body["flags"]
+    assert body["stages"]["tamper"]["tamper_score"] == pytest.approx(0.85)
+    assert body["stages"]["tamper"]["hard_flag"] is True
+    assert "page_two_tamper" in body["flags"]
+    assert [context["issue_date"] for context in tamper_contexts] == ["2025-01-01", "2025-02-02"]
+    assert all(context["hard_confidence"] == 0.75 for context in tamper_contexts)
+
+
+def test_no_issuer_scope_emits_only_no_issuer_logo(tmp_path, jpeg_bytes):
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _StubDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        body = client.post(
+            "/v1/validate", headers=AUTH, files=_upload(jpeg_bytes),
+        ).json()
+
+    assert body["stages"]["stamp"]["reason"] == "no_issuer_logo"
+    assert "no_issuer_logo" in body["flags"]
+    assert "unreferenced_logo" not in body["flags"]

@@ -109,12 +109,29 @@ return [
         // outer limit that must sit above it.
         'timeout' => (int) env('ML_API_TIMEOUT', 300),
         'connect_timeout' => (int) env('ML_API_CONNECT_TIMEOUT', 10),
-        'retries' => (int) env('ML_API_RETRIES', 2),
+        'retries' => (int) env('ML_API_RETRIES', 1),
 
         // Fallback OCR field template for document types with no dedicated
         // template (bir | business_permit | dti | none). The three vendor-
         // submittable types are routed per-type in MlPipelineService::ocrTemplateFor().
-        'template' => env('ML_API_TEMPLATE', 'bir'),
+        'template' => env('ML_API_TEMPLATE', 'none'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Registration signature enrollment (§5 Stage 4a — captured at sign-up)
+    |--------------------------------------------------------------------------
+    |
+    | The vendor uploads one photo of THREE signatures on bond paper. The ML API
+    | (POST {ml.base_url}{endpoint}) detects and embeds them; SignatureEnrollmentService
+    | applies these gates: exactly `expected_count` signatures, mean pairwise cosine
+    | >= `consistency_threshold`, and no forensic hard-flag (edited / pasted on top).
+    */
+
+    'signature' => [
+        'enroll_endpoint' => env('ML_API_SIGNATURE_ENROLL_ENDPOINT', '/v1/signature/enroll'),
+        'expected_count' => (int) env('SIGNATURE_ENROLL_COUNT', 3),
+        'consistency_threshold' => (float) env('SIGNATURE_CONSISTENCY_THRESHOLD', 0.80),
     ],
 
 ];

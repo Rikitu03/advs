@@ -34,9 +34,11 @@
                     <flux:icon icon="check-badge" class="size-4 text-cu-blue" />
                 </div>
                 <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] text-cu-muted dark:bg-white/[0.03]">
-                    <svg viewBox="0 0 200 70" class="h-16 w-auto" fill="none" aria-hidden="true">
-                        <path d="M8 50 C 30 8, 45 62, 62 34 S 96 6, 116 44 S 150 60, 172 24 192 40 192 40" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
+                    @if ($data['reference_image_url'] ?? null)
+                        <img src="{{ $data['reference_image_url'] }}" alt="Enrolled signature reference" class="max-h-full max-w-full object-contain" />
+                    @else
+                        <span class="text-xs">Reference image unavailable</span>
+                    @endif
                 </div>
             </div>
 
@@ -46,10 +48,12 @@
                     <span class="text-xs font-medium text-cu-muted">Query (this submission)</span>
                     <x-pass-fail :pass="$pass" />
                 </div>
-                <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] dark:bg-white/[0.03] {{ $queryInk }}">
-                    <svg viewBox="0 0 200 70" class="h-16 w-auto" fill="none" aria-hidden="true">
-                        <path d="M8 36 C 26 60, 44 12, 60 40 S 92 64, 112 28 S 146 8, 168 48 190 30 190 30" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
+                <div class="flex min-h-24 items-center justify-center rounded-lg bg-black/[0.03] p-2 dark:bg-white/[0.03] {{ $queryInk }}">
+                    @if ($data['crop'] ?? null)
+                        <x-detection-crop :url="$data['crop']['url']" :box="$data['crop']['box']" label="Detected signature" />
+                    @else
+                        <span class="text-xs text-cu-muted">Not available for this document</span>
+                    @endif
                 </div>
             </div>
         </div>

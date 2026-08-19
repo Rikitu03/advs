@@ -32,6 +32,7 @@ class ValidationResultFactory extends Factory
             'text_fields_expected' => 14,
             'classification_label' => 'BIR Permit',
             'classification_confidence' => 0.96,
+            'classification_authenticity' => 0.96,
             'signature_detected' => true,
             'signature_bbox' => [120, 640, 260, 700],
             'signature_score' => 0.9,

@@ -128,8 +128,8 @@ new #[Layout('components.layouts.auth')] class extends Component {
         <section class="flex flex-col gap-4">
             <flux:heading size="lg">{{ __('Business information') }}</flux:heading>
 
-            <flux:input wire:model="company_name" :label="__('Registered business name')" required />
-            <flux:input wire:model="trade_name" :label="__('Trade name / DBA (optional)')" />
+            <flux:input wire:model="company_name" :label="__('Registered business name')" placeholder="e.g. Acme Logistics, Inc." required />
+            <flux:input wire:model="trade_name" :label="__('Trade name / DBA (optional)')" placeholder="e.g. Acme Express (optional)" />
 
             <flux:select wire:model.live="business_entity_type" :label="__('Type of business entity')" :placeholder="__('Select entity type')" required>
                 @foreach (\App\Models\Vendor::BUSINESS_ENTITY_TYPES as $value => $label)
@@ -140,25 +140,25 @@ new #[Layout('components.layouts.auth')] class extends Component {
             <flux:input wire:model="tin" :label="__('TIN (Tax Identification Number)')" placeholder="123-456-789-000" required />
 
             @if ($this->requiresDti())
-                <flux:input wire:model="dti_registration_number" :label="__('DTI Registration Number')" required />
+                <flux:input wire:model="dti_registration_number" :label="__('DTI Registration Number')" placeholder="e.g. 12345678" required />
             @endif
 
             @if ($this->requiresSec())
-                <flux:input wire:model="sec_registration_number" :label="__('SEC Registration Number')" required />
+                <flux:input wire:model="sec_registration_number" :label="__('SEC Registration Number')" placeholder="e.g. CS2001234567" required />
             @endif
 
-            <flux:input wire:model="business_permit_number" :label="__('Business Permit Number')" required />
-            <flux:input wire:model="nature_of_business" :label="__('Nature / line of business')" required />
+            <flux:input wire:model="business_permit_number" :label="__('Business Permit Number')" placeholder="e.g. BP-2024-000123" required />
+            <flux:input wire:model="nature_of_business" :label="__('Nature / line of business')" placeholder="e.g. Freight forwarding and logistics" required />
 
             <flux:heading size="sm" class="mt-2">{{ __('Business address') }}</flux:heading>
-            <flux:input wire:model="business_street" :label="__('Street')" required />
+            <flux:input wire:model="business_street" :label="__('Street')" placeholder="e.g. 123 Main Street, Makati Commercial Center" required />
             <div class="grid gap-4 sm:grid-cols-2">
-                <flux:input wire:model="business_barangay" :label="__('Barangay')" required />
-                <flux:input wire:model="business_city" :label="__('City / Municipality')" required />
+                <flux:input wire:model="business_barangay" :label="__('Barangay')" placeholder="e.g. Barangay Bel-Air" required />
+                <flux:input wire:model="business_city" :label="__('City / Municipality')" placeholder="e.g. Makati City" required />
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
-                <flux:input wire:model="business_province" :label="__('Province')" required />
-                <flux:input wire:model="business_postal_code" :label="__('ZIP / Postal code')" required />
+                <flux:input wire:model="business_province" :label="__('Province')" placeholder="e.g. Metro Manila" required />
+                <flux:input wire:model="business_postal_code" :label="__('ZIP / Postal code')" placeholder="e.g. 1209" required />
             </div>
         </section>
 
@@ -167,11 +167,11 @@ new #[Layout('components.layouts.auth')] class extends Component {
             <flux:heading size="lg">{{ __('Owner / authorized representative') }}</flux:heading>
 
             <div class="grid gap-4 sm:grid-cols-2">
-                <flux:input wire:model="first_name" :label="__('First name')" required />
-                <flux:input wire:model="middle_name" :label="__('Middle name (optional)')" />
+                <flux:input wire:model="first_name" :label="__('First name')" placeholder="e.g. Juan" required />
+                <flux:input wire:model="middle_name" :label="__('Middle name (optional)')" placeholder="e.g. Santos (optional)" />
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
-                <flux:input wire:model="last_name" :label="__('Last name')" required />
+                <flux:input wire:model="last_name" :label="__('Last name')" placeholder="e.g. dela Cruz" required />
                 <flux:input wire:model="suffix" :label="__('Suffix (optional)')" placeholder="Jr., Sr., III" />
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
@@ -183,7 +183,7 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 </flux:select>
             </div>
 
-            <flux:input wire:model="contact_number" :label="__('Contact number')" required />
+            <flux:input wire:model="contact_number" :label="__('Contact number')" placeholder="e.g. +63 912 345 6789" required />
 
             <div class="grid gap-4 sm:grid-cols-2">
                 <flux:select wire:model="government_id_type" :label="__('Government ID type')" :placeholder="__('Select ID type')" required>
@@ -191,10 +191,10 @@ new #[Layout('components.layouts.auth')] class extends Component {
                         <flux:select.option value="{{ $value }}">{{ $label }}</flux:select.option>
                     @endforeach
                 </flux:select>
-                <flux:input wire:model="government_id_number" :label="__('Government ID number')" required />
+                <flux:input wire:model="government_id_number" :label="__('Government ID number')" placeholder="e.g. 1234-5678-9012" required />
             </div>
 
-            <flux:textarea wire:model="home_address" :label="__('Home address (complete)')" rows="2" required />
+            <flux:textarea wire:model="home_address" :label="__('Home address (complete)')" placeholder="e.g. 456 Home St., Barangay Paligsahan, Quezon City, 1100" rows="2" required />
         </section>
 
         <flux:button type="submit" variant="primary" class="w-full" wire:loading.attr="disabled" wire:target="save">

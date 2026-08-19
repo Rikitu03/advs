@@ -69,7 +69,7 @@ class SystemSettingsTest extends TestCase
             ->test('admin.settings.index')
             ->assertSet('values.max_file_size_mb', '10')
             ->assertSet('values.high_risk_threshold', '61')
-            ->assertSet('values.stamp_similarity_threshold', '0.85')
+            ->assertSet('values.stamp_similarity_threshold', '0.8')
             ->assertSet('values.accepted_formats', 'pdf,png,jpg,jpeg')
             ->assertSee('File Upload Constraints')
             ->assertSee('Risk Bands & Retention');
@@ -135,6 +135,7 @@ class SystemSettingsTest extends TestCase
             ->set('values.risk_weight_classification', '0.50')
             ->set('values.risk_weight_signature', '0.50')
             ->set('values.risk_weight_stamp', '0.50')
+            ->set('values.risk_weight_tamper', '0.50')
             ->call('save')
             ->assertHasErrors(['risk_weight_text']);
     }
@@ -192,8 +193,22 @@ class SystemSettingsTest extends TestCase
     public function test_service_returns_default_when_key_missing(): void
     {
         $this->assertSame(10, SystemSetting::int('max_file_size_mb', 10));
-        $this->assertSame(0.85, SystemSetting::float('stamp_similarity_threshold', 0.85));
+        $this->assertSame(0.80, app(SystemSettingsService::class)->pipelineSnapshot()['STAMP_SIMILARITY_THRESHOLD']);
         $this->assertNull(SystemSetting::get('does_not_exist'));
+    }
+
+    public function test_pipeline_snapshot_is_typed_complete_and_hash_stable(): void
+    {
+        SystemSetting::set('max_pdf_pages', '3');
+        SystemSetting::set('risk_weight_tamper', '0.2');
+
+        $service = app(SystemSettingsService::class);
+        $snapshot = $service->pipelineSnapshot();
+
+        $this->assertSame(3, $snapshot['MAX_PDF_PAGES']);
+        $this->assertSame(0.2, $snapshot['RISK_WEIGHT_TAMPER']);
+        $this->assertSame(0.5, $snapshot['STAMP_TAMPER_THRESHOLD']);
+        $this->assertSame($service->pipelineSnapshotHash($snapshot), $service->pipelineSnapshotHash(array_reverse($snapshot, true)));
     }
 
     public function test_admin_sees_settings_link_in_sidebar(): void

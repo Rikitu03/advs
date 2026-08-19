@@ -2,6 +2,8 @@
 
 namespace App\Services\Document;
 
+use App\Services\SystemSettingsService;
+
 /**
  * Computes a document's composite risk score (ADVS_System_Reference.md §5
  * Stage 5 / §6) from the pipeline's component authenticity scores.
@@ -19,6 +21,8 @@ namespace App\Services\Document;
  */
 class RiskScoreService
 {
+    public function __construct(private readonly SystemSettingsService $settings) {}
+
     /**
      * @param array{
      *     text?: float|null,
@@ -31,13 +35,20 @@ class RiskScoreService
      * } $components
      * @return array{score: float, level: string, hard_override: bool, base: float, penalties: float, breakdown: array<string, mixed>}
      */
-    public function compute(array $components): array
+    public function compute(array $components, ?array $snapshot = null): array
     {
-        $weights = config('advs.risk.weights');
-        $missingPenalty = (float) config('advs.risk.missing_component_penalty');
-        $highThreshold = (int) config('advs.risk.high_threshold');
-        $mediumThreshold = (int) config('advs.risk.medium_threshold');
-        $hardThreshold = (float) config('advs.risk.tamper_hard_threshold');
+        $snapshot ??= $this->settings->pipelineSnapshot();
+        $weights = [
+            'text' => (float) ($snapshot['RISK_WEIGHT_TEXT'] ?? 0.20),
+            'classification' => (float) ($snapshot['RISK_WEIGHT_CLASSIFICATION'] ?? 0.20),
+            'signature' => (float) ($snapshot['RISK_WEIGHT_SIGNATURE'] ?? 0.20),
+            'stamp' => (float) ($snapshot['RISK_WEIGHT_STAMP'] ?? 0.20),
+            'tamper' => (float) ($snapshot['RISK_WEIGHT_TAMPER'] ?? 0.20),
+        ];
+        $missingPenalty = (float) ($snapshot['MISSING_COMPONENT_PENALTY'] ?? 15);
+        $highThreshold = (int) ($snapshot['HIGH_RISK_THRESHOLD'] ?? 61);
+        $mediumThreshold = (int) ($snapshot['MEDIUM_RISK_THRESHOLD'] ?? 31);
+        $hardThreshold = (float) ($snapshot['TAMPER_HARD_THRESHOLD'] ?? 0.80);
 
         // Map each weighted term to its source authenticity score.
         $scores = [

@@ -10,16 +10,60 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from .compat import load_script
 from .config import Settings
 
-IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+ACCEPTED_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
 
 
-def save_upload(file: UploadFile, data: bytes, tmp_dir: str) -> Path:
-    suffix = Path(file.filename or "upload.bin").suffix.lower() or ".bin"
+def validate_upload(file: UploadFile, data: bytes, settings: Settings) -> str:
+    suffix = Path(file.filename or "").suffix.lower()
+    expected_mime = ACCEPTED_MIME_TYPES.get(suffix)
+    if expected_mime is None:
+        raise HTTPException(status_code=422, detail="Unsupported upload type; use PDF, PNG, or JPEG.")
+    if file.content_type != expected_mime:
+        raise HTTPException(
+            status_code=422,
+            detail=f"MIME type {file.content_type!r} does not match {suffix or 'the filename'}.",
+        )
+    if not data:
+        raise HTTPException(status_code=422, detail="The uploaded file is empty.")
+    if len(data) > settings.max_file_size_mb * 1024 * 1024:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The uploaded file exceeds the {settings.max_file_size_mb} MB limit.",
+        )
+
+    detected = _detect_magic(data)
+    if detected != expected_mime:
+        raise HTTPException(status_code=422, detail="File contents do not match the declared upload type.")
+    return suffix
+
+
+def _detect_magic(data: bytes) -> str | None:
+    if data.startswith(b"%PDF-"):
+        return "application/pdf"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
+
+
+def save_upload(file: UploadFile, data: bytes, tmp_dir: str, settings: Settings | None = None) -> Path:
+    suffix = (
+        validate_upload(file, data, settings)
+        if settings is not None
+        else Path(file.filename or "upload.bin").suffix.lower() or ".bin"
+    )
     path = Path(tmp_dir) / f"upload{suffix}"
     path.write_bytes(data)
     return path
@@ -38,7 +82,13 @@ def ocr_cfg(settings: Settings) -> dict:
     return cfg
 
 
-def load_pages(original: Path, tmp_dir: str, settings: Settings) -> tuple[list, list[Path]]:
+def load_pages(
+    original: Path,
+    tmp_dir: str,
+    settings: Settings,
+    *,
+    strict: bool = False,
+) -> tuple[list, list[Path]]:
     """Return ``(bgr_pages, page_image_paths)`` for an upload.
 
     Raster uploads are their own single page (and their own full-DPI page
@@ -51,7 +101,9 @@ def load_pages(original: Path, tmp_dir: str, settings: Settings) -> tuple[list, 
 
     try:
         pages = od.load_images(original, ocr_cfg(settings))
-    except od.OcrError:
+    except od.OcrError as exc:
+        if strict:
+            raise HTTPException(status_code=422, detail=f"Unreadable document: {exc}") from exc
         return [], []
 
     if not is_pdf(original):

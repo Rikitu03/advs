@@ -9,13 +9,13 @@
 > - UI functions → [UI_FUNCTION_PHASES.md](./UI_FUNCTION_PHASES.md)
 >
 > Sources this plan integrates:
-> - **What the system does** — [ADVS_System_Reference.md](../../ADVS_System_Reference.md) (Stages 0–T, risk score, §9 params).
-> - **How we build** — [CLAUDE.md](../../CLAUDE.md) (stack, conventions, original 10-sprint phases §10).
+> - **What the system does** — [ADVS reference](../ADVS_REFERENCE.md) (Stages 0–T, risk score, §9 params).
+> - **How we build** — [README.md](../../README.md) and [AGENTS.md](../../AGENTS.md).
 > - **New client direction** — [CLIENT_INTERVIEW_GAP_PLAN.md](../CLIENT_INTERVIEW_GAP_PLAN.md) (Negofood Solution interview, 2026-06-29).
 >
 > **Branch/integration:** work is staging-first (lead/integration branch `staging`); land each phase as a
-> reviewable slice. Precedence rule from `CLAUDE.md`: stack/version facts follow `CLAUDE.md`; product
-> behavior follows `ADVS_System_Reference.md`; flag conflicts explicitly (see the calendar-driven note below).
+> reviewable slice. Stack/version facts follow the installed code and root README; product behavior
+> follows `docs/ADVS_REFERENCE.md`; flag conflicts explicitly.
 
 ---
 
@@ -33,8 +33,8 @@ vendor type, **expiration + renewal** monitoring, and a **resubmission** loop. T
 become **additional flags surfaced beside** the existing composite risk score — they do not replace it.
 (Subjects are **vendors only** — personnel/employee onboarding is out of scope; see gap plan G5.)
 
-> **Approved conceptual departure (flag, per `CLAUDE.md` precedence):**
-> [ADVS_System_Reference.md §1](../../ADVS_System_Reference.md) states the system is *"on-demand, not
+> **Approved conceptual departure:**
+> [ADVS reference §1](../ADVS_REFERENCE.md) states the system is *"on-demand, not
 > calendar-driven."* The **renewal scheduler (Phase P5)** introduces a deliberate calendar dimension.
 > This is an approved change; the reference doc carries a pointer to it. Everything else stays on-demand.
 
@@ -111,8 +111,8 @@ The **NEW** stages are what these phases add; Stages 1–T and the risk score al
 known-good contract rather than guessing.
 
 **Tasks:**
-- Map `ProcessDocumentAction` against the [ADVS_System_Reference.md §5](../../ADVS_System_Reference.md) stage list; record which stages are implemented vs stubbed.
-- Inventory the `Process`-facade Service wrappers and the exact Python CLI contract each expects (`--input`/`--output` JSON), per [CLAUDE.md §6](../../CLAUDE.md). Note any contract that points at a **missing** script (those scripts are delivered in [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md)).
+- Map `ProcessDocumentAction` against the [ADVS reference §5](../ADVS_REFERENCE.md) stage list; record which stages are implemented vs stubbed.
+- Inventory the current FastAPI and Laravel HTTP contract described in [README.md](../../README.md) and [python/README.md](../../python/README.md).
 - Verify temp-payload cleanup happens in `finally` blocks (no leaked `storage/app/python_payloads/*.json`).
 - Confirm `documents` retains **both** `file_path` (original) and `converted_image_path` (preprocessed) so Stage T reads the original (reference §Stage T).
 
@@ -209,7 +209,7 @@ and persist them, degrading gracefully on poor scans.
   compute **present / missing / expired** items; set `submissions.status = incomplete` when required items
   are missing or expired.
 - **Validity integration** — surface `expiring_soon` / `expired` documents as **compliance flags**
-  alongside (not inside) the composite risk score from [ADVS_System_Reference.md §5](../../ADVS_System_Reference.md).
+  alongside (not inside) the composite risk score from [ADVS reference §5](../ADVS_REFERENCE.md).
 - **Resubmission action** — officer "Request Resubmission" on a document/submission sets
   `resubmit_requested`, notifies the subject, and reopens upload for **only the flagged items**; vendor
   re-upload re-enters the pipeline. Every transition writes to `audit_logs` (G9).
@@ -233,7 +233,7 @@ and #2 pains. **This is the approved on-demand → calendar-driven departure.**
   `expiring_soon` / `expired` notifications and `document_reminders` keyed on
   `expiry_date − renewal_window_days`.
 - Reminder notifications reuse the existing in-dashboard + email notification layer
-  ([ADVS_System_Reference.md §7](../../ADVS_System_Reference.md)); window is configurable per
+  ([ADVS reference §7](../ADVS_REFERENCE.md)); window is configurable per
   requirement-profile item (`renewal_window_days`) with a system-settings default.
 - Idempotent: re-running the daily scan must not duplicate reminders for the same document/window.
 
@@ -245,7 +245,7 @@ duplicates. Feature test drives the command with frozen time across the window b
 
 ## Phase P6 — Hardening & integration verification
 
-**Goal:** Prove the full path end-to-end and harden the seams (mirrors [CLAUDE.md §9c](../../CLAUDE.md)).
+**Goal:** Prove the full path end-to-end and harden the integration described in [README.md](../../README.md).
 
 **Tasks:**
 - Run the full pipeline (upload → queue → Python → DB) on representative real document types; confirm a
@@ -286,4 +286,4 @@ renewal reminder scheduled. `php artisan config:cache && route:cache && view:cac
 - Manual end-to-end click-through (the Phase P6 DoD scenario) passes.
 - Python inference contracts exist and pass their tests (owned by [MODEL_TRAINING_PHASES.md](./MODEL_TRAINING_PHASES.md)).
 
-[schema-first-modeling]: ../../CLAUDE.md
+[schema-first-modeling]: ../../AGENTS.md

@@ -1,4 +1,7 @@
-"""Unit tests for the pure (non-Tk) logic of business_permit_annotator.py.
+"""Unit tests for the pure (non-Tk) logic of scripts/annotator.py.
+
+(The module was renamed from ``business_permit_annotator.py``; this file keeps
+its original name so the test path stays stable in history.)
 
 Covers the runtime label prompt (slugify -> de-dup -> ordering), the prompt
 loop's re-ask / EOF behavior, template resolution, and the fact that the tricky
@@ -12,14 +15,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# business_permit_annotator.py lives in python/scripts/ (sibling dir to
-# python/tests/), exactly like annotate_boxes.py.
+# annotator.py lives in python/scripts/ (sibling dir to python/tests/),
+# exactly like annotate_boxes.py.
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import annotate_boxes as ab  # noqa: E402
-import business_permit_annotator as bpa  # noqa: E402
+import annotator as bpa  # noqa: E402
 
 
 # ----- slugify_label --------------------------------------------------------
