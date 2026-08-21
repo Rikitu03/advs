@@ -116,7 +116,6 @@ return [
 
     'limiters' => [
         'login' => 'login',
-        'two-factor' => 'two-factor',
         'passkeys' => 'passkeys',
     ],
 
@@ -145,8 +144,11 @@ return [
     */
 
     'passkeys' => [
-        'relying_party_id' => parse_url(config('app.url'), PHP_URL_HOST),
-        'allowed_origins' => [config('app.url')],
+        'relying_party_id' => env('PASSKEYS_RELYING_PARTY_ID', parse_url(config('app.url'), PHP_URL_HOST)),
+        'allowed_origins' => array_values(array_filter(array_map(
+            static fn (string $origin): string => rtrim(trim($origin), '/'),
+            explode(',', env('PASSKEYS_ALLOWED_ORIGINS', config('app.url')))
+        ))),
         'timeout' => 60000,
     ],
 
@@ -167,11 +169,7 @@ return [
         Features::emailVerification(),
         Features::updateProfileInformation(),
         Features::updatePasswords(),
-        // Two-factor authentication and passkeys are scaffolded by Fortify but
-        // disabled for now. Re-enable here (and add the corresponding traits +
-        // migrations) when implementing the 2FA flow described in CLAUDE.md §5.
-        // Features::twoFactorAuthentication(['confirm' => true, 'confirmPassword' => true]),
-        // Features::passkeys(['confirmPassword' => true]),
+        Features::passkeys(['confirmPassword' => true]),
     ],
 
 ];

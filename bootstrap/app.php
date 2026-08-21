@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\DisableRememberedAuthentication;
 use App\Http\Middleware\EnsureSignatureEnrolled;
 use App\Http\Middleware\EnsureUserHasRole;
 use App\Http\Middleware\EnsureVendorProfileComplete;
@@ -30,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // business/owner details first, then enrolls a signature, before reaching
         // email verification or the app.
         $middleware->web(append: [
+            DisableRememberedAuthentication::class,
             EnsureVendorProfileComplete::class,
             EnsureSignatureEnrolled::class,
         ]);

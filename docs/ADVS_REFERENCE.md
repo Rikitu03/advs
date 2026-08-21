@@ -59,6 +59,8 @@ The thesis mandates **Secure Login** as a core scope item: "Access to the system
 - **Session-based authentication** managed by Laravel's built-in auth scaffolding
 - **Password hashing** via bcrypt (Laravel default)
 - **CSRF protection** on all forms
+- **Email OTP on every password login** â€” valid credentials start a ten-minute, single-use six-digit email challenge stored only as a one-way hash and protected by resend, request, and attempt limits.
+- **No trusted-device bypass** â€” password logins do not expose or honor "remember me" / "remember this device". A registered passkey can complete the pending password-login challenge, but cannot start a standalone login.
 - **Account-based access** — no anonymous or public access to any system feature
 
 ### Role Definitions and Permissions

@@ -3,6 +3,7 @@
 namespace App\Http\Responses;
 
 use App\Models\User;
+use App\Services\EmailOtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
@@ -17,8 +18,16 @@ class LoginResponse implements LoginResponseContract
 {
     public function toResponse($request): RedirectResponse|JsonResponse
     {
+        if ($request->session()->has(EmailOtpService::SESSION_KEY)) {
+            if ($request->wantsJson()) {
+                return new JsonResponse(['email_otp' => true], 202);
+            }
+
+            return redirect()->route('mfa-challenge');
+        }
+
         if ($request->wantsJson()) {
-            return new JsonResponse(['two_factor' => false]);
+            return new JsonResponse(['email_otp' => false]);
         }
 
         /** @var User $user */

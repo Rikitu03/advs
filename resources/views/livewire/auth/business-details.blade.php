@@ -34,9 +34,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
     public string $date_of_birth = '';
     public string $gender = '';
     public string $contact_number = '';
-    public string $government_id_type = '';
-    public string $government_id_number = '';
-    public string $home_address = '';
 
     public function requiresDti(): bool
     {
@@ -74,9 +71,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
             'date_of_birth' => ['required', 'date', 'before:today'],
             'gender' => ['required', Rule::in(array_keys(VendorRepresentative::GENDERS))],
             'contact_number' => ['required', 'string', 'max:20'],
-            'government_id_type' => ['required', Rule::in(array_keys(VendorRepresentative::GOVERNMENT_ID_TYPES))],
-            'government_id_number' => ['required', 'string', 'max:60'],
-            'home_address' => ['required', 'string', 'max:500'],
         ];
     }
 
@@ -184,17 +178,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
             </div>
 
             <flux:input wire:model="contact_number" :label="__('Contact number')" placeholder="e.g. +63 912 345 6789" required />
-
-            <div class="grid gap-4 sm:grid-cols-2">
-                <flux:select wire:model="government_id_type" :label="__('Government ID type')" :placeholder="__('Select ID type')" required>
-                    @foreach (\App\Models\VendorRepresentative::GOVERNMENT_ID_TYPES as $value => $label)
-                        <flux:select.option value="{{ $value }}">{{ $label }}</flux:select.option>
-                    @endforeach
-                </flux:select>
-                <flux:input wire:model="government_id_number" :label="__('Government ID number')" placeholder="e.g. 1234-5678-9012" required />
-            </div>
-
-            <flux:textarea wire:model="home_address" :label="__('Home address (complete)')" placeholder="e.g. 456 Home St., Barangay Paligsahan, Quezon City, 1100" rows="2" required />
         </section>
 
         <flux:button type="submit" variant="primary" class="w-full" wire:loading.attr="disabled" wire:target="save">

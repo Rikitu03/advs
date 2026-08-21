@@ -13,7 +13,7 @@ class DatabaseSeeder extends Seeder
      * Seed the application's database.
      *
      * Creates one verified account per ADVS role for local testing.
-     * All seeded accounts use the password "password".
+     * The generic demo accounts use the password "password".
      */
     public function run(): void
     {
@@ -82,6 +82,7 @@ class DatabaseSeeder extends Seeder
         }
 
         $this->call([
+            AdminUserSeeder::class,
             DocumentTypeSeeder::class,
             NegofoodSubmissionSeeder::class,
             SystemSettingSeeder::class,

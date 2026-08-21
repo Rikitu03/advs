@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Auth\MfaChallengeController;
 use App\Models\Document;
 use App\Models\User;
 use App\Models\Vendor;
@@ -18,6 +19,12 @@ use Livewire\Volt\Volt;
 |--------------------------------------------------------------------------
 */
 Route::view('/', 'welcome')->name('home');
+
+Route::middleware('guest')->group(function () {
+    Route::get('mfa-challenge', [MfaChallengeController::class, 'show'])->name('mfa-challenge');
+    Route::post('mfa-challenge', [MfaChallengeController::class, 'verify'])->middleware('throttle:email-otp-verify')->name('mfa-challenge.verify');
+    Route::post('mfa-challenge/resend', [MfaChallengeController::class, 'resend'])->middleware('throttle:email-otp-resend')->name('mfa-challenge.resend');
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -200,6 +207,7 @@ Route::middleware(['auth'])->group(function () {
 
     Volt::route('settings/profile', 'settings.profile')->name('settings.profile');
     Volt::route('settings/password', 'settings.password')->name('settings.password');
+    Volt::route('settings/security', 'settings.security')->name('settings.security')->middleware('verified');
     Volt::route('settings/preference', 'settings.preference')->name('settings.preference');
     Volt::route('settings/appearance', 'settings.appearance')->name('settings.appearance');
 });

@@ -17,7 +17,7 @@ read models.
 
 Implemented:
 
-- Fortify session authentication, email verification, password reset, and
+- Fortify session authentication with email OTP required for every password login, email verification, password reset, and
   reference-signature enrollment during registration.
 - Role-based access for `vendor`, `compliance_officer`, and `admin`.
 - Vendor document intake with MIME, size, and batch validation.
@@ -231,4 +231,3 @@ The Python API contract and deployment details are documented in
 [python/README.md](python/README.md). Model-training status and remaining
 evaluation work are in
 [python/DEVELOPMENT_PHASES.md](python/DEVELOPMENT_PHASES.md).
-

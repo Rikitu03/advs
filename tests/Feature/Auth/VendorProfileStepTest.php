@@ -59,9 +59,6 @@ class VendorProfileStepTest extends TestCase
             ->set('date_of_birth', '1990-06-19')
             ->set('gender', 'male')
             ->set('contact_number', '+63 917 000 0000')
-            ->set('government_id_type', 'national_id')
-            ->set('government_id_number', '1234-5678-9012')
-            ->set('home_address', '37 Real St, Calamba')
             ->call('save')
             ->assertHasNoErrors()
             ->assertRedirect(route('signature.create'));
@@ -69,6 +66,21 @@ class VendorProfileStepTest extends TestCase
         $user->refresh();
         $this->assertTrue($user->hasCompletedVendorProfile());
         $this->assertSame('Negofood Trading', $user->vendor->company_name);
+        $this->assertNull($user->vendor->representative->government_id_type);
+        $this->assertNull($user->vendor->representative->government_id_number);
+        $this->assertNull($user->vendor->representative->home_address);
+    }
+
+    public function test_business_step_does_not_render_legacy_identity_or_home_address_fields(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->unverified()->create();
+
+        $this->actingAs($user)
+            ->get(route('business.create'))
+            ->assertOk()
+            ->assertDontSee('Government ID type')
+            ->assertDontSee('Government ID number')
+            ->assertDontSee('Home address (complete)');
     }
 
     public function test_business_step_requires_core_fields(): void

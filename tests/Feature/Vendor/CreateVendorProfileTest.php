@@ -37,9 +37,6 @@ class CreateVendorProfileTest extends TestCase
             'date_of_birth' => '1990-06-19',
             'gender' => 'male',
             'contact_number' => '+63 917 000 0000',
-            'government_id_type' => 'national_id',
-            'government_id_number' => '1234-5678-9012',
-            'home_address' => '37 Real St, Calamba',
         ], $overrides);
     }
 
@@ -56,6 +53,9 @@ class CreateVendorProfileTest extends TestCase
         $this->assertNull($vendor->trade_name);
         $this->assertSame('Jose', $vendor->representative->first_name);
         $this->assertNull($vendor->representative->middle_name);
+        $this->assertNull($vendor->representative->government_id_type);
+        $this->assertNull($vendor->representative->government_id_number);
+        $this->assertNull($vendor->representative->home_address);
         $this->assertTrue($user->refresh()->hasCompletedVendorProfile());
         $this->assertDatabaseCount('vendors', 1);
         $this->assertDatabaseCount('vendor_representatives', 1);
@@ -86,5 +86,25 @@ class CreateVendorProfileTest extends TestCase
         $this->assertDatabaseCount('vendors', 1);
         $this->assertDatabaseCount('vendor_representatives', 1);
         $this->assertSame('Renamed Trading', $user->vendor->refresh()->company_name);
+    }
+
+    public function test_it_preserves_legacy_representative_fields_when_updating_a_profile(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->create();
+        $action = app(CreateVendorProfile::class);
+
+        $vendor = $action->execute($user, $this->payload());
+        $vendor->representative->update([
+            'government_id_type' => 'national_id',
+            'government_id_number' => '1234-5678-9012',
+            'home_address' => '37 Real St, Calamba',
+        ]);
+
+        $action->execute($user, $this->payload(['company_name' => 'Renamed Trading']));
+
+        $representative = $user->vendor->representative->refresh();
+        $this->assertSame('national_id', $representative->government_id_type);
+        $this->assertSame('1234-5678-9012', $representative->government_id_number);
+        $this->assertSame('37 Real St, Calamba', $representative->home_address);
     }
 }

@@ -38,4 +38,21 @@ class VendorProfilePageTest extends TestCase
             ->assertSee('Jose Rizal')
             ->assertSee('Pasig');
     }
+
+    public function test_profile_page_hides_uncollected_legacy_representative_fields(): void
+    {
+        $user = User::factory()->create();
+        $vendor = Vendor::factory()->for($user)->create();
+        VendorRepresentative::factory()->for($vendor)->create([
+            'government_id_type' => null,
+            'government_id_number' => null,
+            'home_address' => null,
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('vendor.profile'))
+            ->assertOk()
+            ->assertDontSee('Government ID')
+            ->assertDontSee('Home address');
+    }
 }

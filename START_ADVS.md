@@ -36,7 +36,11 @@ php artisan key:generate
 Create a MySQL database named `advs`, then update `.env`:
 
 ```dotenv
-APP_URL=http://127.0.0.1:8000
+APP_URL=http://localhost:8000
+
+# WebAuthn requires a hostname. Do not open the app at 127.0.0.1.
+PASSKEYS_RELYING_PARTY_ID=localhost
+PASSKEYS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:8100
 
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
@@ -126,7 +130,7 @@ curl.exe http://127.0.0.1:7860/ready
 
 ## Open ADVS
 
-Visit `http://127.0.0.1:8000`.
+Visit `http://localhost:8000`.
 
 Seeded accounts use password `password`:
 
