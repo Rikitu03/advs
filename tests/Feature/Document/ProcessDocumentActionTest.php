@@ -25,6 +25,15 @@ class ProcessDocumentActionTest extends TestCase
     {
         Storage::fake('local');
         $document = Document::factory()->create();
+        $document->submission->vendor->update([
+            'company_name' => 'BUREAU OF INTERNAL REVENUE',
+            'trade_name' => null,
+            'tin' => null,
+            'dti_registration_number' => null,
+            'sec_registration_number' => null,
+            'business_permit_number' => null,
+            'registration_number' => null,
+        ]);
         Storage::disk('local')->put($document->file_path, 'fake-document-bytes');
 
         return $document;
@@ -146,6 +155,66 @@ class ProcessDocumentActionTest extends TestCase
         $this->assertSame('pending_review', $submission->status);
         $this->assertSame('low', $submission->risk_level);
         $this->assertEqualsWithDelta($result->document_risk_score, $submission->composite_risk_score, 0.01);
+    }
+
+    public function test_vendor_registration_matching_replaces_the_ml_text_score_before_risk_is_computed(): void
+    {
+        $document = $this->document();
+        $document->submission->vendor->update([
+            'company_name' => 'Acme Foods, Inc.',
+            'trade_name' => 'Acme Kitchen',
+            'tin' => '123-456-789-000',
+            'dti_registration_number' => 'DTI-2026-001',
+            'sec_registration_number' => null,
+            'business_permit_number' => 'BP-26-99',
+            'registration_number' => null,
+        ]);
+
+        $stages = $this->cleanStages([
+            'ocr' => ['page_count' => 1, 'pages' => [[
+                'text' => 'ACME FOODS INC ACME KITCHEN TIN 123456789000 DTI 2026 001 BP 26 99',
+                'words' => [],
+                'fields' => [],
+                'quality' => [
+                    'mean_confidence' => 92.0,
+                    'text_validation_score' => 0.01,
+                    'required_matched' => 0,
+                    'required_total' => 99,
+                    'flags' => [],
+                ],
+            ]]],
+        ]);
+        $this->fakeMl($stages);
+
+        $result = app(ProcessDocumentAction::class)->execute($document->fresh());
+
+        $this->assertEqualsWithDelta(1.0, $result->text_validation_score, 1e-6);
+        $this->assertSame(5, $result->text_fields_matched);
+        $this->assertSame(5, $result->text_fields_expected);
+        $this->assertLessThan(31, $result->document_risk_score);
+    }
+
+    public function test_unavailable_ocr_does_not_fall_back_to_a_previous_or_ml_text_score(): void
+    {
+        $document = $this->document();
+        $document->validationResult()->create([
+            'submission_id' => $document->submission_id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+            'text_validation_score' => 1.0,
+            'text_fields_matched' => 1,
+            'text_fields_expected' => 1,
+        ]);
+        $this->fakeMl($this->cleanStages([
+            'ocr' => ['skipped' => true, 'reason' => 'insufficient_text'],
+        ]));
+
+        $result = app(ProcessDocumentAction::class)->execute($document->fresh());
+
+        $this->assertNull($result->ocr_extracted_text);
+        $this->assertNull($result->text_validation_score);
+        $this->assertSame(0, $result->text_fields_matched);
+        $this->assertSame(1, $result->text_fields_expected);
+        $this->assertContains('Text validation unavailable', $result->flags);
     }
 
     public function test_a_document_the_classifier_calls_fake_outranks_a_genuine_one_on_risk(): void
@@ -296,6 +365,8 @@ class ProcessDocumentActionTest extends TestCase
         $this->assertNotContains('transient_stage_flag', $result->flags);
         $this->assertNotContains('Text validation unavailable', $result->flags);
         $this->assertSame(1.0, (float) $result->text_validation_score);
+        $this->assertSame(1, $result->text_fields_matched);
+        $this->assertSame(1, $result->text_fields_expected);
     }
 
     public function test_job_marks_document_failed_on_failure(): void

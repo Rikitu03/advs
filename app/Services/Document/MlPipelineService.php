@@ -221,7 +221,12 @@ class MlPipelineService
      */
     public function mapStages(array $stages, array $context = []): array
     {
-        $columns = [];
+        $columns = [
+            'ocr_extracted_text' => null,
+            'ocr_confidence' => null,
+            'ocr_fields' => null,
+            'detected_city' => null,
+        ];
         $flags = [];
 
         // ── Stage 4 detection — bounding boxes for the drill-down ──────────────
@@ -244,21 +249,30 @@ class MlPipelineService
         if ($this->ran($ocr) && ! empty($ocr['pages'])) {
             $page = $ocr['pages'][0];
             $quality = $page['quality'] ?? [];
-            $columns['ocr_extracted_text'] = $page['text'] ?? null;
+            $sourcePages = is_array($ocr['source_pages'] ?? null) ? $ocr['source_pages'] : [];
+            $pages = $sourcePages !== [] ? $sourcePages : $ocr['pages'];
+            $columns['ocr_extracted_text'] = collect($pages)
+                ->pluck('text')
+                ->filter(fn (mixed $text): bool => is_string($text) && trim($text) !== '')
+                ->implode("\n\n");
             $columns['ocr_confidence'] = $this->float($quality['mean_confidence'] ?? null);
             // The structured key/value map the drill-down renders. Stored as the
             // API returns it — per-field warnings included — so the format
             // patterns that grade a value stay in the field specs that define it.
-            $columns['ocr_fields'] = $page['fields'] ?? null;
-            $columns['text_validation_score'] = $this->float($quality['text_validation_score'] ?? null);
-            $columns['text_fields_matched'] = $quality['required_matched'] ?? null;
-            $columns['text_fields_expected'] = $quality['required_total'] ?? null;
+            $fields = $page['fields'] ?? [];
+            $permitEvidence = $ocr['business_permit'] ?? null;
+            if (is_array($permitEvidence)) {
+                $fields['__business_permit'] = $permitEvidence;
+            }
+            $columns['ocr_fields'] = $fields === [] ? null : $fields;
 
             // The issuing city an LGU logo reference is keyed by (§5 Stage 4b). It is
             // knowable only here — the city prints on the document, so it does not
             // exist until Stage 2 has read it — which is why the pre-call lookup in
             // validate() can scope national issuers but never LGU ones.
-            $city = $this->detectedCity($page['fields'] ?? null);
+            $city = is_array($permitEvidence)
+                ? $this->normalizeIssuerCity($permitEvidence['issuer_city_canonical'] ?? null)
+                : $this->detectedCity($page['fields'] ?? null);
             if ($city !== null) {
                 $columns['detected_city'] = $city;
             }
@@ -403,9 +417,12 @@ class MlPipelineService
             return null;
         }
 
-        $city = Str::title(Str::squish((string) ($field['value'] ?? '')));
+        return $this->normalizeIssuerCity($field['value'] ?? null);
+    }
 
-        return $city === '' ? null : $city;
+    private function normalizeIssuerCity(mixed $value): ?string
+    {
+        return IssuerCity::canonical(is_string($value) ? $value : null);
     }
 
     /**
@@ -471,8 +488,14 @@ class MlPipelineService
             if (! is_array($vector) || $vector === []) {
                 continue;
             }
-            $vectors[$row->city] = $vector;
-            $ids[$row->city] = (int) $row->id;
+            $key = $issuerScope === 'national'
+                ? ''
+                : (IssuerCity::canonical((string) $row->city) ?? Str::title(Str::squish((string) $row->city)));
+            if ($key === null) {
+                continue;
+            }
+            $vectors[$key] = $vector;
+            $ids[$key] = (int) $row->id;
         }
 
         return [$vectors === [] ? null : json_encode($vectors, JSON_THROW_ON_ERROR), $ids];
@@ -490,9 +513,23 @@ class MlPipelineService
             return $ids[''] ?? null;
         }
 
-        $key = Str::title(Str::squish((string) $city));
+        $key = $this->normalizeIssuerCity($city);
 
-        return $key === '' ? null : ($ids[$key] ?? null);
+        if ($key === null) {
+            return null;
+        }
+
+        if (isset($ids[$key])) {
+            return $ids[$key];
+        }
+
+        foreach ($ids as $storedCity => $id) {
+            if ($this->normalizeIssuerCity((string) $storedCity) === $key) {
+                return $id;
+            }
+        }
+
+        return null;
     }
 
     /**

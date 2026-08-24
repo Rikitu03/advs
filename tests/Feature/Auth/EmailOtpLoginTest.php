@@ -6,6 +6,8 @@ use App\Models\EmailOtp;
 use App\Models\User;
 use App\Notifications\EmailLoginCode;
 use App\Services\EmailOtpService;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
@@ -13,6 +15,15 @@ use Tests\TestCase;
 class EmailOtpLoginTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_login_code_is_encrypted_and_queued_on_the_mail_queue(): void
+    {
+        $notification = new EmailLoginCode('123456');
+
+        $this->assertInstanceOf(ShouldQueue::class, $notification);
+        $this->assertInstanceOf(ShouldBeEncrypted::class, $notification);
+        $this->assertSame('mail', $notification->queue);
+    }
 
     public function test_challenge_screen_requires_pending_session(): void
     {
@@ -113,5 +124,47 @@ class EmailOtpLoginTest extends TestCase
         $otp = EmailOtp::query()->firstOrFail();
 
         $this->assertSame($otp->sent_at->timestamp, session('email_otp.pending.sent_at'));
+    }
+
+    public function test_challenge_screen_renders_digit_boxes_and_resend_cooldown(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create();
+
+        $this->post(route('login.store'), ['email' => $user->email, 'password' => 'password']);
+
+        $response = $this->get(route('mfa-challenge'));
+        $html = $response->getContent();
+
+        $response->assertOk();
+        $response->assertSee('Resend Code', false);
+        $response->assertSee('mfaChallenge(', false);
+
+        $this->assertSame(6, preg_match_all('/x-ref="code-[0-5]"/', $html), 'Six individual digit boxes are rendered.');
+        $this->assertSame(6, preg_match_all('/autocomplete="one-time-code"/', $html), 'Every digit box opts into one-time-code autofill.');
+        $this->assertSame(1, preg_match_all('/name="code"/', $html), 'The digits are assembled into a single code field on submit.');
+        $this->assertStringContainsString('x-bind:disabled="cooldownRemaining > 0"', $html);
+        $this->assertStringContainsString("x-bind:class=\"{ 'cursor-not-allowed opacity-40': cooldownRemaining > 0 }\"", $html);
+        $this->assertSame(1, preg_match('/<button[^>]*x-bind:disabled="cooldownRemaining > 0"[^>]*>(.*?)<\/button>/s', $html, $resendButton));
+        $this->assertStringContainsString('Resend Code', $resendButton[1]);
+        $this->assertStringNotContainsString('data-flux-loading-indicator', $resendButton[1]);
+        $this->assertStringContainsString('aria-live="polite"', $html);
+        $this->assertStringNotContainsString(__('Email verification code'), $html);
+    }
+
+    public function test_invalid_code_preserves_submitted_digits_for_retry(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create();
+
+        $this->post(route('login.store'), ['email' => $user->email, 'password' => 'password']);
+
+        $this->post(route('mfa-challenge.verify'), ['code' => '000000'])
+            ->assertSessionHasErrors('code')
+            ->assertSessionHas('_old_input.code', '000000');
+
+        $html = $this->get(route('mfa-challenge'))->getContent();
+
+        $this->assertSame(6, preg_match_all('/value="0"/', $html), 'Each visible digit input keeps the submitted value after an invalid code.');
     }
 }

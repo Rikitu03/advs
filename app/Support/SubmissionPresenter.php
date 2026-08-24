@@ -4,6 +4,8 @@ namespace App\Support;
 
 use App\Models\Submission;
 use App\Models\ValidationResult;
+use App\Models\Vendor;
+use App\Services\Document\OcrVendorMatchScore;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -105,9 +107,9 @@ class SubmissionPresenter
 
         [
             $summary['ocr_filters'],
-            $summary['ocr_by_document'],
             $summary['ocr_fields_by_document'],
         ] = self::ocrByDocument($submission);
+        $summary['business_permit_by_document'] = self::businessPermitByDocument($submission, $logoReferenceUrls);
 
         $summary['flags_by_document'] = self::flagGroups($submission, $typeNames);
 
@@ -198,6 +200,8 @@ class SubmissionPresenter
                 'cosine' => $result?->stamp_similarity !== null ? round($result->stamp_similarity, 3) : '—',
                 'similarity_threshold' => (int) round((float) $thresholds['stamp'] * 100),
                 'pass' => (bool) ($result?->stamp_passed ?? false),
+                'texture_checked' => $result?->stamp_tampered !== null,
+                'scan_copy_texture' => (bool) ($result?->stamp_tampered ?? false),
                 'crop' => self::cropData($result, $result?->stamp_bbox),
                 'reference_image_url' => $result?->logo_reference_id === null
                     ? null
@@ -294,7 +298,7 @@ class SubmissionPresenter
     {
         return $submission->documents
             ->flatMap(fn ($document): array => $document->validationResult?->flags ?? [])
-            ->map(self::humanizeFlag(...))
+            ->map(self::flagLabel(...))
             ->unique()
             ->values()
             ->all();
@@ -314,7 +318,7 @@ class SubmissionPresenter
                 'document' => $document->original_filename,
                 'type' => $typeNames[$document->document_type_id] ?? 'Unassigned',
                 'flags' => collect($document->validationResult?->flags ?? [])
-                    ->map(self::humanizeFlag(...))
+                    ->map(self::flagLabel(...))
                     ->unique()
                     ->values()
                     ->all(),
@@ -329,33 +333,117 @@ class SubmissionPresenter
      * one tab per document (keyed by document id), since OCR output is
      * intrinsically per-file, not per-type.
      *
-     * Returns the extracted key/value rows the panel renders, plus the raw text
-     * behind them (kept for the collapsed "raw text" view, and the only thing to
-     * show for results written before `ocr_fields` existed).
+     * Returns only the extracted key/value rows rendered by the panel. Raw OCR
+     * text remains persisted for pipeline use but is not exposed in Livewire state.
      *
      * @return array{
      *     0: list<array{key: string, label: string}>,
-     *     1: array<string, string>,
-     *     2: array<string, list<array<string, mixed>>>,
+     *     1: array<string, list<array<string, mixed>>>,
      * }
      */
     private static function ocrByDocument(Submission $submission): array
     {
         $filters = [];
-        $texts = [];
         $fields = [];
 
         foreach ($submission->documents as $document) {
             $key = (string) $document->id;
-            $result = $document->validationResult;
 
             $filters[] = ['key' => $key, 'label' => $document->original_filename];
-            $texts[$key] = $result?->ocr_extracted_text
-                ?? 'OCR stage not yet available — no extracted text for this document.';
-            $fields[$key] = self::ocrFieldRows($result?->ocr_fields);
+            $fields[$key] = self::ocrFieldRows(
+                $document->validationResult?->ocr_fields,
+                $submission->vendor,
+            );
         }
 
-        return [$filters, $texts, $fields];
+        return [$filters, $fields];
+    }
+
+    /**
+     * @param  array<int, string>  $logoReferenceUrls
+     * @return array<string, array<string, mixed>>
+     */
+    private static function businessPermitByDocument(Submission $submission, array $logoReferenceUrls): array
+    {
+        $result = [];
+        $referenceLabels = DB::table('logo_references')
+            ->whereIn(
+                'id',
+                $submission->documents
+                    ->pluck('validationResult.logo_reference_id')
+                    ->filter()
+                    ->map(fn ($id): int => (int) $id)
+                    ->unique()
+                    ->all(),
+            )
+            ->pluck('label', 'id');
+
+        foreach ($submission->documents as $document) {
+            $fields = $document->validationResult?->ocr_fields;
+            $permit = is_array($fields) && is_array($fields['__business_permit'] ?? null)
+                ? $fields['__business_permit']
+                : null;
+            if ($permit === null) {
+                continue;
+            }
+            $referenceId = $document->validationResult?->logo_reference_id;
+            $resultFlags = (array) ($document->validationResult?->flags ?? []);
+            $referenceStatus = match (true) {
+                in_array('no_stamp_detected', $resultFlags, true) => 'no_logo_detected',
+                in_array('stamp_mismatch', $resultFlags, true) => 'logo_mismatch',
+                $referenceId !== null => 'matched',
+                in_array('city_not_identified', $resultFlags, true),
+                in_array('unreferenced_logo', $resultFlags, true) => 'reference_missing',
+                default => 'unavailable',
+            };
+            $textureStatus = match (true) {
+                $document->validationResult?->stamp_tampered === true,
+                in_array('stamp_tampered', $resultFlags, true) => 'concern',
+                $document->validationResult?->stamp_tampered === false => 'clean',
+                default => 'unavailable',
+            };
+            $canonicalCity = $permit['issuer_city_canonical'] ?? $document->validationResult?->detected_city;
+            $checks = is_array($permit['identity']['checks'] ?? null) ? $permit['identity']['checks'] : [];
+            $evidenceFields = collect(is_array($permit['fields'] ?? null) ? $permit['fields'] : [])
+                ->map(function (mixed $field, string $fieldKey) use ($checks): array {
+                    $field = is_array($field) ? $field : [];
+                    $comparison = collect($checks)->first(
+                        fn (mixed $check): bool => is_array($check) && ($check['field'] ?? null) === $fieldKey,
+                    );
+
+                    return [
+                        ...$field,
+                        'expected' => is_array($comparison) ? ($comparison['expected'] ?? null) : null,
+                        'comparison' => is_array($comparison) && ($comparison['available'] ?? false)
+                            ? (bool) ($comparison['matched'] ?? false)
+                            : null,
+                    ];
+                })
+                ->all();
+            $result[(string) $document->id] = [
+                'classification_label' => $document->validationResult?->classification_label,
+                'classification_confidence' => $document->validationResult?->classification_confidence,
+                'raw_city' => $permit['issuer_city_raw'] ?? null,
+                'city' => $canonicalCity,
+                'layout' => $permit['layout_key'] ?? null,
+                'layout_version' => $permit['layout_version'] ?? null,
+                'reference_key' => $canonicalCity === null ? null : 'business_permit:'.$canonicalCity,
+                'reference_id' => $referenceId,
+                'reference_label' => $referenceId === null ? null : $referenceLabels->get($referenceId),
+                'reference_image_url' => $referenceId === null ? null : ($logoReferenceUrls[$referenceId] ?? null),
+                'reference_status' => $referenceStatus,
+                'texture_status' => $textureStatus,
+                'reference_reason' => $resultFlags,
+                'fields' => $evidenceFields,
+                'conflicts' => $permit['conflicts'] ?? [],
+                'identity_score' => $permit['identity']['score'] ?? null,
+                'validity' => $permit['identity']['validity'] ?? null,
+                'checks' => $checks,
+                'flags' => $permit['identity']['flags'] ?? [],
+            ];
+        }
+
+        return $result;
     }
 
     /**
@@ -366,16 +454,55 @@ class SubmissionPresenter
      * @param  array<string, mixed>|null  $fields
      * @return list<array{key: string, label: string, value: string|null, required: bool, warning: array{label: string, reasons: list<string>}|null}>
      */
-    private static function ocrFieldRows(?array $fields): array
+    private static function ocrFieldRows(?array $fields, ?Vendor $vendor = null): array
     {
         $rows = [];
+
+        $registrationMap = [
+            'registered_name' => ['company_name'],
+            'business_name' => ['company_name', 'trade_name'],
+            'trade_name' => ['trade_name'],
+            'tin' => ['tin'],
+            'ocn' => ['registration_number'],
+            'certificate_no' => ['dti_registration_number', 'registration_number'],
+            'trn_no' => ['dti_registration_number'],
+            'dti_registration_number' => ['dti_registration_number'],
+            'sec_registration_number' => ['sec_registration_number'],
+            'permit_no' => ['business_permit_number'],
+            'business_permit_number' => ['business_permit_number'],
+            'registration_number' => ['registration_number'],
+            'name_of_proprietor' => ['company_name'],
+            'business_owner' => ['company_name'],
+            'business_location' => ['business_street', 'business_barangay', 'business_city', 'business_province'],
+            'business_address' => ['business_street', 'business_barangay', 'business_city', 'business_province'],
+            'kind_of_business' => ['nature_of_business'],
+            'nature_of_business' => ['nature_of_business'],
+            'city_issued' => ['business_city'],
+        ];
 
         foreach ($fields ?? [] as $key => $field) {
             if (! is_array($field)) {
                 continue;
             }
+            if (str_starts_with((string) $key, '__')) {
+                continue;
+            }
 
             $value = $field['value'] ?? null;
+            $registrationKeys = $registrationMap[(string) $key] ?? [];
+            $registrationValues = collect($registrationKeys)
+                ->map(fn (string $registrationKey): ?string => $vendor?->getAttribute($registrationKey))
+                ->filter(fn (?string $registrationValue): bool => $registrationValue !== null && trim($registrationValue) !== '')
+                ->values()
+                ->all();
+            $comparison = $registrationKeys === [] || $registrationValues === []
+                ? null
+                : collect($registrationValues)->contains(
+                    fn (string $registrationValue): bool => OcrVendorMatchScore::compare(
+                        $value === null ? null : (string) $value,
+                        $registrationValue,
+                    ) === true,
+                );
 
             $rows[] = [
                 'key' => (string) $key,
@@ -384,6 +511,14 @@ class SubmissionPresenter
                 // for a payload written before names were sent.
                 'label' => $field['name'] ?? self::humanizeFieldName((string) $key),
                 'value' => ($value === null || $value === '') ? null : (string) $value,
+                'registration_key' => $registrationKeys === [] ? null : implode('|', $registrationKeys),
+                'registration_label' => $registrationKeys === []
+                    ? null
+                    : implode(' / ', array_map(self::humanizeFieldName(...), $registrationKeys)),
+                'registration_value' => $registrationValues === []
+                    ? null
+                    : implode(' / ', $registrationValues),
+                'comparison' => $comparison,
                 'required' => (bool) ($field['required'] ?? false),
                 'warning' => self::fieldWarning($field),
             ];
@@ -440,8 +575,17 @@ class SubmissionPresenter
      * - "missing_required_fields:form_no,tin" → "Missing required fields: Form No, TIN"
      * - "no_signature_detected"               → "No signature detected"
      */
-    private static function humanizeFlag(string $flag): string
+    public static function flagLabel(string $flag): string
     {
+        $labels = [
+            'stamp_tampered' => 'Stamp has scan/copy texture',
+            'stamp_tamper_unavailable' => 'Stamp texture check unavailable',
+        ];
+
+        if (isset($labels[$flag])) {
+            return $labels[$flag];
+        }
+
         if (str_contains($flag, ' ')) {
             return $flag;
         }
@@ -475,7 +619,7 @@ class SubmissionPresenter
             return $overrides[$field];
         }
 
-        $acronyms = ['tin' => 'TIN', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID',
+        $acronyms = ['tin' => 'TIN', 'dti' => 'DTI', 'sec' => 'SEC', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID',
             'ocn' => 'OCN', 'trn' => 'TRN', 'psic' => 'PSIC'];
 
         $words = array_map(

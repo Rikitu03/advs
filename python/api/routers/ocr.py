@@ -54,6 +54,72 @@ def _merge_roi_fields(fields: dict, roi_results: dict[str, str]) -> dict:
     return fields
 
 
+def _permit_city(od: Any, text: str, fields: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Resolve the issuer before selecting a city-specific ROI profile."""
+    raw = ((fields.get("city_issued") or {}).get("raw_value")
+           or (fields.get("city_issued") or {}).get("value")
+           if isinstance(fields.get("city_issued"), dict) else None)
+    canonical = od.canonical_business_permit_city(raw)
+    if canonical is not None:
+        return str(raw), canonical
+
+    upper = text.upper()
+    for city, aliases in od.BUSINESS_PERMIT_CITY_ALIASES.items():
+        for alias in aliases:
+            if alias in upper:
+                return alias, city
+    return (str(raw) if raw else None), None
+
+
+def _business_permit_evidence(
+    fields: dict[str, Any],
+    raw_city: str | None,
+    canonical_city: str | None,
+    *,
+    source_page: int | None = None,
+    layout_version: str | None = None,
+) -> dict[str, Any]:
+    aliases = {
+        "permit_no": "permit_no",
+        "or_no": "or_no",
+        "issue_date": "date_issued",
+        "owner_or_proprietor": "name_of_proprietor",
+        "trade_name": "trade_name",
+        "business_address": "business_location",
+        "nature_of_business": "kind_of_business",
+        "valid_until": "valid_until",
+        "tax_year": "tax_year",
+        "lcn_or_account_no": "lcn_or_account_no",
+    }
+    evidence: dict[str, Any] = {}
+    for key, source_key in aliases.items():
+        field = fields.get(source_key)
+        if not isinstance(field, dict):
+            continue
+        item = {
+            "name": field.get("name"),
+            "value": field.get("value"),
+            "normalized_value": str(field.get("value") or "").strip().upper() or None,
+            "confidence": field.get("confidence"),
+            "source_page": source_page,
+            "bbox": field.get("bbox"),
+            "source": field.get("source", "tesseract"),
+            "warnings": list(field.get("warnings") or []),
+            "matched": bool(field.get("matched")),
+            "required": bool(field.get("required")),
+        }
+        evidence[key] = item
+
+    return {
+        "issuer_city_raw": raw_city,
+        "issuer_city_canonical": canonical_city,
+        "issuer_city_confidence": (fields.get("city_issued") or {}).get("confidence"),
+        "layout_key": canonical_city.lower() if canonical_city else None,
+        "layout_version": layout_version,
+        "fields": evidence,
+    }
+
+
 def resolve_recognizer(registry: ModelRegistry, template: str,
                        accurate_templates: tuple[str, ...]) -> Any:
     """Which TrOCR recognizer this template should use.
@@ -123,7 +189,7 @@ def run_ocr_stage(
     roi_config = _load_roi_config() if roi_active else None
 
     pages = []
-    for image in images:
+    for page_number, image in enumerate(images, start=1):
         preprocessed = od.preprocess(image, cfg)
         ocr = od.run_ocr(preprocessed, cfg, engine)
         text = od.clean_text(ocr["raw_text"])
@@ -131,17 +197,26 @@ def run_ocr_stage(
         fields = None
         keywords = None
         roi_diagnostics = None
+        permit_city_raw = None
+        permit_city = None
         if tmpl is not None:
             keywords = tmpl["keywords"]
-            fields = od.extract_fields(text, ocr["token_conf"], tmpl["field_specs"])
+            field_specs = tmpl["field_specs"]
+            if template == "business_permit":
+                preliminary = od.extract_fields(text, ocr["token_conf"], od.BUSINESS_PERMIT_FIELD_SPECS)
+                permit_city_raw, permit_city = _permit_city(od, text, preliminary)
+                field_specs = od.business_permit_field_specs(permit_city)
+                fields = od.extract_fields(text, ocr["token_conf"], field_specs)
+            else:
+                fields = od.extract_fields(text, ocr["token_conf"], field_specs)
             if tmpl["positional"] is not None:
                 fields = tmpl["positional"](fields, ocr["words"], ocr["token_conf"])
 
             if roi_module is not None:
-                page_city = city or (fields.get("city_issued") or {}).get("value")
+                page_city = city or permit_city or (fields.get("city_issued") or {}).get("value")
                 outcome = roi_module.extract_fields_via_roi(
                     preprocessed, template, roi_config, rapid_detector, trocr,
-                    city=page_city, field_specs=tmpl["field_specs"],
+                    city=page_city, field_specs=field_specs,
                     fields=fields,
                     low_conf_floor=settings.roi_tesseract_confidence_floor,
                     budget_seconds=settings.roi_budget_seconds,
@@ -152,9 +227,9 @@ def run_ocr_stage(
 
             # Last, so each warning grades the value the officer will see -
             # whichever engine above produced it.
-            fields = od.annotate_field_warnings(fields, tmpl["field_specs"], cfg)
+            fields = od.annotate_field_warnings(fields, field_specs, cfg)
 
-        pages.append({
+        page = {
             "text": text,
             "words": ocr["words"],
             "fields": fields,
@@ -162,7 +237,14 @@ def run_ocr_stage(
             # story from "it ran and recognized nothing".
             "roi": roi_diagnostics,
             "quality": od.score_quality(text, fields or {}, ocr, cfg, keywords),
-        })
+        }
+        if template == "business_permit":
+            page["business_permit"] = _business_permit_evidence(
+                fields or {}, permit_city_raw, permit_city,
+                source_page=page_number,
+                layout_version=getattr(od, "BUSINESS_PERMIT_LAYOUT_VERSION", None),
+            )
+        pages.append(page)
 
     return {"page_count": len(pages), "pages": pages}
 

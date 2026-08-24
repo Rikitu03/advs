@@ -4,6 +4,7 @@ use App\Models\Submission;
 use App\Services\Document\OfficerDecisionService;
 use App\Support\SubmissionPresenter;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 
 new class extends Component
@@ -55,7 +56,7 @@ new class extends Component
 
     public function setOcrDocumentFilter(string $key): void
     {
-        abort_unless(array_key_exists($key, $this->record['ocr_by_document']), 400);
+        abort_unless(array_key_exists($key, $this->record['ocr_fields_by_document']), 400);
 
         $this->ocrDocumentFilter = $key;
     }
@@ -138,7 +139,7 @@ new class extends Component
                 'pass' => $c['signature']['pass'], 'detail' => $c['signature']['detail'], 'expandable' => true,
             ],
             [
-                'key' => 'stamp', 'label' => 'Stamp Match (EfficientNet)', 'icon' => 'check-badge',
+                'key' => 'stamp', 'label' => 'Issuer Logo Match (EfficientNet)', 'icon' => 'check-badge',
                 'score' => $stampVerified
                     ? $c['stamp']['similarity'].'% sim.'
                     : ($c['stamp']['detected'] ? 'Unverified' : 'Not detected'),
@@ -334,9 +335,10 @@ new class extends Component
             <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 240ms">
                 @php
                     $ocrFields = $s['ocr_fields_by_document'][$ocrDocumentFilter] ?? [];
+                    $permitEvidence = $s['business_permit_by_document'][$ocrDocumentFilter] ?? null;
                 @endphp
                 <div class="flex flex-wrap items-center justify-between gap-3">
-                    <h2 class="text-base font-semibold text-cu-text">OCR extracted text</h2>
+                    <h2 class="text-base font-semibold text-cu-text">OCR extracted fields</h2>
                     @if (count($s['ocr_filters']) > 1)
                         <div class="flex flex-wrap items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1" wire:loading.class="opacity-60" wire:target="setOcrDocumentFilter">
                             @foreach ($s['ocr_filters'] as $filter)
@@ -348,51 +350,172 @@ new class extends Component
                     @endif
                 </div>
 
+                @if ($permitEvidence !== null)
+                    <div class="mt-4 border-t border-cu-border pt-4">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h3 class="text-sm font-semibold text-cu-text">Business permit issuer evidence</h3>
+                                <p class="mt-1 text-xs text-cu-muted">{{ $permitEvidence['layout'] ? ucfirst($permitEvidence['layout']).' layout' : 'Layout unavailable' }}{{ $permitEvidence['layout_version'] ? ' · '.$permitEvidence['layout_version'] : '' }}</p>
+                                @if ($permitEvidence['classification_label'] !== null)
+                                    <p class="mt-1 text-xs text-cu-muted">
+                                        Classified as <span class="font-medium text-cu-text">{{ $permitEvidence['classification_label'] }}</span>{{ $permitEvidence['classification_confidence'] !== null ? ' at '.round($permitEvidence['classification_confidence'] * 100, 1).'%' : '' }}. Structured extraction and issuer verification are assessed separately below.
+                                    </p>
+                                @endif
+                            </div>
+                            @php
+                                $referenceStatus = $permitEvidence['reference_status'];
+                                $referenceLabel = match ($referenceStatus) {
+                                    'matched' => 'Issuer reference matched',
+                                    'no_logo_detected' => 'No logo detected',
+                                    'logo_mismatch' => 'Logo mismatch',
+                                    'reference_missing' => 'Issuer reference missing',
+                                    default => 'Issuer verification unavailable',
+                                };
+                                $textureStatus = $permitEvidence['texture_status'];
+                                $textureLabel = match ($textureStatus) {
+                                    'concern' => 'Texture concern',
+                                    'clean' => 'Texture check clear',
+                                    default => 'Texture check unavailable',
+                                };
+                            @endphp
+                            <div class="flex flex-wrap gap-2">
+                                <flux:badge size="sm" :color="$referenceStatus === 'matched' ? 'green' : ($referenceStatus === 'logo_mismatch' ? 'red' : 'amber')">
+                                    {{ $referenceLabel }}
+                                </flux:badge>
+                                <flux:badge size="sm" :color="$textureStatus === 'clean' ? 'green' : ($textureStatus === 'concern' ? 'red' : 'zinc')">
+                                    {{ $textureLabel }}
+                                </flux:badge>
+                            </div>
+                        </div>
+                        <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+                            <div><dt class="text-xs text-cu-muted">OCR issuer</dt><dd class="mt-1 font-medium text-cu-text">{{ $permitEvidence['raw_city'] ?? 'Unavailable' }}</dd></div>
+                            <div><dt class="text-xs text-cu-muted">Canonical issuer</dt><dd class="mt-1 font-medium text-cu-text">{{ $permitEvidence['city'] ?? 'Unavailable' }}</dd></div>
+                            <div><dt class="text-xs text-cu-muted">Reference key</dt><dd class="mt-1 break-words font-mono text-xs text-cu-text">{{ $permitEvidence['reference_key'] ?? 'Unavailable' }}</dd></div>
+                            <div><dt class="text-xs text-cu-muted">Reference ID</dt><dd class="mt-1 font-medium text-cu-text">{{ $permitEvidence['reference_id'] ?? 'None' }}</dd></div>
+                            <div>
+                                <dt class="text-xs text-cu-muted">Canonical logo</dt>
+                                <dd class="mt-1 font-medium text-cu-text">
+                                    @if ($permitEvidence['reference_image_url'] !== null)
+                                        <a href="{{ $permitEvidence['reference_image_url'] }}" target="_blank" rel="noopener" class="text-cu-purple hover:underline">{{ $permitEvidence['reference_label'] ?? 'View issuer logo' }}</a>
+                                    @else
+                                        Not available
+                                    @endif
+                                </dd>
+                            </div>
+                            <div><dt class="text-xs text-cu-muted">Identity score</dt><dd class="mt-1 font-medium text-cu-text">{{ $permitEvidence['identity_score'] !== null ? round($permitEvidence['identity_score'] * 100, 1).'%' : 'Unavailable' }}</dd></div>
+                            <div><dt class="text-xs text-cu-muted">Validity</dt><dd class="mt-1 font-medium text-cu-text">{{ $permitEvidence['validity'] ? ucfirst($permitEvidence['validity']) : 'Unavailable' }}</dd></div>
+                        </dl>
+                        @if (count($permitEvidence['fields']) > 0)
+                            <div class="mt-3 overflow-x-auto rounded-xl border border-cu-border bg-cu-bg">
+                                <table class="w-full text-left text-xs">
+                                    <thead class="border-b border-cu-border text-cu-muted"><tr><th class="px-3 py-2 font-medium">Evidence</th><th class="px-3 py-2 font-medium">Extracted / normalized</th><th class="px-3 py-2 font-medium">Vendor comparison</th><th class="px-3 py-2 font-medium">Source</th></tr></thead>
+                                    <tbody class="divide-y divide-cu-border">
+                                        @foreach ($permitEvidence['fields'] as $key => $field)
+                                            <tr>
+                                                <td class="px-3 py-2 text-cu-muted">{{ Str::headline($key) }}</td>
+                                                <td class="max-w-80 break-words px-3 py-2 font-mono text-xs text-cu-text">
+                                                    {{ $field['value'] ?? 'Unavailable' }}
+                                                    @if (($field['normalized_value'] ?? null) !== null && $field['normalized_value'] !== ($field['value'] ?? null))
+                                                        <span class="block text-[10px] text-cu-muted">Normalized: {{ $field['normalized_value'] }}</span>
+                                                    @endif
+                                                </td>
+                                                <td class="px-3 py-2">
+                                                    @if ($field['comparison'] === true)
+                                                        <flux:badge size="sm" color="green">Matched</flux:badge>
+                                                    @elseif ($field['comparison'] === false)
+                                                        <flux:badge size="sm" color="red">Mismatch</flux:badge>
+                                                    @else
+                                                        <flux:badge size="sm" color="zinc">Unavailable</flux:badge>
+                                                    @endif
+                                                    @if ($field['expected'] !== null)
+                                                        <span class="mt-1 block max-w-64 break-words text-[10px] text-cu-muted">Expected: {{ $field['expected'] }}</span>
+                                                    @endif
+                                                </td>
+                                                <td class="px-3 py-2 text-cu-muted">
+                                                    {{ $field['source'] ?? 'tesseract' }}{{ isset($field['source_page']) ? ' · p. '.$field['source_page'] : '' }}{{ isset($field['confidence']) && $field['confidence'] !== null ? ' · '.round($field['confidence']).'%' : '' }}
+                                                    @if (is_array($field['bbox'] ?? null) && count($field['bbox']) === 4)
+                                                        <span class="block font-mono text-[10px]">bbox {{ implode(', ', $field['bbox']) }}</span>
+                                                    @endif
+                                                    @if (count((array) ($field['warnings'] ?? [])) > 0)
+                                                        <span class="block text-amber-700 dark:text-amber-300">{{ implode(', ', $field['warnings']) }}</span>
+                                                    @endif
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        @endif
+                        @if (count($permitEvidence['conflicts']) > 0 || count($permitEvidence['flags']) > 0)
+                            <div class="mt-3 space-y-1 text-xs text-amber-700 dark:text-amber-300">
+                                @foreach ($permitEvidence['conflicts'] as $field => $values)
+                                    <p>Conflict in {{ Str::headline($field) }}: {{ implode(' / ', (array) $values) }}</p>
+                                @endforeach
+                                @if (count($permitEvidence['flags']) > 0)
+                                    <p>{{ implode(', ', array_map(SubmissionPresenter::flagLabel(...), $permitEvidence['flags'])) }}</p>
+                                @endif
+                            </div>
+                        @endif
+                    </div>
+                @endif
+
                 @if (count($s['ocr_filters']) === 0)
-                    <p class="mt-3 text-sm text-cu-muted">No documents to display OCR text for.</p>
+                    <p class="mt-3 text-sm text-cu-muted">No documents to display OCR fields for.</p>
                 @else
                     <div wire:loading.class="opacity-40" wire:target="setOcrDocumentFilter">
                         @if (count($ocrFields) > 0)
                             {{-- Extracted key/value pairs, in the document type's template order --}}
-                            <dl class="mt-3 divide-y divide-cu-border overflow-hidden rounded-xl border border-cu-border bg-cu-bg">
+                            <div class="mt-3 overflow-hidden rounded-xl border border-cu-border bg-cu-bg">
+                                <div class="hidden grid-cols-[minmax(9rem,0.9fr)_minmax(14rem,1.25fr)_minmax(14rem,1.25fr)_minmax(7rem,0.7fr)] gap-4 border-b border-cu-border bg-black/[0.03] px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-cu-muted dark:bg-white/[0.03] lg:grid">
+                                    <span>Field</span>
+                                    <span>OCR extracted</span>
+                                    <span>Vendor registration</span>
+                                    <span>Check</span>
+                                </div>
+                                <dl class="divide-y divide-cu-border">
                                 @foreach ($ocrFields as $field)
-                                    <div class="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-baseline sm:gap-4">
-                                        <dt class="shrink-0 text-xs font-medium text-cu-muted sm:w-56">{{ $field['label'] }}</dt>
-                                        <dd class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                                            @if ($field['value'] !== null)
-                                                <span class="min-w-0 break-words font-mono text-xs text-cu-text">{{ $field['value'] }}</span>
+                                    <div class="grid items-start justify-items-start gap-2 px-4 py-3 text-left lg:grid-cols-[minmax(9rem,0.9fr)_minmax(14rem,1.25fr)_minmax(14rem,1.25fr)_minmax(7rem,0.7fr)] lg:gap-4">
+                                        <dt class="text-xs font-medium text-cu-muted">{{ $field['label'] }}</dt>
+                                        <dd class="min-w-0">
+                                            <span class="mr-2 text-[10px] font-semibold uppercase tracking-wide text-cu-muted lg:hidden">OCR</span>
+                                            <span class="[overflow-wrap:anywhere] font-mono text-xs text-cu-text">{{ $field['value'] ?? '—' }}</span>
+                                        </dd>
+                                        <dd class="min-w-0">
+                                            <span class="mr-2 text-[10px] font-semibold uppercase tracking-wide text-cu-muted lg:hidden">Registration</span>
+                                            @if ($field['registration_key'] !== null)
+                                                <span class="[overflow-wrap:anywhere] font-mono text-xs text-cu-text">{{ $field['registration_value'] ?? 'Not provided' }}</span>
                                             @else
-                                                <span class="font-mono text-xs text-cu-muted">—</span>
-                                            @endif
-                                            @if ($field['warning'] !== null)
-                                                <x-ocr-warning-badge :label="$field['warning']['label']"
-                                                                     :reasons="$field['warning']['reasons']" />
+                                                <span class="text-xs text-cu-muted">Not comparable</span>
                                             @endif
                                         </dd>
+                                        <dd class="justify-self-start">
+                                            @if ($field['comparison'] === true)
+                                                <flux:badge size="sm" color="green" icon="check-circle">Passed</flux:badge>
+                                            @elseif ($field['comparison'] === false)
+                                                <flux:badge size="sm" color="red" icon="x-circle">Mismatch</flux:badge>
+                                            @else
+                                                <flux:badge size="sm" color="zinc">Unavailable</flux:badge>
+                                            @endif
+                                        </dd>
+                                        @if ($field['warning'] !== null)
+                                            <div class="flex min-w-0 flex-wrap items-center gap-2 lg:col-span-3 lg:col-start-2">
+                                                <x-ocr-warning-badge :label="$field['warning']['label']"
+                                                                     :reasons="$field['warning']['reasons']" />
+                                            </div>
+                                        @endif
                                     </div>
                                 @endforeach
-                            </dl>
+                                </dl>
+                            </div>
                         @else
                             {{-- No field map: either the stage hasn't run, or this result predates
-                                 the ocr_fields column and has only its raw text. --}}
+                                 the ocr_fields column. --}}
                             <p class="mt-3 text-sm text-cu-muted">
                                 No extracted fields for this document — the OCR stage has not run, or it
-                                was processed before field extraction was recorded. The raw text below is
-                                all that is on file.
+                                was processed before field extraction was recorded.
                             </p>
                         @endif
 
-                        {{-- The raw blob stays one click away so a field can be checked in context --}}
-                        <div class="mt-3" x-data="{ open: {{ count($ocrFields) > 0 ? 'false' : 'true' }} }">
-                            <button type="button" x-on:click="open = ! open" :aria-expanded="open"
-                                    class="flex items-center gap-2 rounded-lg py-0.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cu-purple/40">
-                                <span class="shrink-0 text-cu-muted transition-transform duration-200" :class="open && 'rotate-90'">
-                                    <flux:icon icon="chevron-right" class="size-3.5" />
-                                </span>
-                                <span class="text-xs font-medium text-cu-muted">Raw OCR text</span>
-                            </button>
-                            <pre x-show="open" x-collapse x-cloak class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-cu-border bg-cu-bg p-4 font-mono text-xs leading-relaxed text-cu-muted">{{ $s['ocr_by_document'][$ocrDocumentFilter] ?? '' }}</pre>
-                        </div>
                     </div>
                 @endif
             </div>

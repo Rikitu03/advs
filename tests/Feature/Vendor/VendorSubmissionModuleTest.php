@@ -49,6 +49,26 @@ class VendorSubmissionModuleTest extends TestCase
             ->assertDontSee('Retry');
     }
 
+    public function test_submit_documents_page_waits_for_submit_before_uploading_queued_files(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        Vendor::factory()->for($user)->create();
+
+        $html = $this->actingAs($user)
+            ->get(route('vendor.submit'))
+            ->getContent();
+
+        $this->assertStringContainsString(
+            "status: validType && validSize ? 'queued' : 'invalid'",
+            $html,
+        );
+        $this->assertStringContainsString('this.uploadFileAt(0, payload)', $html);
+        $this->assertStringContainsString("this.files.every((file) => file.valid && file.type !== '')", $html);
+        $this->assertStringNotContainsString('this.syncUpload()', $html);
+    }
+
     public function test_my_submissions_shows_display_only_fallback_rows_when_vendor_has_no_submissions(): void
     {
         $user = User::factory()->role(User::ROLE_VENDOR)->create();

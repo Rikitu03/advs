@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from PIL import Image
 
 from .. import embedding as emb
+from ..compat import load_script
 from ..config import Settings
 from ..registry import ModelRegistry
 from ..uploads import load_pages, save_upload
@@ -161,7 +162,13 @@ def canonical_city(value: str | None) -> str | None:
     if value is None:
         return None
     squished = " ".join(str(value).split())
-    return squished.title() if squished else None
+    if not squished:
+        return None
+    od = load_script("ocr_dryrun")
+    permit_city = od.canonical_business_permit_city(squished)
+    if permit_city is not None:
+        return permit_city
+    return squished.title()
 
 
 def parse_reference_map(raw: str | None, expected_length: int | None = None) -> dict[str, list[float]]:
@@ -331,7 +338,37 @@ def _aggregate_ocr(pages: list[dict]) -> tuple[dict, list[str]]:
 
     selected_fields: dict[str, dict] = {}
     values: dict[str, set[str]] = {}
-    for page in completed:
+    permit_evidence: dict[str, Any] | None = None
+    for page_index, page in enumerate(completed, start=1):
+        page_permit = page.get("business_permit")
+        if isinstance(page_permit, dict):
+            candidate = {**page_permit, "source_page": page_index}
+            if permit_evidence is None:
+                permit_evidence = {**candidate, "fields": {}, "conflicts": {}}
+            elif candidate.get("issuer_city_canonical") and not permit_evidence.get("issuer_city_canonical"):
+                permit_evidence["issuer_city_canonical"] = candidate["issuer_city_canonical"]
+                permit_evidence["issuer_city_raw"] = candidate.get("issuer_city_raw")
+                permit_evidence["issuer_city_confidence"] = candidate.get("issuer_city_confidence")
+                permit_evidence["layout_key"] = candidate.get("layout_key")
+            for key, value in (candidate.get("fields") or {}).items():
+                if not isinstance(value, dict):
+                    continue
+                current = permit_evidence["fields"].get(key)
+                if (current is not None and current.get("matched") and value.get("matched")
+                        and str(current.get("value")) != str(value.get("value"))):
+                    permit_evidence["conflicts"].setdefault(key, []).extend([
+                        current.get("value"), value.get("value"),
+                    ])
+                current_rank = (
+                    bool(current.get("matched")),
+                    101.0 if current.get("confidence") is None else float(current.get("confidence")),
+                ) if current else (False, -1.0)
+                candidate_rank = (
+                    bool(value.get("matched")),
+                    101.0 if value.get("confidence") is None else float(value.get("confidence")),
+                )
+                if current is None or candidate_rank > current_rank:
+                    permit_evidence["fields"][key] = {**value, "source_page": page_index}
         for key, field in (page.get("fields") or {}).items():
             if not field.get("matched") or field.get("value") in (None, ""):
                 continue
@@ -342,7 +379,7 @@ def _aggregate_ocr(pages: list[dict]) -> tuple[dict, list[str]]:
             current_conf = current.get("confidence") if current else None
             current_rank = -1.0 if current is None else (101.0 if current_conf is None else float(current_conf))
             if rank > current_rank:
-                selected_fields[key] = field
+                selected_fields[key] = {**field, "source_page": page_index}
 
     conflicts = [key for key, found in values.items() if len(found) > 1]
     quality_flags = [
@@ -375,11 +412,22 @@ def _aggregate_ocr(pages: list[dict]) -> tuple[dict, list[str]]:
             "conflicting_fields": conflicts,
         },
     })
-    return _completed({
+    aggregate = {
         "page_count": len(completed),
         "pages": [aggregate_page],
         "source_pages": completed,
-    }), (["ocr_field_conflict"] if conflicts else [])
+    }
+    if permit_evidence is not None:
+        permit_evidence["conflicts"] = {
+            key: list(dict.fromkeys(v for v in values if v not in (None, "")))
+            for key, values in permit_evidence.get("conflicts", {}).items()
+        }
+        permit_evidence["fields"] = {
+            key: {**value, "source_page": value.get("source_page") or permit_evidence.get("source_page")}
+            for key, value in (permit_evidence.get("fields") or {}).items()
+        }
+        aggregate["business_permit"] = permit_evidence
+    return _completed(aggregate), (["ocr_field_conflict"] if conflicts else [])
 
 
 @router.post("/v1/validate")
@@ -539,7 +587,11 @@ async def validate(
 
             stamp_model = registry.get("stamp")
             stamp_box = _best_box(detections, ("stamp", "logo"))
-            detected_city = canonical_city(context.get("fields", {}).get("city_issued"))
+            permit_evidence = page_ocr.get("business_permit") or {}
+            detected_city = canonical_city(
+                permit_evidence.get("issuer_city_canonical")
+                or context.get("fields", {}).get("city_issued")
+            )
             resolved_city = canonical_city(city) or detected_city
             scope = issuer_scope.lower() if issuer_scope else None
             logo_reference, reference_flag = resolve_issuer_reference(
@@ -638,7 +690,9 @@ async def validate(
     flags = [flag for page in page_results for flag in page["flags"]] + ocr_flags
     artifact_report = registry.artifact_report()
 
-    return {
+    business_permit = ocr_stage.get("business_permit") if isinstance(ocr_stage, dict) else None
+
+    response = {
         "schema_version": SCHEMA_VERSION,
         "status": "completed",
         "stages": stages,
@@ -653,3 +707,6 @@ async def validate(
             },
         },
     }
+    if isinstance(business_permit, dict):
+        response["business_permit"] = business_permit
+    return response

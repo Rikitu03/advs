@@ -174,9 +174,9 @@ This section walks through exactly what happens from the moment a file enters th
 - **Completeness**: Are all mandatory fields populated, or are critical sections missing?
 - **Issuing city / LGU**: The text is scanned for the issuing **city name** (e.g., "Pasig"). This city key is passed to **Stage 4b**, which uses it to look up the correct reference logo(s) for stamp/logo verification. If no city can be identified, Stage 4b cannot scope its lookup and raises a `City not identified` flag.
 
-**Output**: A structured text validation result containing: extracted text blob, list of matched fields, list of missing/inconsistent fields, the detected issuing city (for the §4b logo lookup), and an overall text validation score.
+**Output**: A structured OCR result containing the extracted text blob, list of matched fields, list of missing/inconsistent fields, and the detected issuing city (for the §4b logo lookup). After Laravel receives the response, it computes the risk component's text validation score by comparing the aggregate OCR text against the submission vendor's non-empty registration fields: `company_name`, `trade_name`, `tin`, `dti_registration_number`, `sec_registration_number`, `business_permit_number`, and `registration_number`. Matching is case-insensitive and tolerant of punctuation/spacing separators. The Python API's template-quality `text_validation_score` is not used for risk scoring.
 
-**Failure path**: If OCR produces little or no recognizable text (due to a blank page, an image without text, or extremely poor scan quality), the text validation score will be very low. The system does **not** abort processing — it records the poor OCR result as a flag ("Insufficient text extracted" or "Required fields missing") and continues to the next stages. This flag contributes to the composite risk score. There is no automatic retry mechanism; the document is flagged for manual review, and the vendor may be asked to resubmit.
+**Failure path**: If OCR produces little or no recognizable text (due to a blank page, an image without text, or extremely poor scan quality), Laravel records the text validation component as unavailable rather than falling back to the Python score. The system does **not** abort processing — it records the poor OCR result as a flag ("Insufficient text extracted" or "Required fields missing") and continues to the next stages. The missing component penalty contributes to the composite risk score. There is no automatic retry mechanism; the document is flagged for manual review, and the vendor may be asked to resubmit.
 
 ---
 
@@ -261,14 +261,14 @@ Registration detection is calibrated independently from Stage 4 document detecti
 > **Logo references are keyed by the document's issuer, not by the vendor.** Official stamps, logos, and seals belong to whoever **issues** the document. `document_types.issuer_scope` records which kind, and that drives how the reference is keyed:
 > - **`national`** (e.g. BIR Permit, SEC GIS) — one logo agency-wide; the reference is keyed by **document type alone** (the BIR logo is identical on every BIR document, in any city).
 > - **`lgu`** (e.g. Business Permit) — one seal per city; the reference is keyed by **(document type, city)** (Pasig's business-permit seal differs from Quezon City's).
-> - **`null`** (e.g. Signed Contract) — no official issuer logo; the reference lookup is skipped (only the tamper check runs).
+> - **`null`** (e.g. Signed Contract) — no official issuer logo; the reference lookup is skipped (only the texture check runs).
 >
 > References live in the **`logo_references`** table. There is **no per-vendor stamp embedding** and no per-vendor enrollment step. (This is the opposite of the signature handling in §4a, which uses one per-vendor reference enrolled at registration.)
 
-**Tamper check (always runs, reference or not)**:
+**Texture check (always runs, reference or not)**:
 1. The cropped region is preprocessed (resized, normalized).
 2. It is passed through an **EfficientNet model** (pre-trained, classification head removed, used as a fixed feature extractor) to produce a **compact feature vector** and analyze texture.
-3. EfficientNet's MBConv blocks distinguish genuine **wet-ink impressions** from **photocopied, scanned, or digitally edited reproductions** regardless of whether an issuer reference exists. A detected reproduction/edit raises a `Stamp/logo tampered` flag. (Halftone dot patterns in photocopies, for example, produce a different texture signature than genuine wet ink.)
+3. EfficientNet's MBConv blocks distinguish **wet-ink-like impressions** from **photocopied, scanned, or digital reproductions** regardless of whether an issuer reference exists. A reproduction-like result is presented to officers as `Stamp has scan/copy texture`. It describes the crop's texture and does **not** assert that the stamp artwork was altered. (Halftone dot patterns in photocopies, for example, produce a different texture signature than wet ink.) The legacy API/database field remains `stamp_tampered` for compatibility.
 
 **Issuer lookup & verification**:
 1. Classification (Stage 3) gives the **document type**; the pipeline reads its `issuer_scope`.
@@ -279,16 +279,16 @@ Registration detection is calibrated independently from Stage 4 document detecti
 
 **Reference seeding (per issuer, on first approval)**: An issuer's reference logo is **not** created automatically on first sight — trusting an unverified logo would let a forgery become the standard. Instead, when a logo is detected for an issuer that has **no reference yet**, the document is flagged `Unknown / unreferenced logo` and the feature vector is held pending. The **first time a compliance officer approves a document carrying that issuer's logo**, that logo is enrolled as the reference — stored against the **document type** (`national`) or **(document type, city)** (`lgu`); the officer's approval decision is the trust gate. Every subsequent submission for that issuer is then verified against it.
 
-**Output**: Tamper result + (when an issuer reference exists) similarity percentage and pass/fail indicator; otherwise an `Unknown / unreferenced logo` flag — or, when `issuer_scope` is `null`, only the tamper result.
+**Output**: Texture result + (when an issuer reference exists) similarity percentage and pass/fail indicator; otherwise an `Unknown / unreferenced logo` flag — or, when `issuer_scope` is `null`, only the texture result.
 
 **Failure paths**:
-- **No issuer logo expected** (`issuer_scope = null`) → the reference lookup is skipped; only the tamper-check result is recorded.
+- **No issuer logo expected** (`issuer_scope = null`) → the reference lookup is skipped; only the texture result is recorded.
 - **City not identified** (an `lgu` document type where OCR found no recognizable city) → `City not identified` flag; the lookup cannot be scoped, so verification is skipped and the absence feeds the risk score.
 - **No reference for that issuer yet** → `Unknown / unreferenced logo` flag; contributes to the composite risk score and becomes the reference only if an officer later approves the document.
-- **Tampering detected** → `Stamp/logo tampered — suspect reproduction/edit` flag (raised even before any reference exists).
+- **Scan/copy texture detected** → `Stamp has scan/copy texture` flag (raised even before any reference exists). This means the crop resembles a scanned, photocopied, or digital reproduction; it is not a finding that the stamp artwork was altered.
 - **Below-threshold similarity** (issuer reference exists) → `Logo mismatch — suspect reproduction` flag.
 
-All feed into the composite risk score.
+Issuer-reference availability and identity similarity feed the stamp/logo risk component. The scan/copy texture label is contextual evidence for officer review and does not by itself add stamp risk points or establish document tampering.
 
 ---
 
@@ -326,7 +326,7 @@ All feed into the composite risk score.
 
 **What happens**:
 1. The system **aggregates** results from all validation components:
-   - Text validation score (from OCR template matching)
+   - Text validation score (Laravel regex matching of aggregate OCR text against the vendor's non-empty registration fields)
    - Document classification confidence (from ResNet-50)
    - Signature similarity score (from Siamese CNN) — or "not detected" flag
    - Logo similarity score (from EfficientNet, vs the issuer's reference) — or "not detected / unreferenced / city not identified / no issuer logo" flag
@@ -585,7 +585,7 @@ VENDOR                          SYSTEM                              OFFICER / AD
                                     Euclidean distance → Score
 
                                 8b. Stamp / Logo (EfficientNet)
-                                    Tamper check (always) → look up the
+                                    Texture check (always) → look up the
                                     OCR city's reference logo; if none →
                                     flag "Unknown/unreferenced logo";
                                     else compare → Cosine sim → Score

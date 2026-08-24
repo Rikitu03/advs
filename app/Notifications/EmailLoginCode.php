@@ -3,17 +3,31 @@
 namespace App\Notifications;
 
 use App\Services\EmailOtpService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class EmailLoginCode extends Notification
+class EmailLoginCode extends Notification implements ShouldBeEncrypted, ShouldQueue
 {
+    use Queueable;
+
+    /** @var int */
+    public $tries = 3;
+
+    /** @var array<int, int> */
+    public $backoff = [5, 30, 120];
+
+    /** @var int */
+    public $timeout = 30;
+
     /**
      * Create a new notification instance.
      */
     public function __construct(public readonly string $code)
     {
-        //
+        $this->onQueue('mail');
     }
 
     /**

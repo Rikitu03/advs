@@ -104,8 +104,20 @@ This starts:
 
 - Laravel at `http://127.0.0.1:8000`
 - Vite development assets
-- Queue worker for `document-processing`, `mail`, and `default` with a
-  360-second job timeout
+- Dedicated mail queue worker for `mail` with a 60-second job timeout
+- Dedicated document queue worker for `document-processing` with a 360-second
+  job timeout
+
+Startup first checks the configured database connection. If MySQL is stopped
+or the `DB_*` settings are invalid, the command fails before the other
+processes start with an actionable error. The queue process is also restarted
+automatically by the queue-only `scripts/queue-worker.ps1` supervisor after a
+transient database disconnect. Each queue worker has its own restart loop, so
+slow OCR/ML jobs cannot block authentication email delivery. Laravel normally
+exits a database worker with status 0 when it detects a lost connection, so
+the queue-only restart loops are required for a local multi-process development
+command. Non-zero worker exits are still propagated so application errors
+remain visible.
 
 ### Terminal 2: Python ML API
 
@@ -197,8 +209,9 @@ php artisan optimize:clear
 
 ### Documents stay queued
 
-Confirm Terminal 1 is running and includes the queue worker. The required
-queue is `document-processing`.
+Confirm Terminal 1 is running and includes the dedicated document queue worker.
+The required queue is `document-processing`; the mail worker does not process
+document jobs.
 
 ### ML API is unreachable
 

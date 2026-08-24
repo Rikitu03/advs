@@ -678,6 +678,120 @@ def test_business_permit_has_no_bir_fields() -> None:
     assert "revenue_region_no" not in keys
 
 
+def test_business_permit_aliases_and_city_required_schemas_cover_all_named_lgus() -> None:
+    assert ocr_dryrun.canonical_business_permit_city("CITY OF MAKATI") == "Makati"
+    assert ocr_dryrun.canonical_business_permit_city("Maynila City") == "Manila"
+    assert ocr_dryrun.canonical_business_permit_city("LUNGSOD NG MARIKINA") == "Marikina"
+    assert ocr_dryrun.canonical_business_permit_city("TAGUIG CITY") == "Taguig"
+    assert ocr_dryrun.canonical_business_permit_city("CITY OF DIGOS") == "Digos"
+
+    required_by_city = {
+        city: {spec["key"] for spec in ocr_dryrun.business_permit_field_specs(city) if spec["required"]}
+        for city in ("Digos", "Makati", "Manila", "Marikina", "Taguig")
+    }
+    assert "valid_until" in required_by_city["Makati"]
+    assert "permit_no" in required_by_city["Manila"]
+    assert "permit_no" in required_by_city["Marikina"]
+    assert "lcn_or_account_no" in required_by_city["Taguig"]
+    assert "valid_until" not in required_by_city["Manila"]
+
+
+def test_makati_real_ocr_style_extracts_city_owner_address_nature_or_and_dates() -> None:
+    text = """LUNGSOD NG MAKATI
+NA SI/ANG:
+(THAT) ANNETTE FOSTER
+(with postal address at)
+B14 L21 55TH STREET, AGOHO COVE, BRGY. SAN LORENZO, MAKATI CITY
+(Republic ... permit to operate as)
+a May TRANSPORT SERVICE
+ON : 1sth JULY 2024
+(this permit expires on) DECEMBER 31, 2024
+TAX YEAR 2024
+O.R. NO. 6020150"""
+    city = ocr_dryrun.canonical_business_permit_city(text)
+    fields = ocr_dryrun.extract_fields(text, {}, ocr_dryrun.business_permit_field_specs(city))
+
+    assert city == "Makati"
+    assert fields["name_of_proprietor"]["value"] == "ANNETTE FOSTER"
+    assert "SAN LORENZO" in fields["business_location"]["value"]
+    assert fields["kind_of_business"]["value"] == "TRANSPORT SERVICE"
+    assert fields["date_issued"]["value"] is not None
+    assert "JULY" in fields["date_issued"]["value"].upper()
+    assert fields["valid_until"]["value"] == "DECEMBER 31, 2024"
+    assert fields["or_no"]["value"] == "6020150"
+    assert fields["tax_year"]["value"] == "2024"
+
+
+def test_manila_inline_layout_extracts_required_identity_and_payment_fields() -> None:
+    text = """LUNGSOD NG MAYNILA
+BUSINESS PERMIT
+NAME OF PROPRIETOR: JUAN DELA CRUZ
+TRADE NAME: MAYNILA EATS
+BUSINESS ADDRESS: 100 ESCOLTA STREET, BINONDO, MANILA
+NATURE OF BUSINESS: FOOD SERVICE
+BUSINESS IDENTIFICATION NO.: BIN-2026-00125
+O.R. NO.: 778899"""
+    city = ocr_dryrun.canonical_business_permit_city(text)
+    fields = ocr_dryrun.extract_fields(text, {}, ocr_dryrun.business_permit_field_specs(city))
+
+    assert city == "Manila"
+    assert fields["name_of_proprietor"]["value"] == "JUAN DELA CRUZ"
+    assert fields["trade_name"]["value"] == "MAYNILA EATS"
+    assert fields["business_location"]["value"].startswith("100 ESCOLTA STREET")
+    assert fields["kind_of_business"]["value"] == "FOOD SERVICE"
+    assert fields["permit_no"]["value"] == "BIN-2026-00125"
+    assert fields["or_no"]["value"] == "778899"
+
+
+def test_marikina_value_above_layout_extracts_required_permit_and_dates() -> None:
+    text = """CITY OF MARIKINA
+MARIA SANTOS
+NAME OF PROPRIETOR
+MARIKINA BAKESHOP
+TRADE NAME
+25 SHOE AVENUE, CONCEPCION, MARIKINA CITY
+BUSINESS LOCATION
+BAKERY
+NATURE OF BUSINESS
+PERMIT NO.: MK-2026-4455
+DATE ISSUED: JANUARY 15, 2026
+VALID UNTIL: DECEMBER 31, 2026"""
+    city = ocr_dryrun.canonical_business_permit_city(text)
+    fields = ocr_dryrun.extract_fields(text, {}, ocr_dryrun.business_permit_field_specs(city))
+
+    assert city == "Marikina"
+    assert fields["name_of_proprietor"]["value"] == "MARIA SANTOS"
+    assert fields["trade_name"]["value"] == "MARIKINA BAKESHOP"
+    assert fields["business_location"]["value"].startswith("25 SHOE AVENUE")
+    assert fields["kind_of_business"]["value"] == "BAKERY"
+    assert fields["permit_no"]["value"] == "MK-2026-4455"
+    assert fields["date_issued"]["value"] == "JANUARY 15, 2026"
+    assert fields["valid_until"]["value"] == "DECEMBER 31, 2026"
+
+
+def test_taguig_inline_layout_extracts_entity_location_lcn_and_validity() -> None:
+    text = """CITY OF TAGUIG
+BUSINESS PERMIT
+NAME OF ENTITY: GLOBAL TRANSIT INC.
+TRADE NAME: TAGUIG SHUTTLE
+LOCATION: 8 BONIFACIO DRIVE, FORT BONIFACIO, TAGUIG CITY
+NATURE OF BUSINESS: TRANSPORT SERVICE
+LCN: TG-2026-9001
+DATE ISSUED: FEBRUARY 1, 2026
+VALIDITY UNTIL: DECEMBER 31, 2026"""
+    city = ocr_dryrun.canonical_business_permit_city(text)
+    fields = ocr_dryrun.extract_fields(text, {}, ocr_dryrun.business_permit_field_specs(city))
+
+    assert city == "Taguig"
+    assert fields["name_of_proprietor"]["value"] == "GLOBAL TRANSIT INC"
+    assert fields["trade_name"]["value"] == "TAGUIG SHUTTLE"
+    assert fields["business_location"]["value"].startswith("8 BONIFACIO DRIVE")
+    assert fields["kind_of_business"]["value"] == "TRANSPORT SERVICE"
+    assert fields["lcn_or_account_no"]["value"] == "TG-2026-9001"
+    assert fields["date_issued"]["value"] == "FEBRUARY 1, 2026"
+    assert fields["valid_until"]["value"] == "DECEMBER 31, 2026"
+
+
 # --- per-document-type templates: DTI Business Name Registration --------------
 
 # Captured OCR (Otsu+2x) for a synthetic DTI Business Name certificate. Fields are

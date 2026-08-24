@@ -45,7 +45,7 @@ class PasskeyBrowserFlowTest extends TestCase
             ->assertSee('for (const byte of bytes)', false)
             ->assertSee("console.error('[passkey]', error)", false)
             ->assertSee('No passkey was selected or this browser has no matching passkey.', false)
-            ->assertSee('Send a new code', false);
+            ->assertSee('Resend code', false);
     }
 
     public function test_security_view_uses_binary_safe_encoding_and_reports_registration_errors(): void

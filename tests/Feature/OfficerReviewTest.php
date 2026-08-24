@@ -61,7 +61,9 @@ class OfficerReviewTest extends TestCase
             ->assertOk()
             ->assertSee(SubmissionPresenter::reference($submission))
             ->assertSee('Risk score breakdown')
-            ->assertSee('Officer decision');
+            ->assertSee('Officer decision')
+            ->assertDontSee('Raw OCR text')
+            ->assertDontSee('<pre');
     }
 
     public function test_unknown_submission_returns_not_found(): void
@@ -118,7 +120,7 @@ class OfficerReviewTest extends TestCase
             'document_type_id' => $birTypeId,
         ]);
         ValidationResult::factory()->for($flagged)->create([
-            'flags' => ['missing_required_fields:form_no,tin,rdo_code', 'no_signature_detected'],
+            'flags' => ['missing_required_fields:form_no,tin,rdo_code', 'no_signature_detected', 'stamp_tampered'],
         ]);
 
         // A clean document must not create an empty group in the panel.
@@ -133,7 +135,7 @@ class OfficerReviewTest extends TestCase
         $this->assertCount(1, $detail['flags_by_document']);
         $this->assertSame('northern-star-bir-certificate.png', $detail['flags_by_document'][0]['document']);
         $this->assertSame(
-            ['Missing required fields: Form No, TIN, RDO Code', 'No signature detected'],
+            ['Missing required fields: Form No, TIN, RDO Code', 'No signature detected', 'Stamp has scan/copy texture'],
             $detail['flags_by_document'][0]['flags'],
         );
 
@@ -141,7 +143,10 @@ class OfficerReviewTest extends TestCase
             ->get(route('admin.submissions.show', $submission->id))
             ->assertOk()
             ->assertSee('Missing required fields: Form No, TIN, RDO Code')
-            ->assertSee('No signature detected');
+            ->assertSee('No signature detected')
+            ->assertSee('Stamp has scan/copy texture')
+            ->assertDontSee('Stamp tampered')
+            ->assertDontSee('stamp_tampered');
     }
 
     public function test_flag_humaniser_renders_per_type_field_acronyms(): void
@@ -157,6 +162,7 @@ class OfficerReviewTest extends TestCase
             ['Missing required fields: OCN, TRN, Certificate No, Business Name, Registered Activities'],
             SubmissionPresenter::flags($submission->fresh()),
         );
+        $this->assertSame('Stamp texture check unavailable', SubmissionPresenter::flagLabel('stamp_tamper_unavailable'));
     }
 
     /**
@@ -212,6 +218,71 @@ class OfficerReviewTest extends TestCase
             ->assertSee('no reference is enrolled for this vendor yet')
             ->assertSee('no reference logo is on file for this issuer yet')
             ->assertSee(route('admin.documents.show', $document->id));
+    }
+
+    public function test_business_permit_panel_preserves_issuer_and_field_evidence(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+        $permitTypeId = (int) DB::table('document_types')->where('code', 'business_permit')->value('id');
+        $vendor = Vendor::factory()->create([
+            'company_name' => 'Acme Foods Inc',
+            'business_city' => 'Makati',
+            'business_permit_number' => 'BP-2026-99',
+        ]);
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create(['document_type_id' => $permitTypeId]);
+
+        ValidationResult::factory()->for($document)->create([
+            'classification_label' => 'business_permit',
+            'classification_confidence' => 0.997,
+            'detected_city' => 'Makati',
+            'ocr_fields' => [
+                '__business_permit' => [
+                    'issuer_city_raw' => 'LUNGSOD NG MAKATI',
+                    'issuer_city_canonical' => 'Makati',
+                    'layout_key' => 'makati',
+                    'layout_version' => '2026-08-24',
+                    'fields' => [
+                        'permit_no' => [
+                            'value' => 'BP/2026/99',
+                            'normalized_value' => 'BP/2026/99',
+                            'source_page' => 1,
+                            'bbox' => [1, 2, 3, 4],
+                            'confidence' => 94,
+                            'source' => 'tesseract',
+                        ],
+                    ],
+                    'identity' => [
+                        'score' => 1.0,
+                        'validity' => 'valid',
+                        'checks' => [
+                            'permit_number' => [
+                                'field' => 'permit_no',
+                                'available' => true,
+                                'matched' => true,
+                                'expected' => 'BP-2026-99',
+                            ],
+                        ],
+                        'flags' => [],
+                    ],
+                ],
+            ],
+            'flags' => ['unreferenced_logo'],
+        ]);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('Business permit issuer evidence')
+            ->assertSee('LUNGSOD NG MAKATI')
+            ->assertSee('Makati')
+            ->assertSee('Makati layout')
+            ->assertSee('Issuer reference missing')
+            ->assertSee('Classified as')
+            ->assertSee('99.7%')
+            ->assertSee('BP/2026/99')
+            ->assertSee('Matched')
+            ->assertSee('bbox 1, 2, 3, 4');
     }
 
     /**
@@ -379,7 +450,32 @@ class OfficerReviewTest extends TestCase
         $this->assertSame('No stamp/logo region detected.', $components['stamp']['detail']);
     }
 
-    public function test_drill_down_provides_per_document_ocr_text_with_filters(): void
+    public function test_drill_down_describes_stamp_texture_as_scan_copy_without_claiming_tampering(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'stamp_tampered' => true,
+            'stamp_bbox' => [10, 10, 80, 80],
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertTrue($components['stamp']['texture_checked']);
+        $this->assertTrue($components['stamp']['scan_copy_texture']);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('Issuer Logo Match (EfficientNet)')
+            ->assertSee('Scan/copy texture detected')
+            ->assertSee('does not mean the stamp artwork was altered')
+            ->assertDontSee('Stamp tampered')
+            ->assertDontSee('stamp_tampered');
+    }
+
+    public function test_drill_down_provides_per_document_ocr_filters_without_raw_text(): void
     {
         $vendor = Vendor::factory()->create();
         $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
@@ -407,11 +503,10 @@ class OfficerReviewTest extends TestCase
             ],
             $detail['ocr_filters'],
         );
-        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $bir->id]);
-        $this->assertSame('CITY OF DIGOS BUSINESS PERMIT', $detail['ocr_by_document'][(string) $permit->id]);
+        $this->assertArrayNotHasKey('ocr_by_document', $detail);
     }
 
-    public function test_drill_down_ocr_text_falls_back_when_ocr_not_yet_available(): void
+    public function test_drill_down_does_not_expose_raw_ocr_when_ocr_fields_are_unavailable(): void
     {
         $vendor = Vendor::factory()->create();
         $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
@@ -420,10 +515,8 @@ class OfficerReviewTest extends TestCase
 
         $detail = SubmissionPresenter::detail($submission->fresh());
 
-        $this->assertSame(
-            'OCR stage not yet available — no extracted text for this document.',
-            $detail['ocr_by_document'][(string) $document->id],
-        );
+        $this->assertArrayNotHasKey('ocr_by_document', $detail);
+        $this->assertSame([], $detail['ocr_fields_by_document'][(string) $document->id]);
     }
 
     public function test_drill_down_builds_ocr_field_rows_from_the_persisted_field_map(): void
@@ -446,6 +539,36 @@ class OfficerReviewTest extends TestCase
         $this->assertNull($rows[0]['warning']);
         $this->assertNull($rows[1]['value']);
         $this->assertNull($rows[1]['warning']);
+    }
+
+    public function test_drill_down_compares_ocr_fields_with_vendor_registration_details(): void
+    {
+        $vendor = Vendor::factory()->create([
+            'company_name' => 'Northern Star Finance Inc.',
+            'trade_name' => 'Barporating Solutions',
+            'tin' => '388-063-009-0000',
+            'dti_registration_number' => null,
+            'registration_number' => null,
+        ]);
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'registered_name' => ['name' => 'Registered Name', 'value' => 'NORTHERN STAR FINANCE INC.', 'warnings' => []],
+                'trade_name' => ['name' => 'Trade Name', 'value' => 'BARPORATING SOLUTIONS', 'warnings' => []],
+                'tin' => ['name' => 'TIN', 'value' => '388-063-009-0001', 'warnings' => []],
+                'certificate_no' => ['name' => 'Certificate Number', 'value' => 'BN-99', 'warnings' => []],
+            ],
+        ]);
+
+        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
+            ->keyBy('key');
+
+        $this->assertTrue($rows['registered_name']['comparison']);
+        $this->assertTrue($rows['trade_name']['comparison']);
+        $this->assertFalse($rows['tin']['comparison']);
+        $this->assertNull($rows['certificate_no']['comparison']);
+        $this->assertSame('388-063-009-0000', $rows['tin']['registration_value']);
     }
 
     public function test_drill_down_marks_suspect_ocr_values_with_a_warning(): void
@@ -476,11 +599,11 @@ class OfficerReviewTest extends TestCase
     public function test_drill_down_has_no_ocr_field_rows_when_the_field_map_is_absent(): void
     {
         // Results written before the ocr_fields column existed keep only their
-        // raw text; the panel falls back to it rather than rendering nothing.
+        // raw text in storage, but the presenter must not expose it.
         $detail = $this->detailForOcrFields(null, $document);
 
         $this->assertSame([], $detail['ocr_fields_by_document'][(string) $document->id]);
-        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $document->id]);
+        $this->assertArrayNotHasKey('ocr_by_document', $detail);
     }
 
     /**
@@ -607,6 +730,25 @@ class OfficerReviewTest extends TestCase
             ->assertSee('Document tampering suspected')
             ->assertSee('Signature verification unavailable')
             ->assertSee('Santos Trading Corp.');
+    }
+
+    public function test_risk_logs_present_stamp_scan_copy_texture_separately_from_tampering(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create([
+            'status' => Submission::STATUS_PENDING_REVIEW,
+            'risk_level' => 'low',
+        ]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create(['flags' => ['stamp_tampered']]);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.risk-logs'))
+            ->assertOk()
+            ->assertSee('Stamp has scan/copy texture')
+            ->assertSee('Stamp scan/copy texture')
+            ->assertDontSee('stamp_tampered')
+            ->assertDontSee('Stamp tampered');
     }
 
     public function test_officer_can_view_the_notifications(): void

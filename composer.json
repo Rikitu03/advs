@@ -58,7 +58,8 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php artisan serve\" \"php artisan queue:work --tries=3 --timeout=360 --queue=document-processing,mail,default\" \"npm run dev\" --names='server,queue,vite'"
+            "@php artisan advs:db-ping --no-interaction",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74,#86efac\" \"php -d max_execution_time=0 artisan serve\" \"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/queue-worker.ps1 -Queue mail -Timeout 60\" \"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/queue-worker.ps1 -Queue document-processing -Timeout 360\" \"npm run dev\" --names='server,mail,documents,vite'"
         ]
     },
     "extra": {

@@ -811,10 +811,19 @@ def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
 def test_canonical_city_matches_the_form_laravel_stores():
     from api.routers.validate import canonical_city
 
-    assert canonical_city("CITY OF DIGOS") == "City Of Digos"
-    assert canonical_city("City of  Digos ") == "City Of Digos"
+    assert canonical_city("CITY OF DIGOS") == "Digos"
+    assert canonical_city("City of  Digos ") == "Digos"
     assert canonical_city("") is None
     assert canonical_city(None) is None
+
+
+def test_canonical_city_resolves_reviewed_business_permit_aliases():
+    from api.routers.validate import canonical_city
+
+    assert canonical_city("LUNGSOD NG MAKATI") == "Makati"
+    assert canonical_city("Maynila City") == "Manila"
+    assert canonical_city("CITY OF MARIKINA") == "Marikina"
+    assert canonical_city("TAGUIG CITY") == "Taguig"
 
 
 def test_resolve_issuer_reference_uses_the_national_sentinel():
@@ -1200,6 +1209,57 @@ def test_validate_aggregates_two_pages_and_forwards_page_context(
     assert "page_two_tamper" in body["flags"]
     assert [context["issue_date"] for context in tamper_contexts] == ["2025-01-01", "2025-02-02"]
     assert all(context["hard_confidence"] == 0.75 for context in tamper_contexts)
+
+
+def test_business_permit_aggregate_preserves_field_provenance_and_conflicts(monkeypatch, tmp_path, jpeg_bytes):
+    import api.routers.validate as module
+
+    pages = [
+        {
+            "status": "completed",
+            "business_permit": {
+                "issuer_city_raw": "MAYNILA",
+                "issuer_city_canonical": "Manila",
+                "layout_key": "manila",
+                "fields": {
+                    "permit_no": {"value": "BP-1", "matched": True, "confidence": 70},
+                    "trade_name": {"value": "ALPHA", "matched": True, "confidence": 80},
+                },
+            },
+            "fields": {
+                "permit_no": {"value": "BP-1", "matched": True, "confidence": 70},
+                "trade_name": {"value": "ALPHA", "matched": True, "confidence": 80},
+            },
+            "text": "MAYNILA BP-1 ALPHA",
+            "words": [],
+            "quality": {"required_total": 2, "text_validation_score": 1.0, "mean_confidence": 80, "flags": []},
+        },
+        {
+            "status": "completed",
+            "business_permit": {
+                "issuer_city_raw": "CITY OF MANILA",
+                "issuer_city_canonical": "Manila",
+                "layout_key": "manila",
+                "fields": {
+                    "permit_no": {"value": "BP-2", "matched": True, "confidence": 95},
+                },
+            },
+            "fields": {
+                "permit_no": {"value": "BP-2", "matched": True, "confidence": 95},
+            },
+            "text": "CITY OF MANILA BP-2",
+            "words": [],
+            "quality": {"required_total": 2, "text_validation_score": 1.0, "mean_confidence": 95, "flags": []},
+        },
+    ]
+
+    aggregate, flags = module._aggregate_ocr(pages)
+
+    assert aggregate["business_permit"]["issuer_city_canonical"] == "Manila"
+    assert aggregate["business_permit"]["fields"]["permit_no"]["value"] == "BP-2"
+    assert aggregate["business_permit"]["fields"]["permit_no"]["source_page"] == 2
+    assert aggregate["business_permit"]["conflicts"]["permit_no"] == ["BP-1", "BP-2"]
+    assert "ocr_field_conflict" in flags
 
 
 def test_no_issuer_scope_emits_only_no_issuer_logo(tmp_path, jpeg_bytes):

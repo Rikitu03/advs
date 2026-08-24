@@ -200,7 +200,6 @@ new class extends Component
 
                 this.$refs.upload.value = '';
                 this.submitted = false;
-                this.syncUpload();
             },
             createFileLane(selected) {
                 const extension = selected.name.split('.').pop().toLowerCase();
@@ -218,7 +217,7 @@ new class extends Component
                         ? 'File must be a PDF, PNG, JPG, or JPEG.'
                         : (! validSize ? `File is larger than the ${this.maxBytes / 1024 / 1024} MB per-file limit.` : ''),
                     type: '',
-                    status: validType && validSize ? 'uploading' : 'invalid',
+                    status: validType && validSize ? 'queued' : 'invalid',
                     progress: 0,
                 };
             },
@@ -228,55 +227,6 @@ new class extends Component
                 }
 
                 return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-            },
-            // Stage every valid file's real bytes on the server through Livewire's
-            // upload API and only mark the lane 'completed' when the upload truly
-            // finishes. The batch is submittable only once THIS resolves, so
-            // submitBatch never runs against an empty uploadedFiles array — the old
-            // race (a simulated progress bar decoupled from the real upload) left
-            // the queue on-screen but persisted nothing.
-            syncUpload() {
-                const validLanes = this.files.filter((lane) => lane.valid);
-
-                if (validLanes.length === 0) {
-                    this.uploading = false;
-                    this.$wire.set('uploadedFiles', []);
-                    return;
-                }
-
-                this.uploading = true;
-                validLanes.forEach((lane) => {
-                    lane.status = 'uploading';
-                    lane.error = '';
-                });
-
-                this.$wire.uploadMultiple(
-                    'uploadedFiles',
-                    validLanes.map((lane) => lane.file),
-                    () => {
-                        validLanes.forEach((lane) => {
-                            lane.status = 'completed';
-                            lane.progress = 100;
-                        });
-                        this.uploading = false;
-                    },
-                    () => {
-                        validLanes.forEach((lane) => {
-                            lane.status = 'failed';
-                            lane.progress = 0;
-                            lane.error = 'Upload failed. Remove or replace this file.';
-                        });
-                        this.uploading = false;
-                    },
-                    (event) => {
-                        const progress = event?.detail?.progress ?? 0;
-                        validLanes.forEach((lane) => {
-                            if (lane.status === 'uploading') {
-                                lane.progress = progress;
-                            }
-                        });
-                    },
-                );
             },
             statusLabel(file) {
                 if (file.status === 'invalid') {
@@ -299,7 +249,7 @@ new class extends Component
                     return 'Ready';
                 }
 
-                return 'Waiting';
+                return 'Ready to Upload';
             },
             statusClasses(file) {
                 if (file.status === 'failed' || file.status === 'invalid') {
@@ -326,7 +276,6 @@ new class extends Component
             removeFile(file) {
                 this.files = this.files.filter((lane) => lane.id !== file.id);
                 this.submitted = false;
-                this.syncUpload();
             },
             clearFiles() {
                 this.files = [];
@@ -341,6 +290,7 @@ new class extends Component
                 }
 
                 this.submitted = true;
+                this.uploading = true;
 
                 const payload = this.files
                     .filter((file) => file.valid)
@@ -351,18 +301,50 @@ new class extends Component
                         sizeBytes: file.sizeBytes ?? 0,
                     }));
 
-                // On success submitBatch redirects to My Submissions; this promise
-                // only resolves in-page when the server declined the batch (e.g. a
-                // disguised file was skipped), so drop the banner to surface the error.
-                this.$wire.submitBatch(payload).then(() => {
-                    this.submitted = false;
-                });
+                this.uploadFileAt(0, payload);
+            },
+            uploadFileAt(index, payload) {
+                if (index >= this.files.length) {
+                    this.$wire.submitBatch(payload).then(() => {
+                        this.submitted = false;
+                        this.uploading = false;
+                    });
+                    return;
+                }
+
+                const lane = this.files[index];
+                lane.status = 'uploading';
+                lane.progress = 0;
+                lane.error = '';
+
+                this.$wire.uploadMultiple(
+                    'uploadedFiles',
+                    [lane.file],
+                    () => {
+                        lane.status = 'completed';
+                        lane.progress = 100;
+                        this.uploadFileAt(index + 1, payload);
+                    },
+                    () => {
+                        lane.status = 'failed';
+                        lane.progress = 0;
+                        lane.error = 'Upload failed. Please try submitting again.';
+                        this.submitted = false;
+                        this.uploading = false;
+                    },
+                    (event) => {
+                        lane.progress = event?.detail?.progress ?? 0;
+                    },
+                );
             },
             get hasFiles() {
                 return this.files.length > 0;
             },
             get completedCount() {
                 return this.files.filter((file) => file.status === 'completed').length;
+            },
+            get readyCount() {
+                return this.files.filter((file) => file.valid && file.type !== '').length;
             },
             get allUploaded() {
                 return this.submitted && this.hasFiles && this.completedCount === this.files.length;
@@ -371,7 +353,7 @@ new class extends Component
                 return ! this.uploading
                     && this.hasFiles
                     && this.files.reduce((total, file) => total + (file.sizeBytes ?? 0), 0) <= this.maxBatchBytes
-                    && this.files.every((file) => file.valid && file.type !== '' && file.status === 'completed');
+                    && this.files.every((file) => file.valid && file.type !== '');
             },
         }"
     >
@@ -463,7 +445,7 @@ new class extends Component
                                 <div>
                                     <p class="text-sm font-semibold text-cu-text">File queue</p>
                                     <p class="text-xs text-cu-muted">
-                                        <span x-text="completedCount"></span>
+                                        <span x-text="readyCount"></span>
                                         <span> of </span>
                                         <span x-text="files.length"></span>
                                         <span> ready</span>
@@ -517,6 +499,7 @@ new class extends Component
                                         <select
                                             x-model="file.type"
                                             @change="handleTypeChange(file)"
+                                            :disabled="uploading"
                                             aria-label="Document type"
                                             class="h-10 w-56 shrink-0 rounded-lg border border-cu-border bg-cu-surface px-3 text-sm text-cu-text outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-cu-purple focus:ring-2 focus:ring-cu-purple/20"
                                         >
@@ -532,6 +515,7 @@ new class extends Component
                                         <button
                                             type="button"
                                             @click="removeFile(file)"
+                                            :disabled="uploading"
                                             aria-label="Remove file"
                                             title="Remove file"
                                             class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-cu-border bg-cu-surface text-cu-muted transition hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"

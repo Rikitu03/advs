@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\EmailOtp;
 use App\Models\User;
 use App\Notifications\EmailLoginCode;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +23,10 @@ class EmailOtpService
 
     public function issue(User $user, bool $enforceCooldown = false, bool $invalidatePrevious = true): EmailOtp
     {
+        if ($enforceCooldown && $this->cooldownCached($user)) {
+            throw ValidationException::withMessages(['code' => __('Please wait before requesting another code.')]);
+        }
+
         [$otp, $code] = DB::transaction(function () use ($user, $enforceCooldown, $invalidatePrevious): array {
             User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
             $latestOtp = EmailOtp::query()->where('user_id', $user->getKey())->latest('id')->first();
@@ -57,7 +62,38 @@ class EmailOtpService
             'expires_at' => $otp->expires_at?->toIso8601String(),
         ]);
 
+        if ($enforceCooldown) {
+            $this->cacheCooldown($user);
+        }
+
         return $otp;
+    }
+
+    private function cooldownCached(User $user): bool
+    {
+        try {
+            return Cache::has($this->cooldownKey($user));
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function cacheCooldown(User $user): void
+    {
+        try {
+            Cache::put(
+                $this->cooldownKey($user),
+                true,
+                now()->addSeconds(self::RESEND_COOLDOWN_SECONDS),
+            );
+        } catch (Throwable) {
+            // Cache is an optimization only; the database cooldown remains authoritative.
+        }
+    }
+
+    private function cooldownKey(User $user): string
+    {
+        return 'auth:email-otp:resend-cooldown:'.$user->getKey();
     }
 
     public function send(User $user, EmailOtp $otp): void

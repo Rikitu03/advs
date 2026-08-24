@@ -75,3 +75,24 @@
         </div>
     </div>
 @endunless
+
+@if ($data['texture_checked'] ?? false)
+    <div class="mt-4 flex items-start gap-3 rounded-xl border p-4 {{ ($data['scan_copy_texture'] ?? false) ? 'border-amber-400/25 bg-amber-400/5' : 'border-emerald-500/25 bg-emerald-500/5' }}">
+        <flux:icon
+            :icon="($data['scan_copy_texture'] ?? false) ? 'document-duplicate' : 'check-circle'"
+            class="size-5 shrink-0 {{ ($data['scan_copy_texture'] ?? false) ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300' }}"
+        />
+        <div class="flex flex-col gap-1">
+            <p class="text-sm font-medium text-cu-text">
+                {{ ($data['scan_copy_texture'] ?? false) ? 'Scan/copy texture detected' : 'Wet-ink-like texture detected' }}
+            </p>
+            <p class="text-sm text-cu-muted">
+                @if ($data['scan_copy_texture'] ?? false)
+                    The stamp texture resembles a scanned, photocopied, or digital reproduction. This is separate from issuer-logo identity matching and does not mean the stamp artwork was altered.
+                @else
+                    The stamp texture resembles a wet-ink impression. This texture result is separate from issuer-logo identity matching.
+                @endif
+            </p>
+        </div>
+    </div>
+@endif

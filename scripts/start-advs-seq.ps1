@@ -34,13 +34,15 @@ try {
 
     Run-Command -cmd "npm run build" -exitOnError
     Run-Command -cmd "php artisan optimize:clear" -exitOnError
+    Run-Command -cmd "php artisan advs:db-ping --no-interaction" -exitOnError
 
     # 2) Start services, each in a new window
     Write-Host "Starting services in separate windows..."
 
     $startArgs = @( 
           @{ name = 'Laravel Server'; cmd = "php -d max_execution_time=0 artisan serve" },
-          @{ name = 'Queue Worker'; cmd = "php -d max_execution_time=0 artisan queue:work --tries=3 --timeout=360 --queue=document-processing,mail,default" },
+          @{ name = 'Mail Queue Worker'; cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/queue-worker.ps1 -Queue mail -Timeout 60" },
+          @{ name = 'Document Queue Worker'; cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/queue-worker.ps1 -Queue document-processing -Timeout 360" },
           @{ name = 'Vite Dev'; cmd = "npm run dev" },
           @{ name = 'Python API'; cmd = "& '$repo\start_fastapi.ps1'" }
     )

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Document;
+use App\Services\Document\IssuerCity;
 use App\Services\Document\MlPipelineService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -77,7 +78,18 @@ class EnrollReferenceJob implements ShouldQueue
 
         $embedding = $mlPipeline->embedStamp($this->document, $box);
 
-        $path = $this->storeCrop($city, $type->code, $embedding['crop']);
+        $crop = $embedding['crop'] ?? null;
+        if (! is_string($crop) || $crop === '') {
+            Log::warning('Issuer reference enrollment skipped: no verified crop returned', [
+                'document_id' => $this->document->id,
+                'document_type' => $type->code,
+                'city' => $city,
+            ]);
+
+            return;
+        }
+
+        $path = $this->storeCrop($city, $type->code, $crop);
 
         // insertOrIgnore + the unique(document_type_id, city) index makes concurrent
         // approvals safe: the loser silently no-ops instead of failing the job.
@@ -120,9 +132,9 @@ class EnrollReferenceJob implements ShouldQueue
             return '';
         }
 
-        $city = trim((string) $detectedCity);
+        $city = IssuerCity::canonical($detectedCity);
 
-        return $city === '' ? null : $city;
+        return $city;
     }
 
     private function referenceExists(int $documentTypeId, string $city): bool
@@ -134,19 +146,14 @@ class EnrollReferenceJob implements ShouldQueue
     }
 
     /**
-     * Persist the crop the API embedded as the issuer's reference image. Falls back
-     * to a copy of the source document when the API returned no crop, because
-     * `logo_references.reference_image_path` is NOT NULL.
+     * Persist only the crop the API embedded as the issuer's reference image.
      */
-    private function storeCrop(string $city, string $typeCode, ?string $crop): string
+    private function storeCrop(string $city, string $typeCode, string $crop): string
     {
         $slug = $city === '' ? 'national' : str($city)->slug()->value();
         $path = "logo_references/{$typeCode}/{$slug}-".now()->timestamp.'.png';
 
-        Storage::disk('local')->put(
-            $path,
-            $crop ?? Storage::disk('local')->get($this->document->file_path),
-        );
+        Storage::disk('local')->put($path, $crop);
 
         return $path;
     }

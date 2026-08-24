@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Jobs\SendEmailVerificationNotification;
 use Database\Factories\UserFactory;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -90,7 +91,11 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
         }
 
         try {
-            $this->notify(new VerifyEmail);
+            if (config('queue.default') === 'sync') {
+                $this->notifyNow(new VerifyEmail);
+            } else {
+                SendEmailVerificationNotification::dispatch($this);
+            }
         } catch (TransportExceptionInterface $e) {
             report($e);
 

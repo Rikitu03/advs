@@ -71,8 +71,8 @@ class MlPipelineServiceTest extends TestCase
                 'matched' => true, 'confidence' => 96.0, 'warnings' => []],
             $columns['ocr_fields']['tin'],
         );
-        $this->assertEqualsWithDelta(1.0, $columns['text_validation_score'], 1e-6);
-        $this->assertSame(3, $columns['text_fields_matched']);
+        $this->assertArrayNotHasKey('text_validation_score', $columns);
+        $this->assertArrayNotHasKey('text_fields_matched', $columns);
         $this->assertSame([10, 20, 30, 40], $columns['signature_bbox']);
         $this->assertSame([50, 60, 70, 80], $columns['stamp_bbox']);
 
@@ -141,7 +141,7 @@ class MlPipelineServiceTest extends TestCase
             'matched' => false, 'confidence' => 0.0, 'warnings' => [],
         ]));
 
-        $this->assertArrayNotHasKey('detected_city', $mapped['columns']);
+        $this->assertNull($mapped['columns']['detected_city']);
     }
 
     public function test_a_document_type_with_no_city_field_sets_no_detected_city(): void
@@ -150,7 +150,7 @@ class MlPipelineServiceTest extends TestCase
             'text' => 'BUREAU OF INTERNAL REVENUE', 'fields' => [], 'quality' => [],
         ]]]]);
 
-        $this->assertArrayNotHasKey('detected_city', $mapped['columns']);
+        $this->assertNull($mapped['columns']['detected_city']);
     }
 
     /**
