@@ -70,6 +70,71 @@ class UserManagementTest extends TestCase
         ]);
     }
 
+    public function test_admin_created_user_is_immediately_verified(): void
+    {
+        // An admin provisioning an internal account expects it to be usable at
+        // once. store() passes email_verified_at => now(), so the new user must
+        // not be bounced to the email-verification wall on first login.
+        $admin = User::factory()->role(User::ROLE_ADMIN)->create();
+
+        $this->actingAs($admin)
+            ->post(route('admin.users.store'), [
+                'name' => 'Officer One',
+                'email' => 'officer1@example.com',
+                'role' => User::ROLE_COMPLIANCE_OFFICER,
+                'password' => 'password',
+                'password_confirmation' => 'password',
+            ])
+            ->assertRedirect(route('admin.users.index'));
+
+        $created = User::where('email', 'officer1@example.com')->firstOrFail();
+        $this->assertNotNull(
+            $created->email_verified_at,
+            'Admin-created users should be created pre-verified.',
+        );
+    }
+
+    public function test_admin_can_create_an_inactive_user(): void
+    {
+        $admin = User::factory()->role(User::ROLE_ADMIN)->create();
+
+        $this->actingAs($admin)
+            ->post(route('admin.users.store'), [
+                'name' => 'Dormant',
+                'email' => 'dormant@example.com',
+                'role' => User::ROLE_VENDOR,
+                'password' => 'password',
+                'password_confirmation' => 'password',
+                'is_active' => 0,
+            ])
+            ->assertRedirect(route('admin.users.index'));
+
+        $this->assertFalse(
+            (bool) User::where('email', 'dormant@example.com')->firstOrFail()->is_active,
+            'The is_active choice from the create form must persist.',
+        );
+    }
+
+    public function test_admin_can_deactivate_a_user_via_the_edit_form(): void
+    {
+        $admin = User::factory()->role(User::ROLE_ADMIN)->create();
+        $target = User::factory()->create(); // active by default
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $target), [
+                'name' => $target->name,
+                'email' => $target->email,
+                'role' => $target->role,
+                'is_active' => 0,
+            ])
+            ->assertRedirect(route('admin.users.index'));
+
+        $this->assertFalse(
+            (bool) $target->refresh()->is_active,
+            'Toggling Active off in the edit form must persist.',
+        );
+    }
+
     public function test_create_user_requires_valid_email_and_role(): void
     {
         $admin = User::factory()->role(User::ROLE_ADMIN)->create();

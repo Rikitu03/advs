@@ -1,22 +1,50 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark">
+{{-- Light-locked, exactly like the landing page: this flow is the front door to the
+     same product, so it is drawn ink-on-white with flame as the only accent and uses
+     no `dark:` variants. `data-theme-lock` stops window.advsTheme (partials/head)
+     from stamping `.dark` here for a dark-preferring visitor, which would otherwise
+     recolour the Flux inputs while the page around them stayed white. --}}
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" data-theme-lock="light">
     <head>
         @include('partials.head')
+
+        {{-- The landing page's faces. Jakarta carries the wordmark and headings;
+             Inter is reserved for the step rail's labels, mirroring the way the
+             landing page reserves it for the hero chips. --}}
+        <link
+            href="https://fonts.bunny.net/css?family=plus-jakarta-sans:300,400,500,600,700,800|inter:400,500,600"
+            rel="stylesheet"
+            media="print"
+            onload="this.media='all'"
+        />
+        <noscript>
+            <link href="https://fonts.bunny.net/css?family=plus-jakarta-sans:300,400,500,600,700,800|inter:400,500,600" rel="stylesheet" />
+        </noscript>
     </head>
-    <body class="min-h-screen bg-white antialiased dark:bg-linear-to-b dark:from-neutral-950 dark:to-neutral-900">
-        <div class="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
-            <div class="flex w-full max-w-sm flex-col gap-2">
-                <a href="{{ route('home') }}" class="flex flex-col items-center gap-2 font-medium" wire:navigate>
-                    <span class="flex h-9 w-9 mb-1 items-center justify-center rounded-md">
-                        <x-app-logo-icon class="size-9 fill-current text-black dark:text-white" />
-                    </span>
-                    <span class="sr-only">{{ config('app.name', 'Laravel') }}</span>
-                </a>
-                <div class="flex flex-col gap-6">
+
+    <body class="landing-glow min-h-svh bg-white font-jakarta text-ink antialiased">
+        <div class="flex min-h-svh flex-col items-center justify-center gap-8 px-6 py-12">
+            {{-- The wordmark, set exactly as the landing nav sets it. --}}
+            <a
+                href="{{ route('home') }}"
+                class="font-jakarta text-2xl font-extrabold tracking-tight text-ink transition-colors hover:text-flame focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
+                wire:navigate
+            >
+                ADVS
+                <span class="sr-only">{{ config('app.name', 'ADVS') }}</span>
+            </a>
+
+            {{-- Wide enough to seat the four-stage rail on one line without clipping
+                 its last label, which is what the width has to clear. --}}
+            <main class="w-full max-w-[540px]">
+                {{-- The card is the one raised surface on the page: white on the warm
+                     wash, with the landing's soft, wide shadow rather than a border. --}}
+                <div class="rounded-[28px] bg-white/90 p-6 shadow-[0_20px_60px_-24px_rgb(30_30_30/0.22)] ring-1 ring-black/5 backdrop-blur-xl sm:p-10">
                     {{ $slot }}
                 </div>
-            </div>
+            </main>
         </div>
+
         <flux:toast />
 
         @if ($toast = session()->pull('toast'))

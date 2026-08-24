@@ -1,0 +1,182 @@
+{
+  "permit_no": {
+    "x": 250,
+    "y": 223,
+    "w": 375,
+    "h": 70
+  },
+  "date_issued": {
+    "x": 1118,
+    "y": 229,
+    "w": 261,
+    "h": 64
+  },
+  "business_name": {
+    "x": 121,
+    "y": 313,
+    "w": 1207,
+    "h": 38
+  },
+  "nature_of_business": {
+    "x": 121,
+    "y": 360,
+    "w": 1207,
+    "h": 26
+  },
+  "business_owner_name": {
+    "x": 127,
+    "y": 451,
+    "w": 1213,
+    "h": 38
+  },
+  "business_account_number": {
+    "x": 133,
+    "y": 492,
+    "w": 1207,
+    "h": 47
+  },
+  "business_address": {
+    "x": 145,
+    "y": 592,
+    "w": 1198,
+    "h": 82
+  },
+  "valid_until": {
+    "x": 253,
+    "y": 686,
+    "w": 337,
+    "h": 67
+  },
+  "date_started": {
+    "x": 1144,
+    "y": 683,
+    "w": 255,
+    "h": 73
+  },
+  "plate_number": {
+    "x": 285,
+    "y": 765,
+    "w": 176,
+    "h": 50
+  },
+  "business_area": {
+    "x": 1249,
+    "y": 765,
+    "w": 146,
+    "h": 50
+  },
+  "no_of_personnel": {
+    "x": 722,
+    "y": 750,
+    "w": 199,
+    "h": 59
+  },
+  "business_tax": {
+    "x": 476,
+    "y": 879,
+    "w": 352,
+    "h": 23
+  },
+  "mp_fee": {
+    "x": 473,
+    "y": 914,
+    "w": 357,
+    "h": 23
+  },
+  "sanitary_inspection_fee": {
+    "x": 476,
+    "y": 938,
+    "w": 355,
+    "h": 23
+  },
+  "sanitary_permit_fee": {
+    "x": 476,
+    "y": 961,
+    "w": 360,
+    "h": 26
+  },
+  "garbage_fee": {
+    "x": 479,
+    "y": 987,
+    "w": 352,
+    "h": 32
+  },
+  "fire_inspection_fee": {
+    "x": 470,
+    "y": 1055,
+    "w": 305,
+    "h": 23
+  },
+  "engineering_inspection_fee": {
+    "x": 476,
+    "y": 1020,
+    "w": 357,
+    "h": 29
+  },
+  "plate_sticker_fee": {
+    "x": 479,
+    "y": 1081,
+    "w": 369,
+    "h": 23
+  },
+  "barangay_clearance_fee": {
+    "x": 488,
+    "y": 1266,
+    "w": 363,
+    "h": 38
+  },
+  "community_tax_certificate": {
+    "x": 491,
+    "y": 1304,
+    "w": 360,
+    "h": 35
+  },
+  "deadline_of_renewal": {
+    "x": 353,
+    "y": 1430,
+    "w": 199,
+    "h": 50
+  },
+  "total": {
+    "x": 658,
+    "y": 1491,
+    "w": 237,
+    "h": 38
+  },
+  "encoded_by": {
+    "x": 239,
+    "y": 1547,
+    "w": 343,
+    "h": 41
+  },
+  "received_by": {
+    "x": 250,
+    "y": 1626,
+    "w": 334,
+    "h": 47
+  },
+  "received_date": {
+    "x": 280,
+    "y": 1696,
+    "w": 319,
+    "h": 50
+  },
+  "city_mayor_name": {
+    "x": 992,
+    "y": 1614,
+    "w": 319,
+    "h": 35
+  },
+  "acting_chief": {
+    "x": 997,
+    "y": 1702,
+    "w": 352,
+    "h": 44
+  },
+  "acting_chief_signature": {
+    "x": 1050,
+    "y": 1658,
+    "w": 249,
+    "h": 94
+  }
+}

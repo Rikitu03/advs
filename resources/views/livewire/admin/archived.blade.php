@@ -1,6 +1,7 @@
 <?php
 
-use App\Support\DemoStore;
+use App\Models\Submission;
+use App\Support\SubmissionPresenter;
 use Illuminate\Support\Collection;
 use Livewire\Volt\Component;
 
@@ -22,15 +23,22 @@ new class extends Component {
     }
 
     /**
+     * Decided submissions, newest decision first (§4 Archived Reports).
+     *
      * @return Collection<int, array<string, mixed>>
      */
     public function filtered(): Collection
     {
         $term = mb_strtolower(trim($this->search));
+        $typeNames = SubmissionPresenter::typeNames();
 
-        return DemoStore::archivedReports()
-            ->when($this->decision !== 'all', fn (Collection $rows) => $rows->where('decision', $this->decision))
-            ->when($this->risk !== 'all', fn (Collection $rows) => $rows->where('risk_level', $this->risk))
+        return $this->archivedQuery()
+            ->when($this->decision !== 'all', fn ($query) => $query->where('status', $this->decision))
+            ->when($this->risk !== 'all', fn ($query) => $query->where('risk_level', $this->risk))
+            ->with(['vendor.user', 'reviewer', 'documents.validationResult'])
+            ->orderByDesc('reviewed_at')
+            ->get()
+            ->map(fn (Submission $submission): array => SubmissionPresenter::summary($submission, $typeNames))
             ->when($term !== '', fn (Collection $rows) => $rows->filter(
                 fn (array $s): bool => str_contains(
                     mb_strtolower("{$s['ref']} {$s['company']} {$s['vendor']} {$s['document_type']}"),
@@ -40,6 +48,12 @@ new class extends Component {
             ->values();
     }
 
+    private function archivedQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        return Submission::query()
+            ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED]);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -47,7 +61,7 @@ new class extends Component {
     {
         return [
             'rows' => $this->filtered(),
-            'total' => DemoStore::archivedReports()->count(),
+            'total' => $this->archivedQuery()->count(),
         ];
     }
 }; ?>
@@ -87,7 +101,7 @@ new class extends Component {
             </label>
             <div class="flex flex-wrap items-center gap-3">
                 <div class="flex items-center gap-1 rounded-xl border border-cu-border bg-black/5 dark:bg-white/5 p-1">
-                    @foreach (['all' => 'All', 'approved' => 'Approved', 'rejected' => 'Rejected'] as $value => $text)
+                    @foreach (['all' => 'All', 'approved' => 'Approved', 'resubmission_requested' => 'Resubmission Requested'] as $value => $text)
                         <button type="button" wire:click="setDecision('{{ $value }}')"
                                 class="rounded-lg px-3 py-1.5 text-sm font-medium transition {{ $decision === $value ? 'bg-cu-purple text-white' : 'text-cu-muted hover:text-cu-text' }}">{{ $text }}</button>
                     @endforeach
@@ -131,7 +145,7 @@ new class extends Component {
                                         </span>
                                     @else
                                         <span class="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300">
-                                            <flux:icon icon="x-circle" variant="micro" class="size-3.5" /> Rejected
+                                            <flux:icon icon="arrow-path" variant="micro" class="size-3.5" /> Resubmission Requested
                                         </span>
                                     @endif
                                 </td>

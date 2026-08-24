@@ -2,9 +2,17 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Jobs\EnrollReferenceJob;
+use App\Models\Document;
+use App\Models\Notification;
+use App\Models\Submission;
 use App\Models\User;
-use App\Support\DemoStore;
+use App\Models\ValidationResult;
+use App\Models\Vendor;
+use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
@@ -21,8 +29,39 @@ class OfficerWorkflowTest extends TestCase
         $this->officer = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
     }
 
+    /**
+     * A pending-review submission for a named company with one completed,
+     * scored document.
+     */
+    private function makePendingSubmission(string $company, float $risk, string $level, array $flags = []): Submission
+    {
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create(['company_name' => $company]);
+
+        $submission = Submission::factory()->for($vendor)->create([
+            'status' => Submission::STATUS_PENDING_REVIEW,
+            'composite_risk_score' => $risk,
+            'risk_level' => $level,
+        ]);
+
+        $document = Document::factory()->for($submission)->for($vendor)->create([
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+
+        ValidationResult::factory()->create([
+            'document_id' => $document->id,
+            'submission_id' => $submission->id,
+            'document_risk_score' => $risk,
+            'flags' => $flags,
+        ]);
+
+        return $submission;
+    }
+
     public function test_every_officer_tab_renders(): void
     {
+        $submission = $this->makePendingSubmission('Santos Trading Corp.', 78.0, 'high');
+
         $this->actingAs($this->officer);
 
         foreach ([
@@ -32,8 +71,8 @@ class OfficerWorkflowTest extends TestCase
             route('admin.vendors'),
             route('admin.risk-logs'),
             route('admin.notifications'),
-            route('admin.submissions.show', 1042),
-            route('admin.vendors.show', 1),
+            route('admin.submissions.show', $submission->id),
+            route('admin.vendors.show', $submission->vendor_id),
         ] as $url) {
             $this->get($url)->assertOk();
         }
@@ -44,7 +83,7 @@ class OfficerWorkflowTest extends TestCase
         $vendor = User::factory()->role(User::ROLE_VENDOR)->create();
 
         $this->actingAs($vendor)->get(route('admin.pending'))->assertForbidden();
-        $this->actingAs($vendor)->get(route('admin.submissions.show', 1042))->assertForbidden();
+        $this->actingAs($vendor)->get(route('admin.submissions.show', 1))->assertForbidden();
     }
 
     public function test_unknown_submission_returns_404(): void
@@ -54,54 +93,288 @@ class OfficerWorkflowTest extends TestCase
 
     public function test_officer_can_approve_a_submission(): void
     {
+        $submission = $this->makePendingSubmission('Garcia Textiles', 22.0, 'low');
+
         $this->actingAs($this->officer);
 
-        Volt::test('admin.submissions.show', ['submission' => '1042'])
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
             ->call('startDecision', 'approve')
             ->set('comments', 'Verified against enrolled references.')
             ->call('submitDecision')
             ->assertSee('Approved')
             ->assertSee('Verified against enrolled references.');
 
-        $submission = DemoStore::findSubmission(1042);
-        $this->assertSame('approved', $submission['decision']);
-        $this->assertSame($this->officer->name, $submission['reviewed_by']);
+        $fresh = $submission->fresh();
+        $this->assertSame(Submission::STATUS_APPROVED, $fresh->status);
+        $this->assertSame($this->officer->id, $fresh->reviewed_by);
+        $this->assertSame('Verified against enrolled references.', $fresh->review_comments);
 
-        $this->assertFalse(DemoStore::pendingSubmissions()->contains('id', 1042));
-        $this->assertTrue(DemoStore::archivedReports()->contains('id', 1042));
+        // The decision cascades to the vendor, is audited, and notifies the vendor.
+        $this->assertSame(Vendor::STATUS_APPROVED, $submission->vendor->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $this->officer->id,
+            'action' => 'submission.approved',
+            'entity_id' => $submission->id,
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $submission->vendor->user_id,
+            'type' => Notification::TYPE_DECISION_MADE,
+            'related_submission_id' => $submission->id,
+        ]);
+
+        // The deciding officer (and the rest of the officer team) is notified too.
+        $officerNotification = Notification::where('user_id', $this->officer->id)
+            ->where('type', Notification::TYPE_DECISION_MADE)
+            ->where('related_submission_id', $submission->id)
+            ->firstOrFail();
+        $this->assertSame('Submission approved', $officerNotification->subject);
+        $this->assertStringContainsString($this->officer->name, $officerNotification->body);
+        $this->assertStringContainsString('Garcia Textiles', $officerNotification->body);
     }
 
-    public function test_officer_can_reject_and_undo_a_decision(): void
+    public function test_approval_queues_issuer_logo_reference_seeding(): void
     {
+        Bus::fake();
+        $this->seed(DocumentTypeSeeder::class);
+
+        $submission = $this->makePendingSubmission('Garcia Textiles', 22.0, 'low');
+        $typeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $typed = $submission->documents()->firstOrFail();
+        $typed->update(['document_type_id' => $typeId]);
+        // A document with no resolved type has no issuer to key a reference by.
+        $untyped = Document::factory()->for($submission)->create([
+            'vendor_id' => $submission->vendor_id,
+            'document_type_id' => null,
+        ]);
+
         $this->actingAs($this->officer);
 
-        $component = Volt::test('admin.submissions.show', ['submission' => '1039'])
-            ->call('startDecision', 'reject')
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'approve')
+            ->call('submitDecision');
+
+        // §5 Stage 4b: an approved document's logo "becomes the reference".
+        Bus::assertDispatched(
+            EnrollReferenceJob::class,
+            fn (EnrollReferenceJob $job): bool => $job->document->is($typed) && $job->officerId === $this->officer->id,
+        );
+        Bus::assertNotDispatched(
+            EnrollReferenceJob::class,
+            fn (EnrollReferenceJob $job): bool => $job->document->is($untyped),
+        );
+    }
+
+    public function test_resubmission_request_does_not_seed_any_reference(): void
+    {
+        Bus::fake();
+        $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'resubmit')
+            ->set('comments', 'Please resubmit corrected documents.')
+            ->call('submitDecision');
+
+        // Only an APPROVED document may become an issuer's reference.
+        Bus::assertNotDispatched(EnrollReferenceJob::class);
+    }
+
+    public function test_risk_breakdown_can_be_filtered_by_document_type(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $birTypeId = (int) DB::table('document_types')->where('name', 'BIR Certificate of Registration')->value('id');
+        $permitTypeId = (int) DB::table('document_types')->where('name', 'Business Permit')->value('id');
+
+        $submission = $this->makePendingSubmission('Santos Trading Corp.', 55.0, 'medium');
+        $vendor = $submission->vendor;
+
+        // Replace the helper's untyped document with one per document type.
+        $submission->documents()->delete();
+
+        $bir = Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $birTypeId,
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $bir->id,
+            'submission_id' => $submission->id,
+            'classification_label' => 'BIR Certificate of Registration',
+            'classification_confidence' => 0.97,
+            'document_risk_score' => 20.0,
+        ]);
+
+        $permit = Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $permitTypeId,
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $permit->id,
+            'submission_id' => $submission->id,
+            'classification_label' => 'Business Permit',
+            'classification_confidence' => 0.71,
+            'document_risk_score' => 90.0,
+        ]);
+
+        $this->actingAs($this->officer);
+
+        // Default ('All') shows the highest-risk document — the Business Permit.
+        $component = Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->assertSet('componentFilter', 'all')
+            ->assertSee('Classified as Business Permit')
+            ->assertSee('71% conf.');
+
+        // Filtering to the BIR type swaps in that document's component scores.
+        $component->call('setComponentFilter', 'type-'.$birTypeId)
+            ->assertSee('Classified as BIR Certificate of Registration')
+            ->assertSee('97% conf.')
+            ->assertDontSee('Classified as Business Permit');
+
+        // Unknown filter keys are refused.
+        $component->call('setComponentFilter', 'type-999999')->assertStatus(400);
+    }
+
+    public function test_ocr_text_panel_can_be_filtered_by_document(): void
+    {
+        $submission = $this->makePendingSubmission('Reyes Manufacturing', 40.0, 'medium');
+        $vendor = $submission->vendor;
+
+        // Replace the helper's untyped document with two distinct-text documents.
+        $submission->documents()->delete();
+
+        $bir = Document::factory()->for($submission)->for($vendor)->create([
+            'original_filename' => 'bir-certificate.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $bir->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE CERTIFICATE',
+        ]);
+
+        $permit = Document::factory()->for($submission)->for($vendor)->create([
+            'original_filename' => 'business-permit.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $permit->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'CITY OF DIGOS BUSINESS PERMIT',
+        ]);
+
+        $this->actingAs($this->officer);
+
+        // Default selection is the first document in file order.
+        $component = Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->assertSet('ocrDocumentFilter', (string) $bir->id)
+            ->assertSee('BUREAU OF INTERNAL REVENUE CERTIFICATE')
+            ->assertDontSee('CITY OF DIGOS BUSINESS PERMIT');
+
+        // Filtering to the other document swaps in its own OCR text.
+        $component->call('setOcrDocumentFilter', (string) $permit->id)
+            ->assertSee('CITY OF DIGOS BUSINESS PERMIT')
+            ->assertDontSee('BUREAU OF INTERNAL REVENUE CERTIFICATE');
+
+        // Unknown document ids are refused.
+        $component->call('setOcrDocumentFilter', '999999')->assertStatus(400);
+    }
+
+    public function test_ocr_panel_renders_extracted_field_pairs_and_flags_suspect_values(): void
+    {
+        $submission = $this->makePendingSubmission('Reyes Manufacturing', 40.0, 'medium');
+        $submission->documents()->delete();
+
+        $document = Document::factory()->for($submission)->for($submission->vendor)->create([
+            'original_filename' => 'bir-certificate.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $document->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+            'ocr_fields' => [
+                'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                    'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+                'trade_name' => ['name' => 'Trade Name', 'value' => 'EE Bincn', 'required' => true,
+                    'matched' => true, 'confidence' => 88.0, 'warnings' => ['noisy_text']],
+            ],
+        ]);
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            // Label + value pairs replace the raw dump as the panel's content.
+            ->assertSee('TIN')
+            ->assertSee('009-028-463-000')
+            ->assertSee('Trade Name')
+            ->assertSee('EE Bincn')
+            // The suspect value carries a warning chip; the clean one does not.
+            ->assertSee('Noisy')
+            ->assertSee('Value contains character patterns typical of noisy OCR output.')
+            // The engine name is no longer asserted anywhere in the panel — values
+            // can come from Tesseract or the ROI+TrOCR pass.
+            ->assertDontSee('PyTesseract');
+    }
+
+    public function test_officer_can_request_resubmission_with_a_reason(): void
+    {
+        $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'resubmit')
+            ->set('comments', 'Forged stamp suspected.')
             ->call('submitDecision')
-            ->assertSee('Rejected');
+            ->assertSee('Resubmission requested');
 
-        $this->assertTrue(DemoStore::archivedReports()->contains('id', 1039));
+        $fresh = $submission->fresh();
+        $this->assertSame(Submission::STATUS_RESUBMISSION_REQUESTED, $fresh->status);
+        $this->assertSame(Vendor::STATUS_REJECTED, $submission->vendor->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $this->officer->id,
+            'action' => 'submission.resubmission_requested',
+            'entity_id' => $submission->id,
+        ]);
 
-        $component->call('undoDecision')->assertSee('Pending review');
+        $notification = Notification::where('user_id', $submission->vendor->user_id)->firstOrFail();
+        $this->assertSame('Resubmission requested', $notification->subject);
+        $this->assertStringContainsString('resubmission', $notification->body);
+        $this->assertStringContainsString('Forged stamp suspected.', $notification->body);
 
-        $this->assertTrue(DemoStore::pendingSubmissions()->contains('id', 1039));
+        $officerNotification = Notification::where('user_id', $this->officer->id)
+            ->where('type', Notification::TYPE_DECISION_MADE)
+            ->where('related_submission_id', $submission->id)
+            ->firstOrFail();
+        $this->assertSame('Resubmission requested', $officerNotification->subject);
+        $this->assertStringContainsString($this->officer->name, $officerNotification->body);
+        $this->assertStringContainsString('Tan Imports', $officerNotification->body);
+        $this->assertStringContainsString('Forged stamp suspected.', $officerNotification->body);
     }
 
-    public function test_approving_a_vendors_submission_updates_the_vendor_profile(): void
+    public function test_a_decided_submission_cannot_be_decided_again(): void
     {
+        $submission = $this->makePendingSubmission('Cruz Logistics Inc.', 40.0, 'medium');
+
         $this->actingAs($this->officer);
 
-        // Villanueva Foods (vendor 6) starts pending and not enrolled (SUB-1045).
-        DemoStore::decide(1045, 'approved');
+        $component = Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'approve')
+            ->call('submitDecision');
 
-        $vendor = DemoStore::findVendor(6);
-        $this->assertSame('approved', $vendor['status']);
-        $this->assertTrue($vendor['enrolled']);
-        $this->assertNotNull($vendor['signature_ref']);
+        $component->call('startDecision', 'resubmit')
+            ->call('submitDecision')
+            ->assertStatus(400);
+
+        $this->assertSame(Submission::STATUS_APPROVED, $submission->fresh()->status);
     }
 
     public function test_pending_queue_filters_by_search_and_risk(): void
     {
+        $this->makePendingSubmission('Santos Trading Corp.', 78.0, 'high');
+        $this->makePendingSubmission('Mendoza Pharma', 12.0, 'low');
+
         $this->actingAs($this->officer);
 
         Volt::test('admin.pending')
@@ -118,37 +391,61 @@ class OfficerWorkflowTest extends TestCase
 
     public function test_archived_reports_filter_by_decision(): void
     {
+        $approved = $this->makePendingSubmission('Garcia Textiles', 15.0, 'low');
+        $resubmission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
+
+        $approved->update(['status' => Submission::STATUS_APPROVED, 'reviewed_by' => $this->officer->id, 'reviewed_at' => now()]);
+        $resubmission->update(['status' => Submission::STATUS_RESUBMISSION_REQUESTED, 'reviewed_by' => $this->officer->id, 'reviewed_at' => now()]);
+
         $this->actingAs($this->officer);
 
         Volt::test('admin.archived')
-            ->call('setDecision', 'rejected')
+            ->call('setDecision', 'resubmission_requested')
             ->assertSee('Tan Imports')
             ->assertDontSee('Garcia Textiles');
     }
 
     public function test_notifications_can_be_marked_read(): void
     {
+        Notification::factory()->count(3)->create(['user_id' => $this->officer->id]);
+
         $this->actingAs($this->officer);
 
-        $this->assertGreaterThan(0, DemoStore::unreadCount());
+        $this->assertSame(3, $this->officer->notifications()->unread()->count());
 
         Volt::test('admin.notifications')
-            ->call('markRead', 1)
+            ->call('markRead', $this->officer->notifications()->first()->id)
             ->call('markAllRead');
 
-        $this->assertSame(0, DemoStore::unreadCount());
+        $this->assertSame(0, $this->officer->notifications()->unread()->count());
     }
 
-    public function test_dashboard_kpis_react_to_decisions_and_reset(): void
+    public function test_dashboard_kpis_count_real_submissions(): void
     {
+        $this->makePendingSubmission('Santos Trading Corp.', 78.0, 'high');
+        $this->makePendingSubmission('Mendoza Pharma', 12.0, 'low');
+
         $this->actingAs($this->officer);
 
-        $before = DemoStore::kpis()['pending'];
+        Volt::test('admin.dashboard')
+            ->assertSee('Santos Trading Corp.')
+            ->assertSee('Pending review');
+    }
 
-        DemoStore::decide(1042, 'rejected');
-        $this->assertSame($before - 1, DemoStore::kpis()['pending']);
+    public function test_risk_logs_list_flags_from_validation_results(): void
+    {
+        $this->makePendingSubmission('Santos Trading Corp.', 78.0, 'high', [
+            'Document tampering suspected',
+            'Signature verification unavailable',
+        ]);
 
-        Volt::test('admin.dashboard')->call('resetDemo');
-        $this->assertSame($before, DemoStore::kpis()['pending']);
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.risk-logs')
+            ->assertSee('Document tampering suspected')
+            ->assertSee('Signature verification unavailable')
+            ->call('setType', 'tampering')
+            ->assertSee('Document tampering suspected')
+            ->assertDontSee('Signature verification unavailable');
     }
 }

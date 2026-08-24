@@ -46,6 +46,24 @@ DEFAULT_TAMPER_THRESHOLD = 0.50
 # enough to hard-flag the document (the §6 risk hard-override mirrors this).
 DEFAULT_HARD_CONFIDENCE = 0.80
 
+# Only techniques whose evidence is self-sufficient may hard-flag a document on
+# its own. Everything else stays in the weighted blend but cannot single-handedly
+# force High Risk:
+#
+#   * font / cross_reference — statistical heuristics (a robust size baseline,
+#     format regexes over noisy OCR text) that false-positive on genuine layouts.
+#   * ela — measures a CONTAINER property, recompression history, which simply
+#     does not exist in lossless or re-rendered inputs. Measured: the identical
+#     pixels of a clean Makati permit score 0.2 as a PNG and 1.0 as a JPEG, and
+#     that spurious 0.8 signal was forcing a pristine document to High Risk.
+#     It remains useful as corroborating evidence, not as a sole verdict.
+#
+# metadata and copy_move keep the authority: an image-editor signature, a
+# modify-after-issue timestamp, or an offset-dominant cloned region each evidence
+# a real edit. That is also precisely why copy_move's periodic-texture false
+# positives had to be fixed (see forensics/copy_move.py).
+HARD_FLAG_TECHNIQUES = frozenset({"metadata", "copy_move"})
+
 
 def technique_result(
     score: float,
@@ -83,7 +101,8 @@ def aggregate(
 
     Skipped techniques are excluded (their weight is not counted). Returns the
     aggregate ``tamper_score`` (0 clean .. 1 tampered), ``tamper_authenticity``
-    (its inverse), ``tamper_confidence`` (the single strongest tamper signal),
+    (its inverse), ``tamper_confidence`` (the strongest tamper signal among
+    the ``HARD_FLAG_TECHNIQUES``),
     ``tamper_passed`` and merged ``flags``.
 
     ``hard_flag`` mirrors the §6 risk hard-override: one technique reporting
@@ -104,7 +123,8 @@ def aggregate(
         weight = float(weights.get(name, 0.0))
         num += weight * tamper_signal
         den += weight
-        strongest = max(strongest, tamper_signal)
+        if name in HARD_FLAG_TECHNIQUES:
+            strongest = max(strongest, tamper_signal)
         flags.extend(result.get("flags", []))
 
     tamper_score = (num / den) if den > 0 else 0.0

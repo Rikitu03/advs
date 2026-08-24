@@ -1,6 +1,6 @@
 # ADVS Python ML training/inference dependencies.
 #
-# NOTE: CLAUDE.md pins TensorFlow 2.15, which only ships wheels up to
+# NOTE: Older archived planning pinned TensorFlow 2.15, which only ships wheels up to
 # Python 3.11. This venv is Python 3.12, so we use TensorFlow 2.16.x
 # (first release with 3.12 wheels). 2.16 defaults to Keras 3 — train_advs.py
 # uses only APIs that work under both Keras 2 and 3
@@ -14,6 +14,8 @@ pandas>=2.1
 # --- classification / signature / stamp models ---
 tensorflow==2.16.*           # use tensorflow-cpu==2.16.* on machines without CUDA
 scikit-learn>=1.4
+keras-tuner>=1.4             # hyperparameter tuning
+scipy>=1.11
 scipy>=1.11
 opencv-python-headless>=4.9
 

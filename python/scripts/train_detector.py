@@ -1,6 +1,6 @@
-"""ADVS - YOLOv8 signature + stamp detector (model 2 of 4).
+"""ADVS - YOLOv8 signature + stamp + logo detector (model 2 of 4).
 
-Detects two classes (0=signature, 1=stamp) on full document pages. Faithful to
+Detects three classes (0=signature, 1=stamp, 2=logo) on full document pages. Faithful to
 training_script.md §2.
 
 Data layout (read-only):
@@ -10,7 +10,7 @@ Data layout (read-only):
     <data-root>/validation/detector_data/labels/*.txt
 
 Outputs (under <models-out>):
-    detector_data.yaml (generated), yolov8_stamp_signature.onnx, yolo_runs/
+    detector_data.yaml (generated), yolov8_signature_stamp_logo.onnx, yolo_runs/
 
 Run:
     python scripts/train_detector.py                 # full training (needs ultralytics + data)
@@ -32,7 +32,7 @@ PY_ROOT = Path(__file__).resolve().parents[1]
 CONFIG: dict = {
     "weights": "yolov8n.pt",
     "epochs": 50,
-    "imgsz": 640,
+    "imgsz": 1280,
     "batch": 16,
     "patience": 10,
 }
@@ -42,7 +42,7 @@ SMOKE_OVERRIDES = {
     "batch": 2,
     "patience": 2,
 }
-NAMES = {0: "signature", 1: "stamp"}
+NAMES = {0: "logo", 1: "signature", 2: "stamp_seal"}
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
@@ -100,7 +100,7 @@ def pick_device():
 
 
 def train(cfg: dict, data_root: Path, models_out: Path) -> None:
-    section("YOLOv8 signature + stamp detection")
+    section("YOLOv8 signature + stamp + logo detection")
     from ultralytics import YOLO
 
     yaml_path = models_out / "detector_data.yaml"
@@ -122,7 +122,7 @@ def train(cfg: dict, data_root: Path, models_out: Path) -> None:
     except Exception:  # noqa: BLE001 - metrics shape varies by version
         log("validation complete (mAP attribute unavailable on this version)")
 
-    onnx_path = models_out / "yolov8_stamp_signature.onnx"
+    onnx_path = models_out / "yolov8_signature_stamp_logo.onnx"
     exported = model.export(format="onnx", imgsz=cfg["imgsz"])
     import shutil
 
@@ -130,7 +130,7 @@ def train(cfg: dict, data_root: Path, models_out: Path) -> None:
         shutil.copy(str(exported), str(onnx_path))
     log(f"Exported {onnx_path}")
     if onnx_path.exists():
-        log("inference sanity check -> yolov8_stamp_signature.onnx present")
+         log("inference sanity check -> yolov8_signature_stamp_logo.onnx present")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

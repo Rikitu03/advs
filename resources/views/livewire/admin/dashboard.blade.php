@@ -1,25 +1,79 @@
 <?php
 
-use App\Support\DemoStore;
+use App\Models\AuditLog;
+use App\Models\Submission;
+use App\Support\SubmissionPresenter;
+use Illuminate\Support\Collection;
 use Livewire\Volt\Component;
 
 new class extends Component {
-    public function resetDemo(): void
-    {
-        DemoStore::simulateProcessing(500);
-        DemoStore::reset();
-    }
-
     /**
      * @return array<string, mixed>
      */
     public function with(): array
     {
+        $typeNames = SubmissionPresenter::typeNames();
+
+        $pending = Submission::query()
+            ->where('status', Submission::STATUS_PENDING_REVIEW)
+            ->with(['vendor.user', 'documents.validationResult'])
+            ->orderByDesc('composite_risk_score')
+            ->get()
+            ->map(fn (Submission $submission): array => SubmissionPresenter::summary($submission, $typeNames));
+
+        $decided = Submission::query()
+            ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED])
+            ->selectRaw("count(*) as total, sum(case when status = 'approved' then 1 else 0 end) as approved")
+            ->first();
+
         return [
-            'kpis' => DemoStore::kpis(),
-            'urgent' => DemoStore::urgentSubmissions(),
-            'activity' => DemoStore::activity(),
+            'kpis' => [
+                'pending' => $pending->count(),
+                'flagged_today' => $pending
+                    ->where('submitted_at', '>=', now()->startOfDay())
+                    ->filter(fn (array $s): bool => count($s['flags']) > 0)
+                    ->count(),
+                'high_risk' => $pending->where('risk_level', 'high')->count(),
+                'approval_rate' => ((int) ($decided->total ?? 0)) === 0
+                    ? '—'
+                    : round((int) $decided->approved / (int) $decided->total * 100).'%',
+            ],
+            'urgent' => $pending->take(5)->values(),
+            'activity' => $this->activity(),
         ];
+    }
+
+    /**
+     * Recent audit-trail events rendered as the activity feed.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function activity(): Collection
+    {
+        return AuditLog::query()
+            ->with('user')
+            ->latest('created_at')
+            ->take(6)
+            ->get()
+            ->map(function (AuditLog $log): array {
+                [$icon, $color] = match (true) {
+                    str_ends_with($log->action, '.approved') => ['check-circle', 'emerald'],
+                    str_ends_with($log->action, '.resubmission_requested') => ['arrow-path', 'rose'],
+                    str_starts_with($log->action, 'ml_model.') => ['cpu-chip', 'sky'],
+                    default => ['bolt', 'amber'],
+                };
+
+                return [
+                    'icon' => $icon,
+                    'color' => $color,
+                    'text' => sprintf(
+                        '%s — %s',
+                        str($log->action)->replace(['.', '_'], ' ')->headline(),
+                        $log->user?->name ?? 'System',
+                    ),
+                    'at' => $log->created_at,
+                ];
+            });
     }
 }; ?>
 
@@ -58,13 +112,20 @@ new class extends Component {
                         <flux:icon icon="inbox-stack" class="size-4" />
                         Review queue
                     </a>
+                    @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))
+                        <a href="{{ route('admin.retention.index') }}" wire:navigate
+                           class="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                            <flux:icon icon="clock" class="size-4" />
+                            Retention settings
+                        </a>
+                    @endif
                 </div>
             </div>
             <div class="pointer-events-none absolute -right-10 -top-10 size-48 rounded-full bg-white/10 blur-2xl"></div>
         </div>
 
         {{-- KPI cards --}}
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" wire:loading.class="opacity-50" wire:target="resetDemo">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <x-kpi-card label="Pending review" :value="$kpis['pending']" icon="inbox-stack" accent="purple" hint="Awaiting your decision" class="cu-animate-in" style="animation-delay: 60ms" />
             <x-kpi-card label="Flagged today" :value="$kpis['flagged_today']" icon="flag" accent="pink" hint="New flags raised today" class="cu-animate-in" style="animation-delay: 120ms" />
             <x-kpi-card label="High-risk (≥ 61)" :value="$kpis['high_risk']" icon="exclamation-triangle" accent="yellow" hint="Need priority review" class="cu-animate-in" style="animation-delay: 180ms" />
@@ -86,7 +147,7 @@ new class extends Component {
                     </a>
                 </div>
 
-                <ul class="divide-y divide-cu-border" wire:loading.class="opacity-50" wire:target="resetDemo">
+                <ul class="divide-y divide-cu-border">
                     @forelse ($urgent as $s)
                         <li>
                             <a href="{{ route('admin.submissions.show', $s['id']) }}" wire:navigate
@@ -126,8 +187,8 @@ new class extends Component {
                     <h2 class="text-base font-semibold text-cu-text">Recent activity</h2>
                     <p class="text-xs text-cu-muted">Alerts from the validation pipeline</p>
                 </div>
-                <ul class="flex flex-col px-5 py-2" wire:loading.class="opacity-50" wire:target="resetDemo">
-                    @foreach ($activity as $event)
+                <ul class="flex flex-col px-5 py-2">
+                    @forelse ($activity as $event)
                         <li class="flex gap-3 py-3">
                             <x-activity-icon :icon="$event['icon']" :color="$event['color']" />
                             <div class="min-w-0 flex-1">
@@ -135,19 +196,14 @@ new class extends Component {
                                 <p class="mt-0.5 text-xs text-cu-muted">{{ $event['at']->diffForHumans() }}</p>
                             </div>
                         </li>
-                    @endforeach
+                    @empty
+                        <li class="flex flex-col items-center gap-2 px-5 py-10 text-center">
+                            <flux:icon icon="bolt-slash" class="size-6 text-cu-muted" />
+                            <p class="text-xs text-cu-muted">No recorded activity yet.</p>
+                        </li>
+                    @endforelse
                 </ul>
             </div>
-        </div>
-
-        {{-- Demo controls --}}
-        <div class="flex items-center justify-center gap-2 text-xs text-cu-muted/70">
-            <span>Prototype data — decisions and read-states live in your session.</span>
-            <button type="button" wire:click="resetDemo" wire:loading.attr="disabled" wire:target="resetDemo"
-                    class="inline-flex items-center gap-1.5 font-medium text-cu-blue transition hover:text-cu-purple disabled:opacity-50">
-                <flux:icon.loading wire:loading wire:target="resetDemo" variant="micro" class="size-3.5" />
-                Reset demo data
-            </button>
         </div>
     </div>
 </x-page>

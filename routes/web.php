@@ -3,9 +3,13 @@
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
+use App\Models\Document;
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
 
 /*
@@ -37,13 +41,26 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Volt::route('vendor/dashboard', 'vendor.dashboard')->name('vendor.dashboard');
         Volt::route('vendor/submit', 'vendor.submit')->name('vendor.submit');
         Volt::route('vendor/submissions', 'vendor.submissions')->name('vendor.submissions');
+        Route::get('vendor/documents/{document}', function (Document $document) {
+            $vendor = Auth::user()?->vendor;
+
+            abort_unless($vendor !== null && $document->vendor_id === $vendor->id, 404);
+
+            $path = ltrim($document->file_path, '/');
+
+            abort_unless(Storage::exists($path), 404);
+
+            return Storage::response($path, $document->original_filename, [
+                'Content-Type' => $document->mime_type,
+            ]);
+        })->name('vendor.documents.show');
         Volt::route('vendor/notifications', 'vendor.notifications')->name('vendor.notifications');
         Volt::route('vendor/profile', 'vendor.profile')->name('vendor.profile');
     });
 
-    // Compliance officer / admin dashboard + review workflow.
-    // All pages are full-page Volt components backed by the session-scoped
-    // DemoStore, so officer actions (decisions, read-states) work end to end.
+    // Compliance officer / admin dashboard + review workflow. All pages are
+    // full-page Volt components backed by Eloquent; officer decisions persist
+    // to the database and cascade to the vendor's accreditation status.
     Route::middleware('role:admin,compliance_officer')->group(function () {
         Volt::route('admin/dashboard', 'admin.dashboard')->name('admin.dashboard');
 
@@ -52,6 +69,56 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Validation Results drill-down + officer decision for one submission (§6).
         Volt::route('admin/submissions/{submission}', 'admin.submissions.show')->name('admin.submissions.show');
+
+        // Original uploaded file for review — streamed from private storage;
+        // reaching here already requires the admin/compliance_officer role.
+        Route::get('admin/documents/{document}', function (Document $document) {
+            $path = ltrim($document->file_path, '/');
+
+            abort_unless(Storage::exists($path), 404);
+
+            return Storage::response($path, $document->original_filename, [
+                'Content-Type' => $document->mime_type,
+            ]);
+        })->name('admin.documents.show');
+
+        // Enrollment photos and issuer reference logos are private evidence;
+        // keep them behind the same officer/admin boundary as document files.
+        Route::get('admin/signatures/{vendor}', function (Vendor $vendor) {
+            $path = DB::table('vendor_embeddings')
+                ->where('vendor_id', $vendor->id)
+                ->value('signature_image_path');
+            $path = is_string($path) ? ltrim($path, '/') : null;
+
+            abort_unless($path !== null && str_starts_with($path, 'signatures/') && Storage::disk('local')->exists($path), 404);
+
+            $disk = Storage::disk('local');
+
+            return $disk->response($path, 'enrolled-signature.'.(pathinfo($path, PATHINFO_EXTENSION) ?: 'bin'), [
+                'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+                'Cache-Control' => 'private, no-store, max-age=0',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        })->name('admin.signature.show');
+
+        Route::get('admin/logo-references/{logoReference}', function (int $logoReference) {
+            $path = DB::table('logo_references')
+                ->where('id', $logoReference)
+                ->value('reference_image_path');
+            $path = is_string($path) ? ltrim($path, '/') : null;
+
+            abort_unless($path !== null && str_starts_with($path, 'logo_references/') && Storage::disk('local')->exists($path), 404);
+
+            $disk = Storage::disk('local');
+
+            return $disk->response($path, 'issuer-logo.'.(pathinfo($path, PATHINFO_EXTENSION) ?: 'bin'), [
+                'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+                'Cache-Control' => 'private, no-store, max-age=0',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        })->name('admin.logo-references.show');
 
         // Archived Reports — searchable archive of decided submissions (§4).
         Volt::route('admin/archived', 'admin.archived')->name('admin.archived');
@@ -87,6 +154,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::post('{key}/reset', [SystemSettingsController::class, 'reset'])->name('reset');
         });
 
+        // Data Retention Configuration — admin-only policy management UI.
+        // The Volt page owns the live editing experience; the model/policy
+        // pair keeps the records secure and future-proof for more rules.
+        Route::middleware('role:admin')->prefix('admin/retention')->name('admin.retention.')->group(function () {
+            Volt::route('/', 'admin.retention.index')->name('index');
+        });
+
         // Audit Trail — admin-only viewer for the append-only audit log.
         // The Volt page owns the index, filtering, and search; the
         // controller serves the detail drill-down and CSV export.
@@ -94,6 +168,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Volt::route('/', 'admin.audit.index')->name('index');
             Route::get('export', [AuditLogController::class, 'export'])->name('export');
             Route::get('{audit}', [AuditLogController::class, 'show'])->name('show');
+        });
+
+        // ML Model Management — admin-only catalogue of the four ML weight
+        // files the pipeline consumes (ResNet-50, YOLOv8, Siamese, EfficientNet).
+        // The Volt page handles filtering, sync, and per-row edits. Authorization
+        // is also enforced inside the component via the MlModelPolicy.
+        Route::middleware('role:admin')->prefix('admin/models')->name('admin.models.')->group(function () {
+            Volt::route('/', 'admin.models.index')->name('index');
         });
     });
 });
@@ -108,6 +190,11 @@ Route::middleware(['auth'])->group(function () {
     // verification. Auth-only (the user is not verified yet) and exempt from the
     // EnsureSignatureEnrolled gate by its route name.
     Volt::route('signature/enroll', 'auth.signature-enroll')->name('signature.create');
+
+    // Step 2 of vendor registration: declare business + owner details before
+    // signature enrollment. Auth-only (the user is not verified yet) and exempt
+    // from the EnsureVendorProfileComplete gate by its route name.
+    Volt::route('register/business', 'auth.business-details')->name('business.create');
 
     Route::redirect('settings', 'settings/profile');
 

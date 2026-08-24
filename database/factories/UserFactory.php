@@ -33,6 +33,9 @@ class UserFactory extends Factory
             // Like email_verified_at, factory users default to having completed
             // onboarding (signature enrollment); use unenrolled() to test the gate.
             'signature_enrolled_at' => now(),
+            // Factory users default to having finished the business/owner-details
+            // step too; use withoutVendorProfile() to test that gate.
+            'vendor_profile_completed_at' => now(),
             'remember_token' => Str::random(10),
         ];
     }
@@ -45,6 +48,16 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'signature_path' => null,
             'signature_enrolled_at' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the vendor has not completed the business/owner-details step.
+     */
+    public function withoutVendorProfile(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'vendor_profile_completed_at' => null,
         ]);
     }
 

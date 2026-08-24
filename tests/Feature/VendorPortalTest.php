@@ -2,8 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\Document;
+use App\Models\Notification;
+use App\Models\Submission;
 use App\Models\User;
+use App\Models\Vendor;
+use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class VendorPortalTest extends TestCase
@@ -23,19 +29,44 @@ class VendorPortalTest extends TestCase
 
     public function test_vendor_can_view_the_submit_documents_page(): void
     {
+        $this->seed(DocumentTypeSeeder::class);
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        Vendor::factory()->for($user)->create();
 
         $this->actingAs($user)
             ->get(route('vendor.submit'))
             ->assertOk()
             ->assertSee('Submit Documents')
             ->assertSee('Document submission')
-            ->assertSee('PDF, PNG, JPG');
+            ->assertSee('Queue Files')
+            ->assertSee('Assign Document Type')
+            ->assertSee('Upload Files')
+            ->assertSee('Pending Review')
+            ->assertSee('Business Permit')
+            ->assertSee('BIR Permit')
+            ->assertSee('DTI Registration')
+            ->assertSee('PDF, PNG, JPG')
+            ->assertDontSee('Upload ready files')
+            ->assertDontSee('Retry');
     }
 
     public function test_vendor_can_view_their_submissions(): void
     {
+        $this->seed(DocumentTypeSeeder::class);
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+        $businessPermitId = DB::table('document_types')->where('code', 'business_permit')->value('id');
+
+        $submission = Submission::factory()->for($vendor)->create([
+            'status' => Submission::STATUS_PENDING_REVIEW,
+        ]);
+
+        Document::factory()->for($submission)->for($vendor)->create([
+            'document_type_id' => $businessPermitId,
+            'original_filename' => 'business_permit_2026.pdf',
+            'file_path' => "vendor{$vendor->id}/business_permit00001.pdf",
+            'mime_type' => 'application/pdf',
+        ]);
 
         $this->actingAs($user)
             ->get(route('vendor.submissions'))
@@ -48,6 +79,13 @@ class VendorPortalTest extends TestCase
     public function test_vendor_can_view_notifications(): void
     {
         $user = User::factory()->role(User::ROLE_VENDOR)->create();
+
+        Notification::factory()->create([
+            'user_id' => $user->id,
+            'type' => Notification::TYPE_SUBMISSION_RECEIVED,
+            'subject' => 'Submission received',
+            'body' => 'Your submission has been received and is being processed.',
+        ]);
 
         $this->actingAs($user)
             ->get(route('vendor.notifications'))

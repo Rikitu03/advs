@@ -37,6 +37,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Per-component pass thresholds (§9) — authenticity scores in [0,1]
+    |--------------------------------------------------------------------------
+    |
+    | Displayed on the risk drill-down and used to mark a component pass/fail.
+    | SIGNATURE_DISTANCE_THRESHOLD is empirical (§9); the similarity threshold
+    | here is its presentation-side equivalent.
+    */
+
+    'thresholds' => [
+        'text' => (float) env('TEXT_VALIDATION_THRESHOLD', 0.70),
+        'classification' => (float) env('CLASSIFICATION_CONFIDENCE_THRESHOLD', 0.70),
+        'signature' => (float) env('SIGNATURE_SIMILARITY_THRESHOLD', 0.75),
+        'stamp' => (float) env('STAMP_SIMILARITY_THRESHOLD', 0.85),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Stage T — forensic tampering analysis (python/scripts/tamper_analyze.py)
     |--------------------------------------------------------------------------
     */
@@ -59,9 +76,62 @@ return [
         ],
 
         // Python invocation (Process facade) — mirrors the other Stage runners.
+        // Retained for the standalone Stage-T CLI; the document pipeline now runs
+        // forensics inside the ML API's /v1/validate (see the 'ml' block below).
         'python_bin' => env('ADVS_PYTHON_BIN', 'python3'),
         'script' => 'scripts/tamper_analyze.py',
         'timeout' => (int) env('TAMPER_TIMEOUT', 120),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | ML API — the FastAPI document-validation service (python/api)
+    |--------------------------------------------------------------------------
+    |
+    | The pipeline (classify / OCR / detect / signature / stamp / forensics) is
+    | reached in ONE call to POST {base_url}/v1/validate, authenticated with a
+    | bearer token that must match the service's API_TOKEN (python/.env.api).
+    | Env-driven so dev points at a local uvicorn and prod at a Hugging Face
+    | Space without code changes. See app/Services/Document/MlPipelineService.
+    */
+
+    'ml' => [
+        'base_url' => rtrim((string) env('ML_API_URL', 'http://127.0.0.1:7860'), '/'),
+        'token' => env('ML_API_TOKEN'),
+
+        // ML inference on CPU is slow; give the request room, fail forward after.
+        // 300, not 180: Stage 2's ROI+TrOCR field recognition dominates the call
+        // on a BIR page — measured 203s for OCR alone (11 field crops on the
+        // accurate recognizer) before classification, detection, verification
+        // and forensics are added. At 180 that page timed out, which blanked
+        // BOTH Stage 2 and Stage 3 in the officer drill-down. The API's own
+        // ROI_BUDGET_SECONDS=210 is what actually bounds the work; this is the
+        // outer limit that must sit above it.
+        'timeout' => (int) env('ML_API_TIMEOUT', 300),
+        'connect_timeout' => (int) env('ML_API_CONNECT_TIMEOUT', 10),
+        'retries' => (int) env('ML_API_RETRIES', 1),
+
+        // Fallback OCR field template for document types with no dedicated
+        // template (bir | business_permit | dti | none). The three vendor-
+        // submittable types are routed per-type in MlPipelineService::ocrTemplateFor().
+        'template' => env('ML_API_TEMPLATE', 'none'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Registration signature enrollment (§5 Stage 4a — captured at sign-up)
+    |--------------------------------------------------------------------------
+    |
+    | The vendor uploads one photo of THREE signatures on bond paper. The ML API
+    | (POST {ml.base_url}{endpoint}) detects and embeds them; SignatureEnrollmentService
+    | applies these gates: exactly `expected_count` signatures, mean pairwise cosine
+    | >= `consistency_threshold`, and no forensic hard-flag (edited / pasted on top).
+    */
+
+    'signature' => [
+        'enroll_endpoint' => env('ML_API_SIGNATURE_ENROLL_ENDPOINT', '/v1/signature/enroll'),
+        'expected_count' => (int) env('SIGNATURE_ENROLL_COUNT', 3),
+        'consistency_threshold' => (float) env('SIGNATURE_CONSISTENCY_THRESHOLD', 0.80),
     ],
 
 ];

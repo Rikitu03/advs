@@ -2,6 +2,10 @@
 
 Extracts 1280-D EfficientNet-B0 features from stamp crops and trains a logistic
 regression to separate genuine from forged. Faithful to training_script.md §4.
+Also calibrates the Stage 4b cosine-similarity threshold (each crop's vector vs
+its asset's mean genuine vector — the stand-in for the issuer's enrolled
+``logo_references`` vector) and writes it to ``stamp_threshold.txt``, which the
+ADVS API reads in preference to the §9 default 0.85.
 
 Data layout (read-only):
     <data-root>/training/stamp_data/genuine/*.png
@@ -10,7 +14,7 @@ Data layout (read-only):
     <data-root>/validation/stamp_data/forged/*.png
 
 Outputs (under <models-out>):
-    efficientnet_feature_extractor.h5, stamp_classifier.pkl
+    efficientnet_feature_extractor.h5, stamp_classifier.pkl, stamp_threshold.txt
 
 Run:
     python scripts/train_stamp.py                 # full training (needs ML stack + data)
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -78,6 +83,56 @@ def validate_structure(train_dir: Path, val_dir: Path) -> dict:
     }
 
 
+def asset_group(stem: str) -> str:
+    """Asset key from a generated filename (``bir_seal_0007`` -> ``bir_seal``);
+    datasets without that naming all fall into one shared group."""
+    m = re.match(r"(.+?)_\d{2,}", stem)
+    return m.group(1) if m else "all"
+
+
+def calibrate_stamp_threshold(train_rows: list, eval_rows: list):
+    """Cosine-similarity threshold where FAR ~= FRR (genuine scores HIGH).
+
+    Each crop's vector is compared to its asset's mean GENUINE training vector
+    — the stand-in for the issuer's enrolled reference in ``logo_references``.
+    Returns None when the eval rows can't support a threshold (one class only).
+    """
+    import numpy as np
+
+    refs = {}
+    for grp in {r[2] for r in train_rows}:
+        feats = [r[0] for r in train_rows if r[2] == grp and r[1] == 1]
+        if feats:
+            vec = np.mean(feats, axis=0)
+            refs[grp] = vec / (np.linalg.norm(vec) or 1.0)
+
+    sims, labels = [], []
+    for feat, label, grp in eval_rows:
+        ref = refs.get(grp)
+        if ref is None:
+            continue
+        unit = feat / (np.linalg.norm(feat) or 1.0)
+        sims.append(float(np.dot(unit, ref)))
+        labels.append(label)
+    sims = np.asarray(sims)
+    labels = np.asarray(labels)
+    if len(sims) == 0 or labels.min() == labels.max():
+        return None
+
+    lo, hi = float(sims.min()), float(sims.max())
+    if hi <= lo:
+        return float(lo)
+    best_t, best_gap = lo, 1e9
+    for t in np.linspace(lo, hi, 200):
+        pred_genuine = sims >= t
+        far = float(np.mean(pred_genuine[labels == 0]))
+        frr = float(np.mean(~pred_genuine[labels == 1]))
+        gap = abs(far - frr)
+        if gap < best_gap:
+            best_gap, best_t = gap, float(t)
+    return best_t
+
+
 def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
     section("EfficientNet-B0 stamp verification")
     import cv2
@@ -102,7 +157,7 @@ def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
                 continue
             arr = cv2.resize(cv2.cvtColor(arr, cv2.COLOR_BGR2RGB), (size, size)).astype("float32")
             feat = extractor.predict(preprocess_input(np.expand_dims(arr, 0)), verbose=0)[0]
-            rows.append((feat, label))
+            rows.append((feat, label, asset_group(ip.stem)))
         return rows
 
     log("Extracting features (training set)")
@@ -146,6 +201,16 @@ def train(cfg: dict, train_dir: Path, val_dir: Path, models_out: Path) -> None:
         pickle.dump(clf, fh)
     extractor.save(str(models_out / "efficientnet_feature_extractor.h5"))
     log("Saved efficientnet_feature_extractor.h5 + stamp_classifier.pkl")
+
+    section("Cosine-threshold calibration (Stage 4b issuer comparison)")
+    if not val_rows:
+        log("No validation set - calibrating on training features")
+    threshold = calibrate_stamp_threshold(train_rows, val_rows or train_rows)
+    if threshold is None:
+        log("Calibration skipped: need both genuine and forged eval samples.")
+    else:
+        (models_out / "stamp_threshold.txt").write_text(f"{threshold:.6f}\n")
+        log(f"Saved stamp_threshold.txt ({threshold:.4f})")
 
     section("Inference sanity check")
     log(f"classifier -> classes {list(clf.classes_)}")

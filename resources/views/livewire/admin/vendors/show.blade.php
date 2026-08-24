@@ -1,7 +1,7 @@
 <?php
 
-use App\Support\DemoData;
-use App\Support\DemoStore;
+use App\Models\Vendor;
+use App\Support\SubmissionPresenter;
 use Livewire\Volt\Component;
 
 new class extends Component {
@@ -15,19 +15,46 @@ new class extends Component {
 
     public function mount(string $vendor): void
     {
-        $found = DemoStore::findVendor($vendor);
+        $model = Vendor::query()
+            ->with(['user', 'submissions' => fn ($query) => $query->latest()])
+            ->find($vendor);
 
-        abort_if($found === null, 404);
+        abort_if($model === null, 404);
 
-        $this->record = $found;
+        $typeNames = SubmissionPresenter::typeNames();
+
+        $this->record = [
+            'id' => $model->id,
+            'company' => $model->company_name,
+            'contact' => $model->user?->name ?? '—',
+            'registration_number' => $model->registration_number ?: ($model->dti_registration_number ?: ($model->sec_registration_number ?: '—')),
+            'phone' => $model->phone_number ?: '—',
+            'address' => $model->business_address ?: ($model->address ?: '—'),
+            'status' => $model->status,
+            'risk_score' => $model->risk_score,
+            'registered_at' => $model->created_at,
+            'last_submission_at' => $model->submissions->first()?->created_at,
+            'submissions_count' => $model->submissions->count(),
+            'enrolled' => $model->user?->hasEnrolledSignature() ?? false,
+            'signature_enrolled_at' => $model->user?->signature_enrolled_at,
+            'submissions' => $model->submissions
+                ->map(fn ($submission): array => SubmissionPresenter::summary($submission, $typeNames))
+                ->values(),
+        ];
     }
 }; ?>
 
 <x-page>
     @php
         $v = $record;
-        $statusColor = DemoData::vendorStatusColor($v['status']);
-        $riskLevel = DemoData::riskLevel((int) $v['risk_score']);
+        $statusColor = \App\Models\Vendor::statusColor($v['status']);
+        $riskLevel = $v['risk_score'] !== null
+            ? match (true) {
+                (float) $v['risk_score'] >= (int) config('advs.risk.high_threshold') => 'high',
+                (float) $v['risk_score'] >= (int) config('advs.risk.medium_threshold') => 'medium',
+                default => 'low',
+            }
+            : null;
     @endphp
 
     <div class="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -98,7 +125,11 @@ new class extends Component {
                 </div>
                 <div class="flex items-center justify-between">
                     <span class="text-sm text-cu-muted">Latest risk</span>
-                    <x-risk-badge :level="$riskLevel" :score="(int) $v['risk_score']" />
+                    @if ($riskLevel !== null)
+                        <x-risk-badge :level="$riskLevel" :score="(int) $v['risk_score']" />
+                    @else
+                        <span class="text-sm text-cu-muted">—</span>
+                    @endif
                 </div>
                 <div class="flex items-center justify-between">
                     <span class="text-sm text-cu-muted">Submissions</span>
@@ -110,7 +141,7 @@ new class extends Component {
         {{-- Reference biometrics --}}
         <div class="cu-animate-in rounded-2xl border border-cu-border bg-cu-surface p-5" style="animation-delay: 180ms">
             <h2 class="text-base font-semibold text-cu-text">Reference biometrics</h2>
-            <p class="text-xs text-cu-muted">Enrolled on the vendor's first approved submission (§5 4a/4b).</p>
+            <p class="text-xs text-cu-muted">The signature reference is enrolled at registration (§5 4a); logo/stamp references are issuer-keyed, not per vendor (§5 4b).</p>
 
             @if ($v['enrolled'])
                 <div class="mt-4 grid gap-4 sm:grid-cols-2">
@@ -121,8 +152,8 @@ new class extends Component {
                         <div>
                             <p class="text-sm font-medium text-cu-text">Signature embedding</p>
                             <p class="text-xs text-cu-muted">
-                                {{ $v['signature_ref']['model'] }} · {{ $v['signature_ref']['dimensions'] }}-D ·
-                                enrolled {{ $v['signature_ref']['enrolled_at']->format('M j, Y') }}
+                                Siamese CNN · 128-D ·
+                                enrolled {{ $v['signature_enrolled_at']?->format('M j, Y') ?? 'at registration' }}
                             </p>
                         </div>
                     </div>
@@ -131,10 +162,9 @@ new class extends Component {
                             <flux:icon icon="check-badge" class="size-5" />
                         </span>
                         <div>
-                            <p class="text-sm font-medium text-cu-text">Stamp feature vector</p>
+                            <p class="text-sm font-medium text-cu-text">Issuer logo references</p>
                             <p class="text-xs text-cu-muted">
-                                {{ $v['stamp_ref']['model'] }} · {{ $v['stamp_ref']['metric'] }} ·
-                                enrolled {{ $v['stamp_ref']['enrolled_at']->format('M j, Y') }}
+                                Kept per issuing agency/city in the reference library — not stored on the vendor.
                             </p>
                         </div>
                     </div>
@@ -142,7 +172,7 @@ new class extends Component {
             @else
                 <div class="mt-4 flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
                     <flux:icon icon="minus-circle" class="size-5 shrink-0 text-amber-400" />
-                    <p class="text-sm text-cu-text">No reference signature or stamp enrolled yet — enrollment runs on the vendor's first approved submission.</p>
+                    <p class="text-sm text-cu-text">No reference signature enrolled yet — signature enrollment is the second step of vendor registration.</p>
                 </div>
             @endif
         </div>
@@ -175,7 +205,7 @@ new class extends Component {
                                         @php($label = \Illuminate\Support\Str::of($s['status'])->replace('_', ' ')->headline())
                                         @if ($s['status'] === 'approved')
                                             <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{{ $label }}</span>
-                                        @elseif ($s['status'] === 'rejected')
+                                        @elseif ($s['status'] === 'resubmission_requested')
                                             <span class="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-300">{{ $label }}</span>
                                         @else
                                             <span class="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">{{ $label }}</span>

@@ -11,6 +11,21 @@
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
+    /* Landing page faces (resources/views/components/landing/*). Jakarta carries
+       every structural heading; Inter is reserved for the small hero chips. */
+    --font-jakarta: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-inter: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+    /* Landing page ink + the single accent. Flame is the only hue on the page —
+       it marks the two things a visitor can act on (the primary CTA) and the two
+       chips the engine "speaks" in. Everything else is ink on white. */
+    --color-ink: #1e1e1e;
+    --color-ink-panel: #232323;
+    --color-ink-rail: #d9d9d9;
+    --color-ink-hair: #aaaaaa;
+    --color-ink-mute: #ebebeb;
+    --color-flame: #e07228;
+
     --color-zinc-50: #fafafa;
     --color-zinc-100: #f5f5f5;
     --color-zinc-200: #e5e5e5;
@@ -27,24 +42,103 @@
     --color-accent-content: var(--color-neutral-800);
     --color-accent-foreground: var(--color-white);
 
-    /* ClickUp brand palette — see color_pallete.md. Used as the officer
-       dashboard accent/brand colors (gradients, KPI chips, focus rings). */
-    --color-cu-purple: #7b68ee;
-    --color-cu-pink: #fd71af;
-    --color-cu-blue: #49ccf9;
-    --color-cu-yellow: #ffc800;
+    /* Dashboard brand accents — retinted to the landing page's ink + flame
+       system (§ landing faces above) instead of the legacy ClickUp violet/
+       pink/cyan set documented in color_pallete.md. `cu-purple` carries the
+       primary brand accent and IS the landing's flame (#e07228) exactly;
+       `cu-pink`/`cu-yellow` are its warmer/cooler siblings (ember, ochre) for
+       KPI-chip differentiation; `cu-blue` — the one slot with no warm
+       reading — becomes a warm clay/taupe rather than reaching for a cool
+       hue the landing page never uses. Token *names* are unchanged (used
+       across 30+ dashboard views); only the values move. */
+    --color-cu-purple: #e07228;
+    --color-cu-pink: #c1503a;
+    --color-cu-blue: #8a7a63;
+    --color-cu-yellow: #c6902e;
 
-    /* ClickUp semantic surfaces — light defaults; dark overrides live in
+    /* Dashboard semantic surfaces — light defaults; dark overrides live in
        `@layer theme { .dark { … } }` below so every `cu-*` utility flips
-       with the `.dark` class set by window.advsTheme. */
-    --color-cu-bg: #f8f8fb;
+       with the `.dark` class set by window.advsTheme. Retinted off the
+       legacy ClickUp cool-gray/indigo surfaces onto the landing page's warm
+       ink neutrals (`--color-ink*` above): `cu-text` is `--color-ink`
+       itself, `cu-border` is `--color-ink-mute`, `cu-bg`/`cu-muted` are the
+       same family without the purple/blue-gray tint. */
+    --color-cu-bg: #fafaf9;
     --color-cu-surface: #ffffff;
-    --color-cu-text: #18181b;
-    --color-cu-muted: #6b7280;
-    --color-cu-border: #e5e7eb;
+    --color-cu-text: #1e1e1e;
+    --color-cu-muted: #6b6560;
+    --color-cu-border: #ebebeb;
 }
 
-/* ClickUp signature gradient (color_pallete.md) as reusable utilities. */
+/* ── Landing page signature ────────────────────────────────────────────────
+   The giant ADVS wordmark bleeds past both margins (630px at a 1440px frame =
+   43.75vw) and the footer slab is pulled up to crop its lower third. Both the
+   size and the overlap are derived from the same clamp so the crop holds its
+   proportion from a 360px phone to a 1440px desktop. */
+@utility landing-wordmark {
+    font-size: clamp(4rem, 43.75vw, 39.375rem);
+    line-height: 1.26;
+    letter-spacing: -0.14em;
+}
+
+@utility landing-wordmark-crop {
+    margin-top: calc(clamp(4rem, 43.75vw, 39.375rem) * -0.3);
+}
+
+/* The white dome rising out of the footer: a shallow elliptical arc, not a
+   circle, so it keeps its shape at every width. */
+@utility landing-dome {
+    border-top-left-radius: 50% 90px;
+    border-top-right-radius: 50% 90px;
+}
+
+/* Warm glow behind the hero and the metrics heading. Flame at low alpha, never
+   a hard edge — it should read as light falling on paper, not as a colour block. */
+@utility landing-glow {
+    background-image:
+        radial-gradient(58% 46% at 50% 22%, rgb(224 114 40 / 0.16), transparent 72%),
+        radial-gradient(42% 38% at 12% 62%, rgb(224 114 40 / 0.11), transparent 74%),
+        radial-gradient(36% 34% at 92% 74%, rgb(224 114 40 / 0.08), transparent 76%);
+}
+
+@utility landing-glow-left {
+    background-image: radial-gradient(46% 52% at 6% 34%, rgb(224 114 40 / 0.16), transparent 72%);
+}
+
+/* ── Landing motion ────────────────────────────────────────────────────────
+   `landing-verdict` — the hero chips are the engine's verdicts, so they arrive
+   one after another once scrolled into view (gated by `x-intersect` in
+   hero.blade.php) rather than being present from the start.
+
+   The metrics rail's fill (metrics.blade.php) is scroll-position-driven via
+   Alpine, not a CSS keyframe, so its height tracks scroll directly and has
+   nothing to disable under reduced motion — it only ever reaches the position
+   the user has actually scrolled to. */
+@keyframes landing-verdict {
+    from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@utility landing-verdict {
+    animation: landing-verdict 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .landing-verdict {
+        animation: none;
+    }
+}
+
+/* Dashboard CTA gradient — flame → ember, replacing the legacy ClickUp
+   violet → pink gradient (color_pallete.md) so it speaks the landing page's
+   own accent family. */
 @utility cu-gradient {
     background-image: linear-gradient(90deg, var(--color-cu-purple), var(--color-cu-pink));
 }
@@ -62,11 +156,16 @@
         --color-accent-content: var(--color-white);
         --color-accent-foreground: var(--color-neutral-800);
 
-        /* Dark ClickUp surfaces (original values). */
-        --color-cu-bg: #0d0d0f;
-        --color-cu-surface: #1a1a2e;
+        /* Dark dashboard surfaces — warm ink neutrals, not the legacy
+           indigo-tinted ClickUp dark theme. `cu-surface` reuses
+           `--color-ink-panel` (#232323) exactly, the same dark-panel tone
+           the landing page itself uses (how-it-works.blade.php); `cu-muted`
+           reuses `--color-ink-hair` (#aaaaaa). `cu-border`'s white-alpha
+           value is already theme-neutral and needs no retint. */
+        --color-cu-bg: #141210;
+        --color-cu-surface: #232323;
         --color-cu-text: #ffffff;
-        --color-cu-muted: #a0a0b0;
+        --color-cu-muted: #aaaaaa;
         --color-cu-border: rgb(255 255 255 / 0.08);
     }
 }

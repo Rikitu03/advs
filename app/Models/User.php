@@ -6,6 +6,8 @@ use Database\Factories\UserFactory;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
@@ -35,6 +37,8 @@ class User extends Authenticatable implements MustVerifyEmail
         'email',
         'password',
         'role',
+        'is_active',
+        'email_verified_at',
     ];
 
     /**
@@ -58,6 +62,7 @@ class User extends Authenticatable implements MustVerifyEmail
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'signature_enrolled_at' => 'datetime',
+            'vendor_profile_completed_at' => 'datetime',
         ];
     }
 
@@ -96,12 +101,44 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
+     * The vendor company profile owned by this user (vendors are the only role
+     * with one).
+     *
+     * @return HasOne<Vendor, $this>
+     */
+    public function vendor(): HasOne
+    {
+        return $this->hasOne(Vendor::class);
+    }
+
+    /**
+     * ADVS in-app alerts for this user. Overrides the Notifiable trait's
+     * relation — the `notifications` table is the custom ADVS schema
+     * (§7), not Laravel's database notification channel.
+     *
+     * @return HasMany<Notification, $this>
+     */
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(Notification::class)->latest();
+    }
+
+    /**
      * Whether the vendor has completed the signature-enrollment step of
      * registration (see the EnsureSignatureEnrolled middleware).
      */
     public function hasEnrolledSignature(): bool
     {
         return $this->signature_enrolled_at !== null;
+    }
+
+    /**
+     * Whether the vendor has completed the business/owner-details step of
+     * registration (see the EnsureVendorProfileComplete middleware).
+     */
+    public function hasCompletedVendorProfile(): bool
+    {
+        return $this->vendor_profile_completed_at !== null;
     }
 
     /**

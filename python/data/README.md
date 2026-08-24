@@ -22,8 +22,10 @@ data/
 │   ├── detector_data/          # YOLOv8
 │   │   ├── images/                 *.jpg / *.png  (full document pages)
 │   │   └── labels/                 *.txt  (YOLO format: "<cls> cx cy w h", cls 0=signature 1=stamp)
-│   ├── signature_data/         # Siamese — one subfolder PER VENDOR of genuine signatures:
-│   │   ├── vendor_001/             *.png
+│   ├── signature_data/         # Siamese — one subfolder PER VENDOR/SIGNER:
+│   │   ├── vendor_001/             *.png  (genuine signatures)
+│   │   │   └── forged/             *.png  (OPTIONAL real skilled forgeries, e.g. CEDAR;
+│   │   │                                   absent -> synthetic forgeries are fabricated)
 │   │   └── vendor_002/
 │   └── stamp_data/             # EfficientNet
 │       ├── genuine/                *.png  (genuine stamp crops)

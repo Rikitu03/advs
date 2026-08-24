@@ -30,7 +30,7 @@ class Submission extends Model
 
     public const STATUS_APPROVED = 'approved';
 
-    public const STATUS_REJECTED = 'rejected';
+    public const STATUS_RESUBMISSION_REQUESTED = 'resubmission_requested';
 
     /**
      * @var list<string>
@@ -67,6 +67,18 @@ class Submission extends Model
     public function documents(): HasMany
     {
         return $this->hasMany(Document::class);
+    }
+
+    /** @return HasMany<PipelineRun, $this> */
+    public function pipelineRuns(): HasMany
+    {
+        return $this->hasMany(PipelineRun::class);
+    }
+
+    /** @return HasMany<PipelinePageResult, $this> */
+    public function pipelinePageResults(): HasMany
+    {
+        return $this->hasMany(PipelinePageResult::class);
     }
 
     public function reviewer(): BelongsTo

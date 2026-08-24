@@ -9,8 +9,8 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white text-zinc-950 dark:bg-cu-bg dark:text-cu-text">
-        <flux:sidebar sticky stashable class="border-r border-zinc-200 bg-white text-zinc-950 dark:border-white/10 dark:bg-cu-surface dark:text-cu-text">
+    <body class="min-h-screen bg-white text-ink dark:bg-cu-bg dark:text-cu-text">
+        <flux:sidebar sticky stashable class="border-r border-ink-mute bg-white text-ink dark:border-white/10 dark:bg-cu-surface dark:text-cu-text">
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
             <a href="{{ route('dashboard') }}" class="mr-5 flex items-center space-x-2" wire:navigate>
@@ -23,7 +23,7 @@
                         <flux:navlist.item icon="home" :href="route('vendor.dashboard')" :current="request()->routeIs('vendor.dashboard')" wire:navigate>Dashboard</flux:navlist.item>
                         <flux:navlist.item icon="arrow-up-tray" :href="route('vendor.submit')" :current="request()->routeIs('vendor.submit')" wire:navigate>Submit Documents</flux:navlist.item>
                         <flux:navlist.item icon="document-text" :href="route('vendor.submissions')" :current="request()->routeIs('vendor.submissions')" wire:navigate>My Submissions</flux:navlist.item>
-                        <flux:navlist.item icon="bell" :href="route('vendor.notifications')" :current="request()->routeIs('vendor.notifications')" wire:navigate>Notifications</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('vendor.notifications')" :current="request()->routeIs('vendor.notifications')" :badge="$user->notifications()->unread()->count() ?: null" wire:navigate>Notifications</flux:navlist.item>
                         <flux:navlist.item icon="user-circle" :href="route('vendor.profile')" :current="request()->routeIs('vendor.profile')" wire:navigate>Profile</flux:navlist.item>
                     </flux:navlist.group>
                 @else
@@ -33,14 +33,15 @@
                         <flux:navlist.item icon="archive-box" :href="route('admin.archived')" :current="request()->routeIs('admin.archived')" wire:navigate>Archived Reports</flux:navlist.item>
                         <flux:navlist.item icon="identification" :href="route('admin.vendors')" :current="request()->routeIs('admin.vendors') || request()->routeIs('admin.vendors.*')" wire:navigate>Vendor Profiles</flux:navlist.item>
                         <flux:navlist.item icon="clipboard-document-list" :href="route('admin.risk-logs')" :current="request()->routeIs('admin.risk-logs')" wire:navigate>Risk Logs</flux:navlist.item>
-                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" :badge="\App\Support\DemoStore::unreadCount() ?: null" wire:navigate>Notifications</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" :badge="$user->notifications()->unread()->count() ?: null" wire:navigate>Notifications</flux:navlist.item>
                     </flux:navlist.group>
 
                     @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))
                         <flux:navlist.group heading="Administration" class="mt-2 grid">
                             <flux:navlist.item icon="users" :href="route('admin.users.index')" :current="request()->routeIs('admin.users.*')" wire:navigate>User Management</flux:navlist.item>
                             <flux:navlist.item icon="cog-6-tooth" :href="route('admin.settings.index')" :current="request()->routeIs('admin.settings.*')" wire:navigate>System Settings</flux:navlist.item>
-                            <x-nav-soon icon="cpu-chip" label="ML Models" />
+                            <flux:navlist.item icon="clock" :href="route('admin.retention.index')" :current="request()->routeIs('admin.retention.*')" wire:navigate>Data Retention</flux:navlist.item>
+                            <flux:navlist.item icon="cpu-chip" :href="route('admin.models.index')" :current="request()->routeIs('admin.models.*')" wire:navigate>ML Models</flux:navlist.item>
                             <flux:navlist.item icon="shield-check" :href="route('admin.audit.index')" :current="request()->routeIs('admin.audit.*')" wire:navigate>Audit Trail</flux:navlist.item>
                         </flux:navlist.group>
                     @endif

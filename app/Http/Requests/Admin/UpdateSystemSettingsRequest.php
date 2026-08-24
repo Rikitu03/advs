@@ -69,6 +69,7 @@ class UpdateSystemSettingsRequest extends FormRequest
                 'risk_weight_classification',
                 'risk_weight_signature',
                 'risk_weight_stamp',
+                'risk_weight_tamper',
             ];
 
             $payload = $this->all();

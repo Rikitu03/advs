@@ -1,24 +1,177 @@
-# ADVS — Agent Instructions
+# AGENTS.md - ADVS Repository Guide
 
-> **Project domain reference: [`ADVS_System_Reference.md`](ADVS_System_Reference.md).**
-> This is the authoritative specification of *what the Automated Document Validation System does* — the end-to-end document-validation pipeline (preprocessing → OCR → classification → signature/stamp detection & verification → risk scoring → officer review), the composite risk-score formula, role-based permissions, dashboard navigation, notifications, storage model, and the **complete table of tunable parameters and their defaults** (`§9`).
->
-> **Read the relevant section before implementing any domain logic.** Use this map:
->
-> | If you are working on… | Read |
-> |---|---|
-> | Upload validation, MIME/size limits, multi-page PDFs | `§2` File Upload Constraints, `§9` Parameters |
-> | Auth, roles, route gating (`role:` middleware) | `§3` Access Control and User Roles |
-> | Sidebars, dashboard pages, role-scoped nav | `§4` Dashboard Navigation Structure |
-> | Any Python pipeline stage / Service / Job | `§5` Processing Pipeline (Stages 0–6) |
-> | Risk-score computation, weights, thresholds | `§5` Stage 5, `§6` Risk Drill-Down, `§9` Parameters |
-> | Signature / stamp verification & enrollment | `§5` Stages 4–4b |
-> | Notifications & alerting | `§7` Notification and Alerting |
-> | Migrations, storage paths, embeddings, retention | `§8` Database and Storage |
->
-> `AGENTS.md` (the Laravel Boost guidelines below) and `CLAUDE.md` cover *how* to build — stack, versions, conventions, and structure. `ADVS_System_Reference.md` covers *what* to build. When a domain task is in scope, the `advs-system-reference` skill activates automatically; consult the reference even if the skill does not fire.
+This file records the current implementation and the rules AI coding agents
+must follow in this repository.
 
----
+Use the documentation by purpose:
+
+- [README.md](README.md): current project status, architecture, and conventions.
+- [START_ADVS.md](START_ADVS.md): installation, startup, tests, and troubleshooting.
+- [docs/ADVS_REFERENCE.md](docs/ADVS_REFERENCE.md): product behavior, pipeline
+  stages, risk scoring, permissions, storage, and tunable parameters.
+- `docs/archive/`: historical plans only. Do not use archived files as current
+  implementation instructions.
+
+When documentation and code disagree about what exists, inspect the code,
+migrations, and tests. When product behavior is unclear, use
+`docs/ADVS_REFERENCE.md`.
+
+## Current State
+
+ADVS is a Laravel vendor-accreditation application with an integrated FastAPI
+document-validation pipeline.
+
+Built and tested:
+
+- Fortify authentication, email verification, password flows, and mandatory
+  vendor reference-signature enrollment.
+- Roles `vendor`, `compliance_officer`, and `admin`, enforced by middleware and
+  policies.
+- Vendor profiles, document upload intake, persistent submissions/documents,
+  and queued processing.
+- FastAPI `/v1/validate` with multi-page OCR, classification, YOLO detection,
+  signature verification, issuer-logo verification, stamp texture checking,
+  and document-wide forensic analysis.
+- Five-component risk scoring: text, classification, signature, stamp/logo,
+  and forensic authenticity.
+- Current aggregate results plus append-only pipeline attempts and per-page
+  provenance.
+- Compliance decisions, notifications, audit trail, system settings, model
+  management, issuer-logo enrollment, and retention settings.
+
+Verify before extending:
+
+- Some UI components may still use `App\Support\Demo*`; inspect the component's
+  data source before assuming it is Eloquent-backed.
+- Model files and datasets are local deployment artifacts. A loaded model is
+  not evidence of acceptable production accuracy.
+- FastAPI HTTP is the canonical inference contract. References to planned
+  standalone `Process`-facade inference scripts in archived docs are obsolete.
+
+## Installed Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | PHP 8.2, Laravel 12 |
+| Authentication | Laravel Fortify 1 |
+| UI | Livewire 4, Volt 1, Flux UI 2 |
+| CSS/build | Tailwind CSS 4, Vite 6 |
+| Database | MySQL 8; sqlite `:memory:` for tests |
+| Queue | Laravel database queue |
+| Python | Python 3.12, TensorFlow 2.16, FastAPI |
+| Tests | PHPUnit 11, pytest |
+
+Environment: Windows 11, XAMPP, and PowerShell.
+
+## Architecture
+
+- `app/Actions`: orchestration such as `ProcessDocumentAction`.
+- `app/Jobs`: queued document processing and reference enrollment.
+- `app/Models`: application, validation, and pipeline-provenance models.
+- `app/Services/Document`: ML transport, stage mapping, risk scoring, tamper
+  persistence, decisions, and submission finalization.
+- `resources/views/livewire`: class-based full-page Volt components.
+- `resources/css/app.css`: Tailwind v4 theme and semantic `cu-*` utilities.
+- `python/api`: FastAPI service and versioned validation contract.
+- `python/scripts`: training, data generation, evaluation, and forensic tools.
+- `database/migrations`: canonical schema source.
+
+Laravel owns persistent state and sends reference vectors plus an immutable
+settings snapshot with every ML request. FastAPI is stateless and returns
+aggregate/per-page stages, flags, model provenance, settings hash, and timings.
+
+## Domain Rules
+
+- The pipeline is fail-forward for inference stages. Record a typed skipped or
+  failed stage and flags; do not abort for low confidence or missing evidence.
+- Reject unsafe uploads and malformed contracts before inference.
+- Compliance officers make the final decision. Never auto-approve or
+  auto-reject from the risk score.
+- Signature references are enrolled during registration and only verified in
+  the document pipeline.
+- Logo references belong to issuers, not vendors. National issuers are keyed by
+  document type; LGU issuers are keyed by document type plus OCR-detected city.
+- Stage 4b texture checking runs even when no issuer logo reference exists.
+- Risk uses five default weights of `0.20`; missing core components add the
+  configured penalty; a high-confidence forensic signal forces High risk.
+- Never invent thresholds. Update `docs/ADVS_REFERENCE.md`, the setting schema,
+  seed defaults, migrations where needed, and tests together.
+
+## Python Rules
+
+- Always use `python/env/Scripts/python.exe`. Bare `python` resolves to an
+  incompatible environment and `py` may select an unsupported version.
+- TensorFlow is 2.16.x; `onnx` remains `<1.17`.
+- `/health` is liveness. `/ready` verifies required artifacts against
+  `python/models/manifest.json` and returns 503 for missing or mismatched files.
+- Model weights remain gitignored. Manifest metadata may be committed.
+- `/v1/*` requires a bearer token; Laravel `ML_API_TOKEN` must match Python
+  `API_TOKEN`.
+- Preserve the legacy aggregate `stages`/`flags` response while extending the
+  versioned contract.
+
+## Laravel Conventions
+
+- Use Artisan `make:* --no-interaction` for Laravel boilerplate.
+- Before any model, migration, factory, seeder, relationship, or
+  column-dependent query change, inspect migrations and run the applicable
+  `migrate:status`, `db:table`, and `model:show` commands.
+- Use explicit parameter and return types, constructor property promotion, and
+  curly braces for all control structures.
+- Put casts in a `casts()` method and define typed relationships on both sides.
+- Keep controllers and Volt components thin. Use actions, jobs, services,
+  policies, and Form Requests.
+- Use named routes and `role:` middleware/policies; never hardcode role checks
+  as the authorization boundary.
+- Use Flux components and semantic `cu-*` theme utilities. Tailwind v4 is
+  configured in `resources/css/app.css`; there is no `tailwind.config.js`.
+- Do not import Alpine; Livewire bundles it.
+- The `config/livewire.php` component layout override and unencrypted `theme`
+  cookie are load-bearing.
+
+## Queue Rules
+
+- Document jobs run on `document-processing` and are unique by document ID.
+- Do not hold a database transaction open during the FastAPI request.
+- Persist successful responses atomically.
+- Record failed attempts, rethrow transient transport/contract failures for
+  queue retry, and mark terminal failures in `failed()`.
+- Keep queue `retry_after` greater than job timeout, and job timeout greater
+  than the ML HTTP timeout.
+
+## Tests and Formatting
+
+Every behavior change requires a focused test.
+
+```powershell
+php artisan test --compact tests\Feature\Document\ProcessDocumentActionTest.php
+python\env\Scripts\python.exe -m pytest python\tests\test_api.py -q
+vendor\bin\pint --dirty --format agent
+npm.cmd run build
+```
+
+The PHP suite expects sqlite `:memory:`, `QUEUE_CONNECTION=sync`, and array
+cache/mail/session drivers from `phpunit.xml`. If the shell exports conflicting
+values, explicitly set the testing variables before running PHPUnit.
+
+Do not remove tests without approval. Do not revert unrelated dirty worktree
+changes. Generated pytest and Augraphy artifacts are not source files.
+
+## Quick Start
+
+```powershell
+# Terminal 1: Laravel, queue, and Vite
+composer run dev
+
+# Terminal 2: FastAPI
+Set-Location python
+.\env\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 7860
+```
+
+See [START_ADVS.md](START_ADVS.md) for complete setup and troubleshooting.
+
+> The Laravel Boost guidelines below are auto-managed by
+> `php artisan boost:update`. Keep repository-specific guidance above them.
 
 <laravel-boost-guidelines>
 === foundation rules ===
@@ -45,10 +198,6 @@ This application is a Laravel application and its main Laravel ecosystems packag
 - laravel/sail (SAIL) - v1
 - phpunit/phpunit (PHPUNIT) - v11
 - tailwindcss (TAILWINDCSS) - v4
-
-## Skills Activation
-
-This project has domain-specific skills available in `**/skills/**`. You MUST activate the relevant skill whenever you work in that domain—don't wait until you're stuck.
 
 ## Conventions
 

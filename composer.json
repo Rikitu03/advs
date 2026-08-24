@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "honeybadger-io/honeybadger-laravel": "^5.1",
         "laravel/fortify": "^1.37",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
@@ -57,7 +58,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"npm run dev\" --names='server,queue,vite'"
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php artisan serve\" \"php artisan queue:work --tries=3 --timeout=360 --queue=document-processing,mail,default\" \"npm run dev\" --names='server,queue,vite'"
         ]
     },
     "extra": {
