@@ -319,9 +319,11 @@ class MlPipelineService
             $columns['stamp_similarity'] = $similarity;
             $columns['stamp_score'] = $similarity;
             $columns['stamp_passed'] = $stamp['match'] ?? null;
-            $columns['logo_reference_id'] = $this->matchedLogoReferenceId(
-                $context['logo_reference_ids'] ?? [], $issuerScope, $stamp['city'] ?? null
-            );
+            $columns['logo_reference_id'] = ($stamp['reference_source'] ?? 'enrolled') === 'enrolled'
+                ? $this->matchedLogoReferenceId(
+                    $context['logo_reference_ids'] ?? [], $issuerScope, $stamp['city'] ?? null
+                )
+                : null;
             if (($stamp['match'] ?? null) === false) {
                 $flags[] = 'stamp_mismatch';
             }

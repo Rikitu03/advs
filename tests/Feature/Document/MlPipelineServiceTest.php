@@ -87,6 +87,24 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame([], $mapped['flags']);
     }
 
+    public function test_curated_stamp_match_does_not_claim_a_database_reference_id(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'stamp' => [
+                'match' => true,
+                'similarity_score' => 0.95,
+                'reason' => null,
+                'reference_source' => 'curated',
+                'best_reference_key' => 'bir-seal',
+            ],
+        ], [
+            'issuer_scope' => 'national',
+            'logo_reference_ids' => ['' => 42],
+        ]);
+
+        $this->assertNull($mapped['columns']['logo_reference_id']);
+    }
+
     public function test_maps_classification_authenticity_separately_from_confidence(): void
     {
         $stages = [

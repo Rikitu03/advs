@@ -42,12 +42,7 @@ final class BusinessPermitEvidence
         if (count($tradeExpected) > 1 && ! ($checks['trade_name']['matched'] ?? false)) {
             $checks['trade_name']['matched'] = $this->matches((string) ($checks['trade_name']['actual'] ?? ''), $tradeExpected[1], 'trade_name');
         }
-        $this->check($checks, $fields, 'business_address', 'address', implode(', ', array_filter([
-            (string) ($vendor?->business_street ?? ''),
-            (string) ($vendor?->business_barangay ?? ''),
-            (string) ($vendor?->business_city ?? ''),
-            (string) ($vendor?->business_province ?? ''),
-        ])));
+        $this->check($checks, $fields, 'business_address', 'address', (string) ($vendor?->business_address ?? ''));
         $this->check($checks, $fields, 'nature_of_business', 'nature', (string) ($vendor?->nature_of_business ?? ''));
 
         foreach ($checks as $key => $check) {
@@ -124,13 +119,7 @@ final class BusinessPermitEvidence
     private function matches(string $actual, string $expected, string $kind): bool
     {
         if ($kind === 'address') {
-            $actualTokens = $this->tokens($actual);
-            $expectedTokens = $this->tokens($expected);
-            if ($expectedTokens === []) {
-                return false;
-            }
-
-            return count(array_intersect($actualTokens, $expectedTokens)) / count($expectedTokens) >= 0.5;
+            return OcrVendorMatchScore::compare($actual, $expected, true) === true;
         }
 
         if ($kind === 'city') {
@@ -139,15 +128,6 @@ final class BusinessPermitEvidence
 
         return OcrVendorMatchScore::compare($actual, $expected) === true
             || ($kind === 'trade_name' && OcrVendorMatchScore::compare($expected, $actual) === true);
-    }
-
-    /** @return list<string> */
-    private function tokens(string $value): array
-    {
-        return array_values(array_unique(array_filter(
-            preg_split('/[^\p{L}\p{N}]+/u', Str::upper($value), -1, PREG_SPLIT_NO_EMPTY) ?: [],
-            static fn (string $token): bool => strlen($token) > 1,
-        )));
     }
 
     private function city(string $value): string

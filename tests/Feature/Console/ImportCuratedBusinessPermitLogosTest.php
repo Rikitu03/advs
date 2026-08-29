@@ -45,7 +45,7 @@ class ImportCuratedBusinessPermitLogosTest extends TestCase
         $row = DB::table('logo_references')->first();
         $this->assertNotNull($row);
         $this->assertSame('Makati', $row->city);
-        $this->assertStringContainsString('approved curated asset v1:', $row->label);
+        $this->assertStringContainsString('approved curated asset 1.0: makati-building-logo', $row->label);
         $this->assertSame([0.1, 0.2, 0.3], json_decode($row->feature_vector, true));
         Storage::disk('local')->assertExists($row->reference_image_path);
 

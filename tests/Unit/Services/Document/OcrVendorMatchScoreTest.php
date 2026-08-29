@@ -68,4 +68,82 @@ class OcrVendorMatchScoreTest extends TestCase
 
         $this->assertSame(['score' => null, 'matched' => 0, 'expected' => 0], $result);
     }
+
+    public function test_address_matches_across_capitalization_punctuation_and_abbreviations(): void
+    {
+        $vendor = new Vendor([
+            'business_street' => '123 Main St.',
+            'business_barangay' => 'Brgy. San Antonio',
+            'business_city' => 'Pasig City',
+            'business_province' => 'Metro Manila',
+            'business_postal_code' => '1605',
+        ]);
+
+        $this->assertTrue(OcrVendorMatchScore::compare(
+            "123 MAIN STREET\nBARANGAY SAN ANTONIO\nPASIG CITY, METRO MANILA 1605",
+            $vendor->business_address,
+            true
+        ));
+    }
+
+    public function test_address_mismatches_if_component_missing_or_different(): void
+    {
+        $vendor = new Vendor([
+            'business_street' => '123 Main St.',
+            'business_barangay' => 'Brgy. San Antonio',
+            'business_city' => 'Pasig City',
+            'business_province' => 'Metro Manila',
+            'business_postal_code' => '1605',
+        ]);
+
+        // missing postal code
+        $this->assertFalse(OcrVendorMatchScore::compare(
+            '123 MAIN STREET BARANGAY SAN ANTONIO PASIG CITY, METRO MANILA',
+            $vendor->business_address,
+            true
+        ));
+
+        // different city
+        $this->assertFalse(OcrVendorMatchScore::compare(
+            '123 MAIN STREET BARANGAY SAN ANTONIO QUEZON CITY, METRO MANILA 1605',
+            $vendor->business_address,
+            true
+        ));
+    }
+
+    public function test_incomplete_legacy_registration_address_is_unavailable(): void
+    {
+        $vendor = new Vendor([
+            'business_street' => '123 Main St.',
+            'business_barangay' => 'Brgy. San Antonio',
+            'business_city' => 'Pasig City',
+            // Missing province and postal code
+        ]);
+
+        $this->assertNull($vendor->business_address);
+
+        $result = (new OcrVendorMatchScore)->calculate('123 Main St. Brgy. San Antonio Pasig City', $vendor);
+        $this->assertSame(0, $result['expected']);
+    }
+
+    public function test_aggregate_document_text_scoring_includes_address(): void
+    {
+        $vendor = new Vendor([
+            'company_name' => 'Acme Foods',
+            'business_street' => '123 Main St.',
+            'business_barangay' => 'Brgy. San Antonio',
+            'business_city' => 'Pasig City',
+            'business_province' => 'Metro Manila',
+            'business_postal_code' => '1605',
+        ]);
+
+        $result = (new OcrVendorMatchScore)->calculate(
+            "Acme Foods\n123 Main Street, Barangay San Antonio, Pasig City, Metro Manila 1605",
+            $vendor
+        );
+
+        $this->assertSame(2, $result['expected']);
+        $this->assertSame(2, $result['matched']);
+        $this->assertEqualsWithDelta(1.0, $result['score'], 1e-6);
+    }
 }

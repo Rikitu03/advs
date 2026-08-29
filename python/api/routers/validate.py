@@ -21,6 +21,12 @@ from PIL import Image
 
 from .. import embedding as emb
 from ..compat import load_script
+from ..logo_catalog import (
+    CatalogError,
+    canonical_city,
+    embed_candidates,
+    resolve_candidates,
+)
 from ..config import Settings
 from ..registry import ModelRegistry
 from ..uploads import load_pages, save_upload
@@ -156,19 +162,6 @@ def _validate_runtime_setting(key: str, value: Any) -> None:
         raise HTTPException(status_code=422, detail="MAX_PDF_PAGES must be between 1 and 10.")
     if key == "max_file_size_mb" and not 1 <= numeric <= 100:
         raise HTTPException(status_code=422, detail="MAX_FILE_SIZE_MB must be between 1 and 100.")
-
-
-def canonical_city(value: str | None) -> str | None:
-    if value is None:
-        return None
-    squished = " ".join(str(value).split())
-    if not squished:
-        return None
-    od = load_script("ocr_dryrun")
-    permit_city = od.canonical_business_permit_city(squished)
-    if permit_city is not None:
-        return permit_city
-    return squished.title()
 
 
 def parse_reference_map(raw: str | None, expected_length: int | None = None) -> dict[str, list[float]]:
@@ -594,9 +587,6 @@ async def validate(
             )
             resolved_city = canonical_city(city) or detected_city
             scope = issuer_scope.lower() if issuer_scope else None
-            logo_reference, reference_flag = resolve_issuer_reference(
-                logo_references, single_logo_reference, scope, resolved_city
-            )
             if scope is None or scope in ("none", "null"):
                 stages["stamp"] = _skipped("no_issuer_logo")
                 page_timings["stamp"] = 0.0
@@ -612,6 +602,21 @@ async def validate(
                 page_timings["stamp"] = 0.0
             else:
                 try:
+                    curated_references = []
+                    try:
+                        curated_references = embed_candidates(
+                            stamp_model,
+                            resolve_candidates(normalized_type, scope, resolved_city),
+                        )
+                    except CatalogError as exc:
+                        logger.warning("curated issuer references unavailable: %s", exc)
+
+                    logo_reference = None
+                    reference_flag = None
+                    if not curated_references:
+                        logo_reference, reference_flag = resolve_issuer_reference(
+                            logo_references, single_logo_reference, scope, resolved_city
+                        )
                     result, elapsed = _timed(lambda: run_stamp_verify(
                         stamp_model,
                         _crop(page, stamp_box["box"]),
@@ -621,6 +626,7 @@ async def validate(
                         resolved_city,
                         classifier=registry.get("stamp_classifier"),
                         missing_reason=reference_flag or "unreferenced_logo",
+                        reference_candidates=curated_references,
                     ))
                     stages["stamp"] = _completed(result)
                     page_timings["stamp"] = elapsed

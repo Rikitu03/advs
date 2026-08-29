@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\IssuerLogoCatalog;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -23,26 +24,17 @@ class ImportCuratedBusinessPermitLogos extends Command
      */
     protected $description = 'Import explicitly curated business-permit logo assets as issuer references.';
 
-    /** @var array<string, string> */
-    private const ASSETS = [
-        'Digos' => 'python/logo_and_seals/business_permit/digos/Digos Logo.png',
-        'Makati' => 'python/logo_and_seals/business_permit/makati/Makati Logo.png',
-        'Manila' => 'python/logo_and_seals/business_permit/maynila/Maynila Logo.png',
-        'Marikina' => 'python/logo_and_seals/business_permit/marikina/Marikina Logo.png',
-        'Taguig' => 'python/logo_and_seals/business_permit/taguig/Taguig Logo.png',
-    ];
+    /** @var list<string> */
+    private const CITIES = ['Digos', 'Makati', 'Manila', 'Marikina', 'Taguig'];
 
-    private const CURATED_VERSION = 'v1';
-
-    public function handle(): int
+    public function handle(IssuerLogoCatalog $catalog): int
     {
         $city = trim((string) $this->option('city'));
-        $assets = $city === '' ? self::ASSETS : array_filter(
-            self::ASSETS,
-            static fn (string $path, string $key): bool => strcasecmp($key, $city) === 0,
-            ARRAY_FILTER_USE_BOTH,
-        );
-        if ($assets === []) {
+        $cities = $city === '' ? self::CITIES : array_values(array_filter(
+            self::CITIES,
+            static fn (string $candidate): bool => strcasecmp($candidate, $city) === 0,
+        ));
+        if ($cities === []) {
             $this->error('Unknown city. Use Digos, Makati, Manila, Marikina, or Taguig.');
 
             return self::INVALID;
@@ -55,22 +47,24 @@ class ImportCuratedBusinessPermitLogos extends Command
             return self::FAILURE;
         }
 
-        foreach ($assets as $canonicalCity => $relativePath) {
-            $this->import($canonicalCity, $relativePath, (int) $typeId);
+        foreach ($cities as $canonicalCity) {
+            $reference = $catalog->referencesFor('business_permit', 'lgu', $canonicalCity)[0] ?? null;
+            $path = is_array($reference) ? $catalog->pathFor($reference['key']) : null;
+            if (! is_array($reference) || $path === null) {
+                $this->warn("{$canonicalCity}: no usable manifest reference");
+
+                continue;
+            }
+
+            $this->import($canonicalCity, $reference, $path, (int) $typeId, $catalog->version());
         }
 
         return self::SUCCESS;
     }
 
-    private function import(string $city, string $relativePath, int $typeId): void
+    /** @param  array{key: string, label: string}  $reference */
+    private function import(string $city, array $reference, string $absolutePath, int $typeId, ?string $version): void
     {
-        $absolutePath = base_path($relativePath);
-        if (! is_file($absolutePath)) {
-            $this->warn("{$city}: asset missing at {$relativePath}");
-
-            return;
-        }
-
         $existing = DB::table('logo_references')
             ->where('document_type_id', $typeId)
             ->where('city', $city)
@@ -81,7 +75,7 @@ class ImportCuratedBusinessPermitLogos extends Command
             return;
         }
 
-        $this->line("{$city}: curated candidate {$relativePath}");
+        $this->line("{$city}: curated candidate {$reference['key']} ({$reference['label']})");
         if ($this->option('dry-run')) {
             return;
         }
@@ -109,7 +103,7 @@ class ImportCuratedBusinessPermitLogos extends Command
             return;
         }
 
-        $storedPath = 'logo_references/business_permit/curated-'.Str::slug($city).'-'.now()->timestamp.'.png';
+        $storedPath = 'logo_references/business_permit/curated-'.Str::slug($reference['key']).'-'.now()->timestamp.'.png';
         $contents = file_get_contents($absolutePath);
         if ($contents === false) {
             $this->error("{$city}: unable to read the asset for storage");
@@ -120,7 +114,7 @@ class ImportCuratedBusinessPermitLogos extends Command
         $payload = [
             'document_type_id' => $typeId,
             'city' => $city,
-            'label' => "{$city} Business Permit (approved curated asset ".self::CURATED_VERSION.": {$relativePath})",
+            'label' => "{$city} Business Permit (approved curated asset ".($version ?? 'unversioned').": {$reference['key']})",
             'feature_vector' => json_encode(array_map(static fn (mixed $value): float => (float) $value, $vector), JSON_THROW_ON_ERROR),
             'reference_image_path' => $storedPath,
             'seeded_from_document_id' => null,

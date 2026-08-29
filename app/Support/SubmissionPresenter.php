@@ -2,9 +2,11 @@
 
 namespace App\Support;
 
+use App\Models\Document;
+use App\Models\PipelineRun;
 use App\Models\Submission;
-use App\Models\ValidationResult;
 use App\Models\Vendor;
+use App\Services\Document\IssuerCity;
 use App\Services\Document\OcrVendorMatchScore;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,27 @@ use Illuminate\Support\Facades\Storage;
  */
 class SubmissionPresenter
 {
+    /** @var array<string, string> */
+    private const BIR_OCR_FIELDS = [
+        'tin' => 'TIN',
+        'registered_name' => 'Registered Name',
+        'registered_address' => 'Registered Address',
+        'trade_name' => 'Trade Name',
+        'line_of_business' => 'Line of Business / PSIC',
+        'registration_date' => 'Registration Date',
+        'date_issued' => 'Date Issued',
+    ];
+
+    /** @var array<string, string> */
+    private const DTI_OCR_FIELDS = [
+        'owner_representative_name' => 'Owner / Representative Name',
+        'business_name' => 'Business Name',
+        'business_address' => 'Business Address',
+        'date_issued' => 'Valid Date',
+        'expiry_date' => 'Expiration Date',
+        'trn_no' => 'Transaction Reference Number (TRN)',
+    ];
+
     /**
      * Compact row for queue/archive tables. Pass a preloaded id→name map of
      * document types when presenting many rows.
@@ -79,20 +102,21 @@ class SubmissionPresenter
             ->sortByDesc(fn ($document) => (float) ($document->validationResult?->document_risk_score ?? -1))
             ->values();
         $primary = $byRisk->first();
-        $result = $primary?->validationResult;
         $thresholds = config('advs.thresholds');
 
-        $typeNames = self::typeNames();
+        $typeMetadata = self::typeMetadata();
+        $typeNames = $typeMetadata->map(fn (array $type): string => $type['name']);
         $signatureReferenceUrl = self::signatureReferenceUrl($submission->vendor_id);
-        $logoReferenceUrls = self::logoReferenceUrls(
+        $logoReferences = self::logoReferences(
             $submission->documents
-                ->pluck('validationResult.logo_reference_id')
+                ->pluck('document_type_id')
                 ->filter()
                 ->map(fn ($id): int => (int) $id)
                 ->unique()
                 ->values()
                 ->all(),
         );
+        $stampEvidence = self::latestStampEvidence($submission->documents);
 
         $summary['documents'] = $submission->documents->map(fn ($document): array => [
             'id' => $document->id,
@@ -108,8 +132,7 @@ class SubmissionPresenter
         [
             $summary['ocr_filters'],
             $summary['ocr_fields_by_document'],
-        ] = self::ocrByDocument($submission);
-        $summary['business_permit_by_document'] = self::businessPermitByDocument($submission, $logoReferenceUrls);
+        ] = self::ocrByDocument($submission, $typeMetadata);
 
         $summary['flags_by_document'] = self::flagGroups($submission, $typeNames);
 
@@ -118,19 +141,33 @@ class SubmissionPresenter
         // §6 drill-down filter: one component set per document type present in
         // the submission, plus 'all' (the highest-risk document overall).
         $filters = [['key' => 'all', 'label' => 'All']];
-        $sets = ['all' => self::components($result, $thresholds, $signatureReferenceUrl, $logoReferenceUrls)];
+        $sets = ['all' => self::components(
+            $primary,
+            $thresholds,
+            $signatureReferenceUrl,
+            $typeMetadata,
+            $logoReferences,
+            $stampEvidence,
+        )];
 
         $byRisk
             ->groupBy(fn ($document) => $document->document_type_id ?? 0)
             ->map(fn ($group, $typeId): array => [
                 'key' => $typeId === 0 ? 'unassigned' : 'type-'.$typeId,
                 'label' => $typeId === 0 ? 'Unassigned' : ($typeNames[$typeId] ?? 'Unassigned'),
-                'result' => $group->first()?->validationResult,
+                'document' => $group->first(),
             ])
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
-            ->each(function (array $type) use (&$filters, &$sets, $thresholds, $signatureReferenceUrl, $logoReferenceUrls): void {
+            ->each(function (array $type) use (&$filters, &$sets, $thresholds, $signatureReferenceUrl, $typeMetadata, $logoReferences, $stampEvidence): void {
                 $filters[] = ['key' => $type['key'], 'label' => $type['label']];
-                $sets[$type['key']] = self::components($type['result'], $thresholds, $signatureReferenceUrl, $logoReferenceUrls);
+                $sets[$type['key']] = self::components(
+                    $type['document'],
+                    $thresholds,
+                    $signatureReferenceUrl,
+                    $typeMetadata,
+                    $logoReferences,
+                    $stampEvidence,
+                );
             });
 
         $summary['component_filters'] = $filters;
@@ -148,13 +185,22 @@ class SubmissionPresenter
      * @return array<string, array<string, mixed>>
      */
     private static function components(
-        ?ValidationResult $result,
+        ?Document $document,
         array $thresholds,
         ?string $signatureReferenceUrl = null,
-        array $logoReferenceUrls = [],
+        ?Collection $typeMetadata = null,
+        ?Collection $logoReferences = null,
+        array $stampEvidence = [],
     ): array {
+        $result = $document?->validationResult;
         $signatureSimilarity = $result?->signature_score !== null ? (int) round($result->signature_score * 100) : null;
         $stampSimilarity = $result?->stamp_score !== null ? (int) round($result->stamp_score * 100) : null;
+        $references = self::stampReferences(
+            $document,
+            $typeMetadata ?? collect(),
+            $logoReferences ?? collect(),
+            $document === null ? [] : ($stampEvidence[$document->id] ?? []),
+        );
 
         return [
             'text' => [
@@ -184,7 +230,7 @@ class SubmissionPresenter
                 'distance' => $result?->signature_distance !== null ? round($result->signature_distance, 3) : '—',
                 'distance_threshold' => 'empirical',
                 'pass' => (bool) ($result?->signature_passed ?? false),
-                'crop' => self::cropData($result, $result?->signature_bbox),
+                'crop' => self::cropData($document, $result?->signature_bbox),
                 'reference_image_url' => $signatureReferenceUrl,
                 'detail' => match (true) {
                     $result === null || $result->signature_detected === null => 'Stage not yet available.',
@@ -202,14 +248,14 @@ class SubmissionPresenter
                 'pass' => (bool) ($result?->stamp_passed ?? false),
                 'texture_checked' => $result?->stamp_tampered !== null,
                 'scan_copy_texture' => (bool) ($result?->stamp_tampered ?? false),
-                'crop' => self::cropData($result, $result?->stamp_bbox),
-                'reference_image_url' => $result?->logo_reference_id === null
-                    ? null
-                    : ($logoReferenceUrls[$result->logo_reference_id] ?? null),
+                'crop' => self::cropData($document, $result?->stamp_bbox),
+                'references' => $references,
+                'reference_image_url' => $references[0]['url'] ?? null,
                 'detail' => match (true) {
                     $result === null || $result->stamp_detected === null => 'Stage not yet available.',
                     $result->stamp_bbox === null => 'No stamp/logo region detected.',
                     $result->stamp_passed !== null => 'Compared against the issuer reference logo.',
+                    $references !== [] => 'Issuer reference images are available, but this stored result has no comparison score.',
                     default => 'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
                 },
             ],
@@ -227,9 +273,8 @@ class SubmissionPresenter
      * @param  list<float>|null  $box
      * @return array{url: string, box: list<float>}|null
      */
-    private static function cropData(?ValidationResult $result, ?array $box): ?array
+    private static function cropData(?Document $document, ?array $box): ?array
     {
-        $document = $box !== null ? $result?->document : null;
         if ($document === null || self::previewKind($document->mime_type) !== 'image' || ! self::validBoundingBox($box)) {
             return null;
         }
@@ -271,22 +316,194 @@ class SubmissionPresenter
     }
 
     /**
-     * @param  list<int>  $logoReferenceIds
-     * @return array<int, string>
+     * @param  list<int>  $documentTypeIds
+     * @return Collection<int, array{id: int, document_type_id: int, city: string, label: string|null, url: string}>
      */
-    private static function logoReferenceUrls(array $logoReferenceIds): array
+    private static function logoReferences(array $documentTypeIds): Collection
     {
-        if ($logoReferenceIds === []) {
-            return [];
+        if ($documentTypeIds === []) {
+            return collect();
         }
 
         return DB::table('logo_references')
-            ->whereIn('id', $logoReferenceIds)
-            ->pluck('reference_image_path', 'id')
-            ->map(fn ($path): ?string => is_string($path) ? ltrim($path, '/') : null)
-            ->filter(fn ($path): bool => $path !== null && str_starts_with($path, 'logo_references/') && Storage::disk('local')->exists($path))
-            ->mapWithKeys(fn ($path, $id): array => [(int) $id => route('admin.logo-references.show', ['logoReference' => $id])])
-            ->all();
+            ->whereIn('document_type_id', $documentTypeIds)
+            ->get(['id', 'document_type_id', 'city', 'label', 'reference_image_path'])
+            ->mapWithKeys(function (object $reference): array {
+                $path = is_string($reference->reference_image_path) ? ltrim($reference->reference_image_path, '/') : null;
+                if ($path === null || ! str_starts_with($path, 'logo_references/') || ! Storage::disk('local')->exists($path)) {
+                    return [];
+                }
+
+                return [(int) $reference->id => [
+                    'id' => (int) $reference->id,
+                    'document_type_id' => (int) $reference->document_type_id,
+                    'city' => is_string($reference->city) ? $reference->city : '',
+                    'label' => is_string($reference->label) ? $reference->label : null,
+                    'url' => route('admin.logo-references.show', ['logoReference' => $reference->id]),
+                ]];
+            });
+    }
+
+    /**
+     * @param  Collection<int|string, array{name: string, code: string, issuer_scope: string|null}>  $typeMetadata
+     * @param  Collection<int, array{id: int, document_type_id: int, city: string, label: string|null, url: string}>  $logoReferences
+     * @param  array{best_reference_key?: string|null, matches?: array<string, array<string, mixed>>}  $evidence
+     * @return list<array{key: string, label: string, source: string, url: string, similarity: int|null, cosine: float|null, match: bool|null, best: bool}>
+     */
+    private static function stampReferences(
+        ?Document $document,
+        Collection $typeMetadata,
+        Collection $logoReferences,
+        array $evidence,
+    ): array {
+        if ($document === null || $document->document_type_id === null) {
+            return [];
+        }
+
+        $type = $typeMetadata[$document->document_type_id] ?? null;
+        if (! is_array($type)) {
+            return [];
+        }
+
+        $matches = is_array($evidence['matches'] ?? null) ? $evidence['matches'] : [];
+        $bestReferenceKey = is_string($evidence['best_reference_key'] ?? null)
+            ? $evidence['best_reference_key']
+            : null;
+        $curated = app(IssuerLogoCatalog::class)->referencesFor(
+            $type['code'],
+            $type['issuer_scope'],
+            $document->validationResult?->detected_city,
+        );
+
+        if ($curated !== []) {
+            return array_map(
+                function (array $reference) use ($matches, $bestReferenceKey): array {
+                    $match = is_array($matches[$reference['key']] ?? null) ? $matches[$reference['key']] : null;
+                    $similarity = is_numeric($match['similarity_score'] ?? null)
+                        ? (float) $match['similarity_score']
+                        : null;
+
+                    return [
+                        'key' => $reference['key'],
+                        'label' => $reference['label'],
+                        'source' => 'curated',
+                        'url' => route('admin.issuer-logo-references.show', ['reference' => $reference['key']]),
+                        'similarity' => $similarity === null ? null : (int) round($similarity * 100),
+                        'cosine' => $similarity === null ? null : round($similarity, 3),
+                        'match' => is_bool($match['match'] ?? null) ? $match['match'] : null,
+                        'best' => $bestReferenceKey === $reference['key'],
+                    ];
+                },
+                $curated,
+            );
+        }
+
+        $databaseReference = self::databaseLogoReference($document, $type, $logoReferences);
+        if ($databaseReference === null) {
+            return [];
+        }
+
+        $match = is_array($matches['enrolled-reference'] ?? null) ? $matches['enrolled-reference'] : null;
+        $similarity = is_numeric($match['similarity_score'] ?? null)
+            ? (float) $match['similarity_score']
+            : null;
+
+        return [[
+            'key' => 'enrolled-reference',
+            'label' => $databaseReference['label']
+                ?? ($type['issuer_scope'] === 'lgu' && $databaseReference['city'] !== ''
+                    ? $databaseReference['city'].' issuer reference'
+                    : $type['name'].' issuer reference'),
+            'source' => 'enrolled',
+            'url' => $databaseReference['url'],
+            'similarity' => $similarity === null ? null : (int) round($similarity * 100),
+            'cosine' => $similarity === null ? null : round($similarity, 3),
+            'match' => is_bool($match['match'] ?? null) ? $match['match'] : null,
+            'best' => $bestReferenceKey === 'enrolled-reference',
+        ]];
+    }
+
+    /**
+     * @param  array{name: string, code: string, issuer_scope: string|null}  $type
+     * @param  Collection<int, array{id: int, document_type_id: int, city: string, label: string|null, url: string}>  $logoReferences
+     * @return array{id: int, document_type_id: int, city: string, label: string|null, url: string}|null
+     */
+    private static function databaseLogoReference(Document $document, array $type, Collection $logoReferences): ?array
+    {
+        $resultReferenceId = $document->validationResult?->logo_reference_id;
+        if ($resultReferenceId !== null && $logoReferences->has($resultReferenceId)) {
+            return $logoReferences[$resultReferenceId];
+        }
+
+        $city = $type['issuer_scope'] === 'lgu'
+            ? IssuerCity::canonical($document->validationResult?->detected_city)
+            : '';
+
+        return $logoReferences->first(function (array $reference) use ($document, $type, $city): bool {
+            if ($reference['document_type_id'] !== $document->document_type_id) {
+                return false;
+            }
+
+            return $type['issuer_scope'] === 'lgu'
+                ? $city !== null && IssuerCity::canonical($reference['city']) === $city
+                : $reference['city'] === '';
+        });
+    }
+
+    /**
+     * @param  Collection<int, Document>  $documents
+     * @return array<int, array{best_reference_key: string|null, matches: array<string, array<string, mixed>>}>
+     */
+    private static function latestStampEvidence(Collection $documents): array
+    {
+        $documentIds = $documents->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        if ($documentIds === []) {
+            return [];
+        }
+
+        $runs = PipelineRun::query()
+            ->with(['pages' => fn ($query) => $query->orderBy('page_index')])
+            ->whereIn('document_id', $documentIds)
+            ->where('status', PipelineRun::STATUS_COMPLETED)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->get()
+            ->unique('document_id');
+
+        $evidence = [];
+        foreach ($runs as $run) {
+            $bestReferenceKey = null;
+            $matches = [];
+
+            foreach ($run->pages as $page) {
+                $stamp = is_array($page->stages['stamp'] ?? null) ? $page->stages['stamp'] : [];
+                if ($bestReferenceKey === null && is_string($stamp['best_reference_key'] ?? null)) {
+                    $bestReferenceKey = $stamp['best_reference_key'];
+                }
+
+                foreach ((array) ($stamp['reference_matches'] ?? []) as $match) {
+                    if (! is_array($match) || ! is_string($match['key'] ?? null)) {
+                        continue;
+                    }
+
+                    $key = $match['key'];
+                    $current = $matches[$key]['similarity_score'] ?? null;
+                    $candidate = $match['similarity_score'] ?? null;
+                    if (! is_numeric($candidate) || (is_numeric($current) && (float) $current >= (float) $candidate)) {
+                        continue;
+                    }
+
+                    $matches[$key] = $match;
+                }
+            }
+
+            $evidence[(int) $run->document_id] = [
+                'best_reference_key' => $bestReferenceKey,
+                'matches' => $matches,
+            ];
+        }
+
+        return $evidence;
     }
 
     /**
@@ -341,7 +558,7 @@ class SubmissionPresenter
      *     1: array<string, list<array<string, mixed>>>,
      * }
      */
-    private static function ocrByDocument(Submission $submission): array
+    private static function ocrByDocument(Submission $submission, Collection $typeMetadata): array
     {
         $filters = [];
         $fields = [];
@@ -353,97 +570,11 @@ class SubmissionPresenter
             $fields[$key] = self::ocrFieldRows(
                 $document->validationResult?->ocr_fields,
                 $submission->vendor,
+                $typeMetadata[$document->document_type_id]['code'] ?? null,
             );
         }
 
         return [$filters, $fields];
-    }
-
-    /**
-     * @param  array<int, string>  $logoReferenceUrls
-     * @return array<string, array<string, mixed>>
-     */
-    private static function businessPermitByDocument(Submission $submission, array $logoReferenceUrls): array
-    {
-        $result = [];
-        $referenceLabels = DB::table('logo_references')
-            ->whereIn(
-                'id',
-                $submission->documents
-                    ->pluck('validationResult.logo_reference_id')
-                    ->filter()
-                    ->map(fn ($id): int => (int) $id)
-                    ->unique()
-                    ->all(),
-            )
-            ->pluck('label', 'id');
-
-        foreach ($submission->documents as $document) {
-            $fields = $document->validationResult?->ocr_fields;
-            $permit = is_array($fields) && is_array($fields['__business_permit'] ?? null)
-                ? $fields['__business_permit']
-                : null;
-            if ($permit === null) {
-                continue;
-            }
-            $referenceId = $document->validationResult?->logo_reference_id;
-            $resultFlags = (array) ($document->validationResult?->flags ?? []);
-            $referenceStatus = match (true) {
-                in_array('no_stamp_detected', $resultFlags, true) => 'no_logo_detected',
-                in_array('stamp_mismatch', $resultFlags, true) => 'logo_mismatch',
-                $referenceId !== null => 'matched',
-                in_array('city_not_identified', $resultFlags, true),
-                in_array('unreferenced_logo', $resultFlags, true) => 'reference_missing',
-                default => 'unavailable',
-            };
-            $textureStatus = match (true) {
-                $document->validationResult?->stamp_tampered === true,
-                in_array('stamp_tampered', $resultFlags, true) => 'concern',
-                $document->validationResult?->stamp_tampered === false => 'clean',
-                default => 'unavailable',
-            };
-            $canonicalCity = $permit['issuer_city_canonical'] ?? $document->validationResult?->detected_city;
-            $checks = is_array($permit['identity']['checks'] ?? null) ? $permit['identity']['checks'] : [];
-            $evidenceFields = collect(is_array($permit['fields'] ?? null) ? $permit['fields'] : [])
-                ->map(function (mixed $field, string $fieldKey) use ($checks): array {
-                    $field = is_array($field) ? $field : [];
-                    $comparison = collect($checks)->first(
-                        fn (mixed $check): bool => is_array($check) && ($check['field'] ?? null) === $fieldKey,
-                    );
-
-                    return [
-                        ...$field,
-                        'expected' => is_array($comparison) ? ($comparison['expected'] ?? null) : null,
-                        'comparison' => is_array($comparison) && ($comparison['available'] ?? false)
-                            ? (bool) ($comparison['matched'] ?? false)
-                            : null,
-                    ];
-                })
-                ->all();
-            $result[(string) $document->id] = [
-                'classification_label' => $document->validationResult?->classification_label,
-                'classification_confidence' => $document->validationResult?->classification_confidence,
-                'raw_city' => $permit['issuer_city_raw'] ?? null,
-                'city' => $canonicalCity,
-                'layout' => $permit['layout_key'] ?? null,
-                'layout_version' => $permit['layout_version'] ?? null,
-                'reference_key' => $canonicalCity === null ? null : 'business_permit:'.$canonicalCity,
-                'reference_id' => $referenceId,
-                'reference_label' => $referenceId === null ? null : $referenceLabels->get($referenceId),
-                'reference_image_url' => $referenceId === null ? null : ($logoReferenceUrls[$referenceId] ?? null),
-                'reference_status' => $referenceStatus,
-                'texture_status' => $textureStatus,
-                'reference_reason' => $resultFlags,
-                'fields' => $evidenceFields,
-                'conflicts' => $permit['conflicts'] ?? [],
-                'identity_score' => $permit['identity']['score'] ?? null,
-                'validity' => $permit['identity']['validity'] ?? null,
-                'checks' => $checks,
-                'flags' => $permit['identity']['flags'] ?? [],
-            ];
-        }
-
-        return $result;
     }
 
     /**
@@ -454,9 +585,27 @@ class SubmissionPresenter
      * @param  array<string, mixed>|null  $fields
      * @return list<array{key: string, label: string, value: string|null, required: bool, warning: array{label: string, reasons: list<string>}|null}>
      */
-    private static function ocrFieldRows(?array $fields, ?Vendor $vendor = null): array
+    private static function ocrFieldRows(?array $fields, ?Vendor $vendor = null, ?string $documentTypeCode = null): array
     {
         $rows = [];
+
+        $profile = match ($documentTypeCode) {
+            'bir_certificate' => self::BIR_OCR_FIELDS,
+            'dti_registration' => self::DTI_OCR_FIELDS,
+            default => null,
+        };
+
+        if ($profile !== null) {
+            $fields = collect($profile)
+                ->mapWithKeys(function (string $label, string $key) use ($fields): array {
+                    $field = is_array($fields[$key] ?? null) ? $fields[$key] : [];
+                    $field['name'] = $label;
+                    $field['value'] ??= null;
+
+                    return [$key => $field];
+                })
+                ->all();
+        }
 
         $registrationMap = [
             'registered_name' => ['company_name'],
@@ -473,8 +622,9 @@ class SubmissionPresenter
             'registration_number' => ['registration_number'],
             'name_of_proprietor' => ['company_name'],
             'business_owner' => ['company_name'],
-            'business_location' => ['business_street', 'business_barangay', 'business_city', 'business_province'],
-            'business_address' => ['business_street', 'business_barangay', 'business_city', 'business_province'],
+            'business_location' => ['business_address'],
+            'business_address' => ['business_address'],
+            'registered_address' => ['business_address'],
             'kind_of_business' => ['nature_of_business'],
             'nature_of_business' => ['nature_of_business'],
             'city_issued' => ['business_city'],
@@ -491,16 +641,16 @@ class SubmissionPresenter
             $value = $field['value'] ?? null;
             $registrationKeys = $registrationMap[(string) $key] ?? [];
             $registrationValues = collect($registrationKeys)
-                ->map(fn (string $registrationKey): ?string => $vendor?->getAttribute($registrationKey))
+                ->mapWithKeys(fn (string $registrationKey): array => [$registrationKey => $vendor?->getAttribute($registrationKey)])
                 ->filter(fn (?string $registrationValue): bool => $registrationValue !== null && trim($registrationValue) !== '')
-                ->values()
                 ->all();
-            $comparison = $registrationKeys === [] || $registrationValues === []
+            $comparison = $value === null || $value === '' || $registrationKeys === [] || $registrationValues === []
                 ? null
                 : collect($registrationValues)->contains(
-                    fn (string $registrationValue): bool => OcrVendorMatchScore::compare(
+                    fn (string $registrationValue, string $registrationKey): bool => OcrVendorMatchScore::compare(
                         $value === null ? null : (string) $value,
                         $registrationValue,
+                        $registrationKey === 'business_address'
                     ) === true,
                 );
 
@@ -509,7 +659,9 @@ class SubmissionPresenter
                 // The API names each field as the form itself captions it
                 // ("Registered Activity(ies)"); humanizeFieldName is the fallback
                 // for a payload written before names were sent.
-                'label' => $field['name'] ?? self::humanizeFieldName((string) $key),
+                'label' => (string) $key === 'trn_no'
+                    ? 'Transaction Reference Number (TRN)'
+                    : ($field['name'] ?? self::humanizeFieldName((string) $key)),
                 'value' => ($value === null || $value === '') ? null : (string) $value,
                 'registration_key' => $registrationKeys === [] ? null : implode('|', $registrationKeys),
                 'registration_label' => $registrationKeys === []
@@ -653,7 +805,21 @@ class SubmissionPresenter
      */
     public static function typeNames(): Collection
     {
-        return DB::table('document_types')->pluck('name', 'id');
+        return self::typeMetadata()->map(fn (array $type): string => $type['name']);
+    }
+
+    /**
+     * @return Collection<int|string, array{name: string, code: string, issuer_scope: string|null}>
+     */
+    private static function typeMetadata(): Collection
+    {
+        return DB::table('document_types')
+            ->get(['id', 'name', 'code', 'issuer_scope'])
+            ->mapWithKeys(fn (object $type): array => [(int) $type->id => [
+                'name' => (string) $type->name,
+                'code' => (string) $type->code,
+                'issuer_scope' => is_string($type->issuer_scope) ? $type->issuer_scope : null,
+            ]]);
     }
 
     /**

@@ -7,8 +7,10 @@ use App\Http\Controllers\Auth\MfaChallengeController;
 use App\Models\Document;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Support\IssuerLogoCatalog;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
@@ -126,6 +128,23 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 'X-Content-Type-Options' => 'nosniff',
             ]);
         })->name('admin.logo-references.show');
+
+        Route::get('admin/issuer-logo-references/{reference}', function (string $reference, IssuerLogoCatalog $catalog) {
+            $path = $catalog->pathFor($reference);
+
+            abort_unless($path !== null, 404);
+
+            $response = response()->file($path, [
+                'Content-Type' => File::mimeType($path) ?: 'application/octet-stream',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+            $response->setPrivate();
+            $response->setMaxAge(0);
+            $response->headers->addCacheControlDirective('no-store');
+
+            return $response;
+        })->where('reference', '[A-Za-z0-9._-]+')->name('admin.issuer-logo-references.show');
 
         // Archived Reports — searchable archive of decided submissions (§4).
         Volt::route('admin/archived', 'admin.archived')->name('admin.archived');

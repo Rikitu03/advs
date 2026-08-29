@@ -27,21 +27,6 @@
 @else
     <div class="flex flex-col gap-4">
         <div class="grid gap-4 sm:grid-cols-2">
-            {{-- Reference --}}
-            <div class="rounded-xl border border-cu-border bg-cu-surface p-4">
-                <div class="mb-2 flex items-center justify-between">
-                    <span class="text-xs font-medium text-cu-muted">Reference (enrolled)</span>
-                    <flux:icon icon="check-badge" class="size-4 text-cu-blue" />
-                </div>
-                <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] text-cu-muted dark:bg-white/[0.03]">
-                    @if ($data['reference_image_url'] ?? null)
-                        <img src="{{ $data['reference_image_url'] }}" alt="Enrolled signature reference" class="max-h-full max-w-full object-contain" />
-                    @else
-                        <span class="text-xs">Reference image unavailable</span>
-                    @endif
-                </div>
-            </div>
-
             {{-- Query --}}
             <div class="rounded-xl border {{ $queryRing }} bg-cu-surface p-4">
                 <div class="mb-2 flex items-center justify-between">
@@ -53,6 +38,21 @@
                         <x-detection-crop :url="$data['crop']['url']" :box="$data['crop']['box']" label="Detected signature" />
                     @else
                         <span class="text-xs text-cu-muted">Not available for this document</span>
+                    @endif
+                </div>
+            </div>
+
+            {{-- Reference --}}
+            <div class="rounded-xl border border-cu-border bg-cu-surface p-4">
+                <div class="mb-2 flex items-center justify-between">
+                    <span class="text-xs font-medium text-cu-muted">Reference (enrolled)</span>
+                    <flux:icon icon="check-badge" class="size-4 text-cu-blue" />
+                </div>
+                <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] text-cu-muted dark:bg-white/[0.03]">
+                    @if ($data['reference_image_url'] ?? null)
+                        <img src="{{ $data['reference_image_url'] }}" alt="Enrolled signature reference" class="max-h-full max-w-full object-contain" />
+                    @else
+                        <span class="text-xs">Reference image unavailable</span>
                     @endif
                 </div>
             </div>

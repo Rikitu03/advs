@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "references": [
+    {
+      "key": "bir-permit-logo",
+      "document_type": "bir_certificate",
+      "issuer_scope": "national",
+      "city": null,
+      "label": "BIR Permit Logo",
+      "path": "bir/BIR Permit Logo.png"
+    },
+    {
+      "key": "bir-seal",
+      "document_type": "bir_certificate",
+      "issuer_scope": "national",
+      "city": null,
+      "label": "BIR Seal",
+      "path": "bir/BIR_SEAL.png"
+    },
+    {
+      "key": "dti-logo",
+      "document_type": "dti_registration",
+      "issuer_scope": "national",
+      "city": null,
+      "label": "DTI Logo",
+      "path": "dti/dti_logo.png"
+    },
+    {
+      "key": "digos-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Digos",
+      "label": "Digos Logo",
+      "path": "business_permit/digos/Digos Logo.png"
+    },
+    {
+      "key": "makati-building-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Makati",
+      "label": "Makati Building Logo",
+      "path": "business_permit/makati/Makati Logo (Building).png"
+    },
+    {
+      "key": "makati-gold-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Makati",
+      "label": "Makati Gold Logo",
+      "path": "business_permit/makati/Makati Logo Gold.png"
+    },
+    {
+      "key": "makati-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Makati",
+      "label": "Makati Logo",
+      "path": "business_permit/makati/Makati Logo.png"
+    },
+    {
+      "key": "manila-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Manila",
+      "label": "Manila Logo",
+      "path": "business_permit/maynila/Maynila Logo.png"
+    },
+    {
+      "key": "manila-stamp",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Manila",
+      "label": "Manila Stamp",
+      "path": "business_permit/maynila/Maynila Stamp.png"
+    },
+    {
+      "key": "marikina-bagong-pilipinas-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Marikina",
+      "label": "Marikina Bagong Pilipinas Logo",
+      "path": "business_permit/marikina/Marikina Bagong Pilipinas Logo.png"
+    },
+    {
+      "key": "marikina-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Marikina",
+      "label": "Marikina Logo",
+      "path": "business_permit/marikina/Marikina Logo.png"
+    },
+    {
+      "key": "taguig-logo",
+      "document_type": "business_permit",
+      "issuer_scope": "lgu",
+      "city": "Taguig",
+      "label": "Taguig Logo",
+      "path": "business_permit/taguig/Taguig Logo.png"
+    }
+  ]
+}

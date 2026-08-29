@@ -174,7 +174,7 @@ This section walks through exactly what happens from the moment a file enters th
 - **Completeness**: Are all mandatory fields populated, or are critical sections missing?
 - **Issuing city / LGU**: The text is scanned for the issuing **city name** (e.g., "Pasig"). This city key is passed to **Stage 4b**, which uses it to look up the correct reference logo(s) for stamp/logo verification. If no city can be identified, Stage 4b cannot scope its lookup and raises a `City not identified` flag.
 
-**Output**: A structured OCR result containing the extracted text blob, list of matched fields, list of missing/inconsistent fields, and the detected issuing city (for the §4b logo lookup). After Laravel receives the response, it computes the risk component's text validation score by comparing the aggregate OCR text against the submission vendor's non-empty registration fields: `company_name`, `trade_name`, `tin`, `dti_registration_number`, `sec_registration_number`, `business_permit_number`, and `registration_number`. Matching is case-insensitive and tolerant of punctuation/spacing separators. The Python API's template-quality `text_validation_score` is not used for risk scoring.
+**Output**: A structured OCR result containing the extracted text blob, list of matched fields, list of missing/inconsistent fields, and the detected issuing city (for the §4b logo lookup). After Laravel receives the response, it computes the risk component's text validation score by comparing the aggregate OCR text against the submission vendor's non-empty registration fields: `company_name`, `trade_name`, `tin`, `dti_registration_number`, `sec_registration_number`, `business_permit_number`, `registration_number`, and a complete five-part `business_address`. Matching is case-insensitive, tolerant of punctuation/spacing separators, and automatically normalizes common address abbreviations (Brgy/St/Ave/etc.). The Python API's template-quality `text_validation_score` is not used for risk scoring.
 
 **Failure path**: If OCR produces little or no recognizable text (due to a blank page, an image without text, or extremely poor scan quality), Laravel records the text validation component as unavailable rather than falling back to the Python score. The system does **not** abort processing — it records the poor OCR result as a flag ("Insufficient text extracted" or "Required fields missing") and continues to the next stages. The missing component penalty contributes to the composite risk score. There is no automatic retry mechanism; the document is flagged for manual review, and the vendor may be asked to resubmit.
 
@@ -263,7 +263,7 @@ Registration detection is calibrated independently from Stage 4 document detecti
 > - **`lgu`** (e.g. Business Permit) — one seal per city; the reference is keyed by **(document type, city)** (Pasig's business-permit seal differs from Quezon City's).
 > - **`null`** (e.g. Signed Contract) — no official issuer logo; the reference lookup is skipped (only the texture check runs).
 >
-> References live in the **`logo_references`** table. There is **no per-vendor stamp embedding** and no per-vendor enrollment step. (This is the opposite of the signature handling in §4a, which uses one per-vendor reference enrolled at registration.)
+> Curated references live under **`python/logo_and_seals`** and are indexed by its versioned `manifest.json`. The manifest may list multiple ordered images for one issuer (for example, the BIR logo and seal). The **`logo_references`** table remains the enrolled-reference fallback when no usable curated candidate exists. There is **no per-vendor stamp embedding** and no per-vendor enrollment step. (This is the opposite of the signature handling in §4a, which uses one per-vendor reference enrolled at registration.)
 
 **Texture check (always runs, reference or not)**:
 1. The cropped region is preprocessed (resized, normalized).
@@ -272,14 +272,16 @@ Registration detection is calibrated independently from Stage 4 document detecti
 
 **Issuer lookup & verification**:
 1. Classification (Stage 3) gives the **document type**; the pipeline reads its `issuer_scope`.
-2. It retrieves the reference logo for that issuer — by **document type** (`national`) or by **(document type, detected city)** (`lgu`, where the city comes from OCR in Stage 2; for `national` the detected city is ignored).
-3. The query feature vector is compared to the issuer reference vector using a **distance metric** (cosine similarity or Euclidean distance), yielding a **similarity percentage** (e.g., "95.2% match").
+2. It resolves all matching curated candidates from `python/logo_and_seals/manifest.json` by **document type** (`national`) or by **(document type, canonical detected city)** (`lgu`, where the city comes from OCR in Stage 2; for `national` the detected city is ignored).
+3. Each usable curated image is embedded lazily and compared with the query crop. Missing or corrupt individual assets are skipped without aborting the stage.
+4. If no curated candidate can be used, the pipeline falls back to the single Laravel-provided vector from `logo_references`.
+5. All resolved candidates are compared in manifest order. The **highest similarity** determines the legacy aggregate `match`, `similarity_score`, and stamp/logo risk component; per-candidate similarities remain in page-level pipeline provenance.
 
 **Configurable parameter**: `STAMP_SIMILARITY_THRESHOLD` (default: **85%**). If the similarity to the issuer reference meets or exceeds this threshold, the logo is validated; below it, it is flagged for manual review.
 
-**Reference seeding (per issuer, on first approval)**: An issuer's reference logo is **not** created automatically on first sight — trusting an unverified logo would let a forgery become the standard. Instead, when a logo is detected for an issuer that has **no reference yet**, the document is flagged `Unknown / unreferenced logo` and the feature vector is held pending. The **first time a compliance officer approves a document carrying that issuer's logo**, that logo is enrolled as the reference — stored against the **document type** (`national`) or **(document type, city)** (`lgu`); the officer's approval decision is the trust gate. Every subsequent submission for that issuer is then verified against it.
+**Fallback reference seeding (per issuer, on first approval)**: An enrolled database reference is **not** created automatically on first sight — trusting an unverified logo would let a forgery become the standard. For issuers that have no usable curated candidate, a detected logo is flagged `Unknown / unreferenced logo` and the feature vector is held pending. The **first time a compliance officer approves a document carrying that issuer's logo**, that logo may be enrolled in `logo_references` against the **document type** (`national`) or **(document type, city)** (`lgu`); the officer's approval decision is the trust gate. Curated candidates continue to take precedence over this fallback.
 
-**Output**: Texture result + (when an issuer reference exists) similarity percentage and pass/fail indicator; otherwise an `Unknown / unreferenced logo` flag — or, when `issuer_scope` is `null`, only the texture result.
+**Output**: Texture result + (when an issuer reference exists) the best similarity percentage and pass/fail indicator; optional `reference_source`, `best_reference_key`, and ordered `reference_matches` identify the candidate evidence while preserving the legacy aggregate fields. When no reference exists, the result carries an `Unknown / unreferenced logo` flag; when `issuer_scope` is `null`, only the texture result is recorded.
 
 **Failure paths**:
 - **No issuer logo expected** (`issuer_scope = null`) → the reference lookup is skipped; only the texture result is recorded.
@@ -402,7 +404,7 @@ The composite risk score is not a black box. When an officer clicks on a submiss
 | Text Validation (OCR) | 82% | 70% | ✓ Pass | 2 of 14 expected fields could not be matched |
 | Document Classification (ResNet-50) | 96% confidence | 70% | ✓ Pass | Classified as "BIR Permit" |
 | Signature Match (Siamese CNN) | 43% similarity | 75% | ✗ Fail | Distance: 1.87 (threshold: 1.20) |
-| Logo Match (EfficientNet, Pasig city ref) | 91% similarity | 85% | ✓ Pass | Cosine similarity: 0.91 vs Pasig reference logo |
+| Issuer References Matching | 91% similarity | 85% | ✓ Pass | Cosine similarity: 0.91 vs Pasig reference logo |
 | Forensic Tampering (Stage T) | 88% authenticity | 50% | ✓ Pass | Metadata/ELA/copy-move/font/cross-ref all clean |
 | **Composite Risk Score** | **62 / 100** | — | ⚠ Medium | Signature mismatch is primary driver |
 
@@ -460,9 +462,10 @@ All file paths are stored as references in the database, not the files themselve
 | Data Type | Storage | Format |
 |---|---|---|
 | Signature reference embedding | Database, **per vendor** (`users.signature_path` + `vendor_embeddings.signature_embedding`) | 128-dimensional float vector, serialized as JSON or binary blob |
-| Logo / stamp / seal reference vector | Database, **per issuer** (the `logo_references` table, keyed by `document_type` for national issuers and `(document_type, city)` for LGU issuers) | Float vector per issuer (dimension depends on EfficientNet variant), serialized similarly |
+| Curated logo / stamp / seal references | Versioned `python/logo_and_seals/manifest.json` plus image files, **per issuer** | Ordered image candidates; vectors are embedded lazily and cached by asset timestamp and model identity |
+| Enrolled logo / stamp / seal fallback vector | Database, **per issuer** (the `logo_references` table, keyed by `document_type` for national issuers and `(document_type, city)` for LGU issuers) | Float vector per issuer (dimension depends on EfficientNet variant), serialized similarly |
 
-The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. Signed Contract) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
+The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. **Logo / stamp / seal** references are **not** stored per vendor. Validation first uses the curated manifest candidates keyed by the **issuer** — `document_type` for national agencies (BIR/DTI) and `(document_type, city)` for LGUs — and compares every matching image. The database reference seeded through officer approval is used only when no curated candidate can be embedded. Document types with `issuer_scope = null` (e.g. Signed Contract) have no identity reference. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
 
 ### Global Document Catalog & "Available Documents" Storage
 

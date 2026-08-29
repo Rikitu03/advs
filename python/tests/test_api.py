@@ -627,7 +627,7 @@ def test_stamp_verify_matches_genuine_and_rejects_mismatch(tmp_path, jpeg_bytes)
 
         same = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
-            data={"reference_vector": json.dumps(vector), "document_type": "bir_certificate"},
+            data={"reference_vector": json.dumps(vector), "document_type": "sec_registration"},
         ).json()
         opposite = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
@@ -637,7 +637,7 @@ def test_stamp_verify_matches_genuine_and_rejects_mismatch(tmp_path, jpeg_bytes)
     assert same["match"] is True
     assert same["similarity_score"] == pytest.approx(1.0)
     assert same["threshold"] == pytest.approx(0.85)  # §9 default
-    assert same["document_type"] == "bir_certificate"
+    assert same["document_type"] == "sec_registration"
     assert opposite["match"] is False
     assert opposite["similarity_score"] < 0.85
 
@@ -650,13 +650,13 @@ def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_b
         app.state.registry._models["stamp"] = _StubEmbedderModel()
         body = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
-            data={"document_type": "business_permit", "city": "Makati"},
+            data={"document_type": "business_permit", "city": "Pasig"},
         ).json()
 
     assert body["match"] is False
     assert body["reason"] == "unreferenced_logo"
     assert body["similarity_score"] is None
-    assert body["city"] == "Makati"
+    assert body["city"] == "Pasig"
     # No stamp_classifier loaded -> the check could not run; not "clean".
     assert body["stamp_tampered"] is None
 
@@ -673,7 +673,7 @@ def test_stamp_verify_runs_the_tamper_check_without_a_reference(tmp_path, jpeg_b
 
         body = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
-            data={"document_type": "business_permit", "city": "Makati"},
+            data={"document_type": "business_permit", "city": "Pasig"},
         ).json()
 
     assert body["reason"] == "unreferenced_logo"      # unchanged

@@ -358,7 +358,7 @@ DTI_FIELD_SPECS: list[dict] = [
      "labels": ["CERTIFICATE NO", "CERTIFICATE NUMBER"],
      "regex": r"((?:BN\s*)?\d{5,})", "value_regex": r"(?:BN\s*)?\d{5,}",
      "same_line": True, "required": True},
-    {"key": "trn_no", "name": "TRN", "scope": "line",
+    {"key": "trn_no", "name": "Transaction Reference Number (TRN)", "scope": "line",
      "labels": ["TRN"], "regex": r"(DTI-\d{4}-\d+|[A-Z0-9-]{6,})",
      "value_regex": r"DTI-\d{4}-\d+|[A-Z0-9-]{6,}",
      "same_line": True, "required": True},

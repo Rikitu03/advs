@@ -16,6 +16,7 @@ class OcrVendorMatchScore
         'sec_registration_number',
         'business_permit_number',
         'registration_number',
+        'business_address',
     ];
 
     /**
@@ -32,7 +33,8 @@ class OcrVendorMatchScore
 
         $matched = count(array_filter(
             $values,
-            fn (string $value): bool => self::matches($ocrText, $value),
+            fn (string $value, string $key): bool => self::matches($ocrText, $value, $key === 'business_address'),
+            ARRAY_FILTER_USE_BOTH,
         ));
 
         return [
@@ -42,7 +44,7 @@ class OcrVendorMatchScore
         ];
     }
 
-    public static function compare(?string $ocrValue, ?string $registrationValue): ?bool
+    public static function compare(?string $ocrValue, ?string $registrationValue, bool $isAddress = false): ?bool
     {
         $ocrValue = Str::squish((string) $ocrValue);
         $registrationValue = Str::squish((string) $registrationValue);
@@ -55,10 +57,10 @@ class OcrVendorMatchScore
             return false;
         }
 
-        return self::matches($ocrValue, $registrationValue);
+        return self::matches($ocrValue, $registrationValue, $isAddress);
     }
 
-    /** @return list<string> */
+    /** @return array<string, string> */
     private function registrationValues(?Vendor $vendor): array
     {
         if ($vendor === null) {
@@ -66,14 +68,29 @@ class OcrVendorMatchScore
         }
 
         return collect(self::VENDOR_FIELDS)
-            ->map(fn (string $field): string => Str::squish((string) $vendor->getAttribute($field)))
+            ->mapWithKeys(fn (string $field): array => [$field => Str::squish((string) $vendor->getAttribute($field))])
             ->filter(fn (string $value): bool => $value !== '')
-            ->values()
             ->all();
     }
 
-    private static function matches(string $ocrText, string $registrationValue): bool
+    private static function matches(string $ocrText, string $registrationValue, bool $isAddress = false): bool
     {
+        if ($isAddress) {
+            $ocrText = self::normalizeAddress($ocrText);
+            $registrationValue = self::normalizeAddress($registrationValue);
+
+            $ocrTokens = preg_split('/[^\p{L}\p{N}]+/u', $ocrText, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $regTokens = preg_split('/[^\p{L}\p{N}]+/u', $registrationValue, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+            foreach ($regTokens as $token) {
+                if (! in_array($token, $ocrTokens, true)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         $tokens = preg_split(
             '/[^\p{L}\p{N}]+/u',
             $registrationValue,
@@ -97,5 +114,20 @@ class OcrVendorMatchScore
             '~(?<![\p{L}\p{N}])'.$pattern.'(?![\p{L}\p{N}])~iu',
             $ocrText,
         ) === 1;
+    }
+
+    public static function normalizeAddress(string $text): string
+    {
+        $text = Str::upper($text);
+        $replacements = [
+            '/\bBRGY\b/u' => 'BARANGAY',
+            '/\bST\b/u' => 'STREET',
+            '/\bRD\b/u' => 'ROAD',
+            '/\bAVE\b/u' => 'AVENUE',
+            '/\bBLVD\b/u' => 'BOULEVARD',
+            '/\bBLK\b/u' => 'BLOCK',
+        ];
+
+        return preg_replace(array_keys($replacements), array_values($replacements), $text) ?? $text;
     }
 }

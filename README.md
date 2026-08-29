@@ -88,7 +88,7 @@ Operational gaps:
 3. **OCR** extracts text and document-specific fields. Multi-page conflicts are
    retained as flags instead of aborting processing. Laravel computes the text
    risk component by matching aggregate OCR text against the vendor's non-empty
-   registration fields; the Python template-quality score is not used for risk.
+   registration fields (including the complete, unified business address); the Python template-quality score is not used for risk.
 4. **Classification** predicts the document class and exposes authenticity as
    `1 - P(fake)` so a confident fake prediction increases risk.
 5. **Detection** locates signature, stamp, and logo regions with YOLOv8.

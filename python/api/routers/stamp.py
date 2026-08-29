@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import tempfile
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -27,10 +28,12 @@ from PIL import Image, UnidentifiedImageError
 
 from .. import embedding as emb
 from ..config import Settings
+from ..logo_catalog import CatalogError, embed_candidates, embed_stamp, resolve_candidates
 from ..schemas import StampEmbedResponse, StampVerifyResponse
 from ..uploads import load_pages, save_upload
 
 router = APIRouter()
+logger = logging.getLogger("advs.api.stamp")
 
 
 def _parse_box(raw: str) -> list[int]:
@@ -62,16 +65,6 @@ def _crop_box(page: Image.Image, box: list[int]) -> Image.Image:
     ))
 
 
-def _efficientnet_preprocess(batch):
-    from tensorflow.keras.applications.efficientnet import preprocess_input
-
-    return preprocess_input(batch)
-
-
-def embed_stamp(model, image: Image.Image) -> list[float]:
-    return emb.embed(model, image, _efficientnet_preprocess)
-
-
 def run_tamper_check(classifier, vector: list[float], threshold: float) -> dict:
     """EfficientNet texture verdict for one logo crop (§5 Stage 4b).
 
@@ -96,6 +89,7 @@ def run_stamp_verify(
     city: str | None = None,
     classifier=None,
     missing_reason: str = "unreferenced_logo",
+    reference_candidates: list[dict] | None = None,
 ) -> dict:
     """Stage 4b: texture check first, issuer comparison second.
 
@@ -113,21 +107,56 @@ def run_stamp_verify(
     )
     base = {"document_type": document_type, "city": city, **tamper}
 
-    if reference is None:
+    candidates = list(reference_candidates or [])
+    if not candidates and reference is not None:
+        candidates = [{
+            "key": "enrolled-reference",
+            "label": "Reference (enrolled)",
+            "source": "enrolled",
+            "city": city,
+            "vector": reference,
+        }]
+
+    if not candidates:
         return {**base, "match": False, "reason": missing_reason,
-                "similarity_score": None, "threshold": None}
+                "similarity_score": None, "threshold": None,
+                "reference_source": None, "best_reference_key": None,
+                "reference_matches": []}
 
-    emb.require_same_length(reference, vector, "reference_vector")
-
-    similarity = emb.cosine_similarity(vector, reference)
     threshold = settings.resolved_stamp_similarity_threshold()
+    matches = []
+    for candidate in candidates:
+        candidate_vector = candidate.get("vector")
+        if not isinstance(candidate_vector, list) or not candidate_vector:
+            continue
+        emb.require_same_length(candidate_vector, vector, "reference_vector")
+        similarity = emb.cosine_similarity(vector, candidate_vector)
+        matches.append({
+            "key": str(candidate.get("key") or "reference"),
+            "label": str(candidate.get("label") or "Issuer reference"),
+            "source": str(candidate.get("source") or "enrolled"),
+            "city": candidate.get("city"),
+            "similarity_score": similarity,
+            "match": similarity >= threshold,
+        })
+
+    if not matches:
+        return {**base, "match": False, "reason": missing_reason,
+                "similarity_score": None, "threshold": None,
+                "reference_source": None, "best_reference_key": None,
+                "reference_matches": []}
+
+    best = max(matches, key=lambda candidate: candidate["similarity_score"])
 
     return {
         **base,
-        "match": similarity >= threshold,
-        "similarity_score": similarity,
+        "match": best["match"],
+        "similarity_score": best["similarity_score"],
         "threshold": threshold,
         "reason": None,
+        "reference_source": best["source"],
+        "best_reference_key": best["key"],
+        "reference_matches": matches,
     }
 
 
@@ -194,12 +223,22 @@ async def stamp_verify(
     reference_vector: str | None = Form(None),
     document_type: str | None = Form(None),
     city: str | None = Form(None),
+    issuer_scope: str | None = Form(None),
 ) -> dict:
     model = request.app.state.registry.require("stamp")
     reference = emb.parse_reference(reference_vector, "reference_vector") if reference_vector else None
     image = await _read_crop(file)
+    curated = []
+    try:
+        curated = embed_candidates(
+            model,
+            resolve_candidates(document_type, issuer_scope, city),
+        )
+    except CatalogError as exc:
+        logger.warning("curated issuer references unavailable: %s", exc)
 
     return run_stamp_verify(
         model, image, reference, request.app.state.settings, document_type, city,
         classifier=request.app.state.registry.get("stamp_classifier"),
+        reference_candidates=curated,
     )

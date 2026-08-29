@@ -840,6 +840,7 @@ def test_dti_certificate_number_and_trn() -> None:
     f = _dti_fields()
     assert f["certificate_no"]["value"] == "BN 1760595"
     assert f["trn_no"]["value"] == "DTI-2026-35374211"
+    assert f["trn_no"]["name"] == "Transaction Reference Number (TRN)"
 
 
 def test_dti_required_set_is_the_expected_keyword_list() -> None:

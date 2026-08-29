@@ -28,8 +28,8 @@ def _stamp_like(size: int = 96) -> np.ndarray:
 
 
 def test_discover_assets_finds_the_repo_artwork():
-    assets = gen.discover_assets(Path(__file__).resolve().parents[1] / "data")
-    for expected in ("bir_officer_stamp", "bir_seal", "dti_logo", "makati"):
+    assets = gen.discover_assets(Path(__file__).resolve().parents[1] / "logo_and_seals")
+    for expected in ("bir-permit-logo", "bir-seal", "dti-logo", "makati-logo"):
         assert expected in assets, f"missing {expected} in {sorted(assets)}"
 
 
