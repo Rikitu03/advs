@@ -4,7 +4,6 @@ use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use App\Models\Submission;
 use App\Services\NotificationService;
-use App\Services\SystemSettingsService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -12,8 +11,7 @@ use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
 
-new class extends Component
-{
+new class extends Component {
     use WithFileUploads;
 
     private const ACCEPTED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
@@ -21,11 +19,6 @@ new class extends Component
     /** @var array<int, mixed> */
     public array $uploadedFiles = [];
 
-    /**
-     * Persist the batch (Stage 0 intake): every Document row is backed by a
-     * really-stored upload, then the validation pipeline job is dispatched
-     * per document (ADVS_System_Reference.md §5 Stage 0).
-     */
     public function submitBatch(array $files = []): mixed
     {
         $user = Auth::user();
@@ -35,17 +28,10 @@ new class extends Component
             abort(403);
         }
 
-        $settings = app(SystemSettingsService::class)->pipelineSnapshot();
-        $maxFileKilobytes = (int) $settings['MAX_FILE_SIZE_MB'] * 1024;
-        $maxBatchBytes = (int) $settings['MAX_BATCH_SIZE_MB'] * 1024 * 1024;
-
         $this->validate([
-            'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:'.$maxFileKilobytes],
+            'uploadedFiles.*' => ['file', 'mimes:pdf,png,jpg,jpeg', 'max:10240'],
         ]);
 
-        // The Alpine queue (names/types) and the Livewire temp uploads travel
-        // separately; join them by client filename — never by array index,
-        // which desyncs when lanes are removed or batches are re-selected.
         $available = collect($this->uploadedFiles);
         $documents = [];
 
@@ -73,9 +59,6 @@ new class extends Component
                 'local',
             );
 
-            // Sniff the stored bytes — Livewire's TemporaryUploadedFile reports
-            // its MIME from the extension, so a disguised file (e.g. PHP named
-            // .pdf) would sail through a getMimeType() check (CLAUDE.md §5).
             $mimeType = (string) (mime_content_type(Storage::disk('local')->path($storedPath)) ?: '');
 
             if (! in_array($mimeType, self::ACCEPTED_MIME_TYPES, true)) {
@@ -90,10 +73,6 @@ new class extends Component
                 'original_filename' => $name,
                 'file_path' => $storedPath,
                 'mime_type' => $mimeType,
-                // Read the size from the stored copy, not $uploadedFile->getSize():
-                // storeAs() above moves (deletes) the livewire-tmp file when the temp
-                // disk and destination are both 'local', so the temp path is already
-                // gone here and getSize() would throw UnableToRetrieveMetadata.
                 'file_size_bytes' => (int) Storage::disk('local')->size($storedPath),
                 'processing_status' => Document::STATUS_QUEUED,
             ];
@@ -105,48 +84,25 @@ new class extends Component
             return null;
         }
 
-        if (array_sum(array_column($documents, 'file_size_bytes')) > $maxBatchBytes) {
-            Storage::disk('local')->delete(array_column($documents, 'file_path'));
-            $this->addError('uploadedFiles', 'The upload batch exceeds the configured total-size limit.');
+        [$submission, $created] = DB::transaction(function () use ($vendor, $documents): array {
+            $submission = Submission::create([
+                'vendor_id' => $vendor->id,
+                'status' => Submission::STATUS_PROCESSING,
+            ]);
 
-            return null;
-        }
+            $created = collect($documents)->map(fn (array $document): Document => Document::create([
+                'submission_id' => $submission->id,
+                ...$document,
+            ]));
 
-        try {
-            [$submission, $created] = DB::transaction(function () use ($vendor, $documents): array {
-                $submission = Submission::create([
-                    'vendor_id' => $vendor->id,
-                    'status' => Submission::STATUS_PROCESSING,
-                ]);
-
-                $created = collect($documents)->map(fn (array $document): Document => Document::create([
-                    'submission_id' => $submission->id,
-                    ...$document,
-                ]));
-
-                $created->each(fn (Document $document) => ProcessDocumentJob::dispatch($document)->afterCommit());
-
-                return [$submission, $created];
-            });
-        } catch (\Throwable $error) {
-            Storage::disk('local')->delete(array_column($documents, 'file_path'));
-
-            throw $error;
-        }
+            return [$submission, $created];
+        });
 
         app(NotificationService::class)->submissionReceived($submission);
 
+        $created->each(fn (Document $document) => ProcessDocumentJob::dispatch($document));
+
         return redirect()->route('vendor.submissions')->with('status', 'Submission queued successfully.');
-    }
-
-    public function pipelineLimits(): array
-    {
-        $settings = app(SystemSettingsService::class)->pipelineSnapshot();
-
-        return [
-            'maxFileMb' => (int) $settings['MAX_FILE_SIZE_MB'],
-            'maxBatchMb' => (int) $settings['MAX_BATCH_SIZE_MB'],
-        ];
     }
 
     private function documentTypeIdFor(string $type): ?int
@@ -154,7 +110,7 @@ new class extends Component
         $aliases = match ($type) {
             'BIR Permit' => ['bir_certificate', 'bir_permit', 'BIR Certificate of Registration', 'BIR Permit'],
             'Business Permit' => ['business_permit', 'Business Permit'],
-            'DTI Registration' => ['dti_registration', 'DTI Business Name Registration', 'DTI Registration'],
+            'Financial Statement' => ['financial_statement', 'Financial Statement'],
             default => [$type],
         };
 
@@ -179,33 +135,60 @@ new class extends Component
 <x-page>
     <div
         class="mx-auto flex w-full max-w-7xl flex-col gap-6"
+        @keydown.escape.window="closeInvalidModal()"
         x-data="{
             files: [],
+            timers: {},
+            rejectedFiles: [],
             allowed: ['pdf', 'png', 'jpg', 'jpeg'],
-            maxBytes: {{ $this->pipelineLimits()['maxFileMb'] }} * 1024 * 1024,
-            maxBatchBytes: {{ $this->pipelineLimits()['maxBatchMb'] }} * 1024 * 1024,
+            maxBytes: 10 * 1024 * 1024,
             dragActive: false,
             submitted: false,
-            uploading: false,
+            submitting: false,
+            stagingUploads: false,
+            invalidModalOpen: false,
             readFiles(fileList) {
+                if (this.submitting) {
+                    return;
+                }
+
                 const selectedFiles = Array.from(fileList);
 
                 if (selectedFiles.length === 0) {
                     return;
                 }
 
+                const accepted = [];
+                const rejected = [];
+
                 selectedFiles.forEach((selected) => {
-                    this.files.push(this.createFileLane(selected));
+                    const file = this.createFileLane(selected);
+
+                    if (! file.valid) {
+                        rejected.push(file);
+                        return;
+                    }
+
+                    accepted.push(file);
                 });
+
+                if (accepted.length > 0) {
+                    this.files.push(...accepted);
+                    this.syncUpload();
+                }
+
+                if (rejected.length > 0) {
+                    this.showRejectedFiles(rejected);
+                }
 
                 this.$refs.upload.value = '';
                 this.submitted = false;
-                this.syncUpload();
             },
             createFileLane(selected) {
-                const extension = selected.name.split('.').pop().toLowerCase();
+                const extension = selected.name.includes('.') ? selected.name.split('.').pop().toLowerCase() : '';
                 const validType = this.allowed.includes(extension);
                 const validSize = selected.size <= this.maxBytes;
+
                 return {
                     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
                     file: selected,
@@ -216,11 +199,19 @@ new class extends Component
                     valid: validType && validSize,
                     error: ! validType
                         ? 'File must be a PDF, PNG, JPG, or JPEG.'
-                        : (! validSize ? `File is larger than the ${this.maxBytes / 1024 / 1024} MB per-file limit.` : ''),
+                        : (! validSize ? 'File is larger than the 10 MB per-file limit.' : ''),
                     type: '',
-                    status: validType && validSize ? 'uploading' : 'invalid',
+                    status: validType && validSize ? 'staging' : 'invalid',
                     progress: 0,
                 };
+            },
+            showRejectedFiles(files) {
+                this.rejectedFiles = files;
+                this.invalidModalOpen = true;
+            },
+            closeInvalidModal() {
+                this.invalidModalOpen = false;
+                this.rejectedFiles = [];
             },
             formatBytes(bytes) {
                 if (bytes < 1024 * 1024) {
@@ -229,24 +220,19 @@ new class extends Component
 
                 return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
             },
-            // Stage every valid file's real bytes on the server through Livewire's
-            // upload API and only mark the lane 'completed' when the upload truly
-            // finishes. The batch is submittable only once THIS resolves, so
-            // submitBatch never runs against an empty uploadedFiles array — the old
-            // race (a simulated progress bar decoupled from the real upload) left
-            // the queue on-screen but persisted nothing.
             syncUpload() {
                 const validLanes = this.files.filter((lane) => lane.valid);
 
                 if (validLanes.length === 0) {
-                    this.uploading = false;
+                    this.stagingUploads = false;
                     this.$wire.set('uploadedFiles', []);
                     return;
                 }
 
-                this.uploading = true;
+                this.stagingUploads = true;
                 validLanes.forEach((lane) => {
-                    lane.status = 'uploading';
+                    lane.status = 'staging';
+                    lane.progress = 0;
                     lane.error = '';
                 });
 
@@ -255,10 +241,10 @@ new class extends Component
                     validLanes.map((lane) => lane.file),
                     () => {
                         validLanes.forEach((lane) => {
-                            lane.status = 'completed';
-                            lane.progress = 100;
+                            lane.status = 'ready';
+                            lane.progress = 0;
                         });
-                        this.uploading = false;
+                        this.stagingUploads = false;
                     },
                     () => {
                         validLanes.forEach((lane) => {
@@ -266,74 +252,63 @@ new class extends Component
                             lane.progress = 0;
                             lane.error = 'Upload failed. Remove or replace this file.';
                         });
-                        this.uploading = false;
+                        this.stagingUploads = false;
                     },
-                    (event) => {
-                        const progress = event?.detail?.progress ?? 0;
+                    () => {
                         validLanes.forEach((lane) => {
-                            if (lane.status === 'uploading') {
-                                lane.progress = progress;
-                            }
+                            lane.progress = 0;
                         });
                     },
                 );
             },
             statusLabel(file) {
-                if (file.status === 'invalid') {
-                    return 'Check File';
+                if (file.status === 'failed') {
+                    return 'Upload Failed';
+                }
+
+                if (file.status === 'staging') {
+                    return 'Preparing';
                 }
 
                 if (file.status === 'uploading') {
                     return 'Uploading';
                 }
 
-                if (file.status === 'failed') {
-                    return 'Upload Failed';
+                if (file.status === 'completed') {
+                    return 'Done';
                 }
 
                 if (file.type === '') {
                     return 'Pending Type Selection';
                 }
 
-                if (file.status === 'completed') {
-                    return 'Ready';
-                }
-
-                return 'Waiting';
+                return 'Ready';
             },
             statusClasses(file) {
-                if (file.status === 'failed' || file.status === 'invalid') {
+                if (file.status === 'completed') {
+                    return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+                }
+
+                if (file.status === 'failed') {
                     return 'bg-rose-500/15 text-rose-700 dark:text-rose-300';
                 }
 
-                if (file.status === 'uploading') {
-                    return 'bg-cu-blue/10 text-cu-blue';
+                if (file.status === 'uploading' || file.status === 'staging') {
+                    return 'bg-cu-blue/10 text-sky-700 dark:text-sky-300';
                 }
 
                 if (file.type === '') {
                     return 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
                 }
 
-                if (file.status === 'completed') {
-                    return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+                return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+            },
+            handleTypeChange(file) {
+                if (this.submitting) {
+                    return;
                 }
 
-                return 'bg-black/10 text-cu-muted dark:bg-white/10';
-            },
-            handleTypeChange() {
                 this.submitted = false;
-            },
-            removeFile(file) {
-                this.files = this.files.filter((lane) => lane.id !== file.id);
-                this.submitted = false;
-                this.syncUpload();
-            },
-            clearFiles() {
-                this.files = [];
-                this.$refs.upload.value = '';
-                this.submitted = false;
-                this.uploading = false;
-                this.$wire.set('uploadedFiles', []);
             },
             uploadReadyFiles() {
                 if (! this.canSubmit) {
@@ -341,25 +316,78 @@ new class extends Component
                 }
 
                 this.submitted = true;
+                this.submitting = true;
 
-                const payload = this.files
-                    .filter((file) => file.valid)
-                    .map((file) => ({
-                        name: file.name,
-                        type: file.type,
-                        extension: file.extension,
-                        sizeBytes: file.sizeBytes ?? 0,
-                    }));
+                const payload = this.files.map((file) => ({
+                    name: file.name,
+                    type: file.type,
+                    extension: file.extension,
+                    sizeBytes: file.sizeBytes ?? 0,
+                }));
 
-                // On success submitBatch redirects to My Submissions; this promise
-                // only resolves in-page when the server declined the batch (e.g. a
-                // disguised file was skipped), so drop the banner to surface the error.
+                this.files.forEach((file) => {
+                    window.clearInterval(this.timers[file.id]);
+                    file.status = 'uploading';
+                    file.progress = 0;
+                    file.error = '';
+
+                    this.timers[file.id] = window.setInterval(() => {
+                        const nextProgress = Math.min(100, file.progress + Math.floor(Math.random() * 16) + 8);
+                        file.progress = nextProgress;
+
+                        if (nextProgress < 100) {
+                            return;
+                        }
+
+                        window.clearInterval(this.timers[file.id]);
+                        file.status = 'completed';
+                        file.progress = 100;
+                        this.submitWhenProgressCompletes(payload);
+                    }, 220);
+                });
+            },
+            submitWhenProgressCompletes(payload) {
+                if (! this.files.every((file) => file.status === 'completed')) {
+                    return;
+                }
+
                 this.$wire.submitBatch(payload).then(() => {
+                    this.files.forEach((file) => {
+                        file.status = 'ready';
+                        file.progress = 0;
+                    });
+                    this.submitting = false;
                     this.submitted = false;
                 });
             },
+            removeFile(file) {
+                if (this.submitting) {
+                    return;
+                }
+
+                window.clearInterval(this.timers[file.id]);
+                this.files = this.files.filter((lane) => lane.id !== file.id);
+                this.submitted = false;
+                this.syncUpload();
+            },
+            clearFiles() {
+                if (this.submitting) {
+                    return;
+                }
+
+                this.files.forEach((file) => window.clearInterval(this.timers[file.id]));
+                this.files = [];
+                this.timers = {};
+                this.$refs.upload.value = '';
+                this.submitted = false;
+                this.stagingUploads = false;
+                this.$wire.set('uploadedFiles', []);
+            },
             get hasFiles() {
                 return this.files.length > 0;
+            },
+            get readyCount() {
+                return this.files.filter((file) => file.type !== '' && file.status === 'ready').length;
             },
             get completedCount() {
                 return this.files.filter((file) => file.status === 'completed').length;
@@ -368,10 +396,10 @@ new class extends Component
                 return this.submitted && this.hasFiles && this.completedCount === this.files.length;
             },
             get canSubmit() {
-                return ! this.uploading
+                return ! this.stagingUploads
+                    && ! this.submitting
                     && this.hasFiles
-                    && this.files.reduce((total, file) => total + (file.sizeBytes ?? 0), 0) <= this.maxBatchBytes
-                    && this.files.every((file) => file.valid && file.type !== '' && file.status === 'completed');
+                    && this.files.every((file) => file.valid && file.type !== '' && file.status === 'ready');
             },
         }"
     >
@@ -394,6 +422,58 @@ new class extends Component
                             Each document lane is ready and the batch is queued for processing.
                         </p>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div
+            x-show="invalidModalOpen"
+            x-cloak
+            x-transition.opacity
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invalid-file-title"
+        >
+            <div
+                class="w-full max-w-lg rounded-2xl border border-cu-border bg-cu-surface p-5 shadow-xl"
+                @click.outside="closeInvalidModal()"
+            >
+                <div class="flex items-start gap-3">
+                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-700 dark:text-rose-300">
+                        <flux:icon icon="exclamation-triangle" class="size-5" />
+                    </span>
+                    <div class="min-w-0 flex-1">
+                        <h2 id="invalid-file-title" class="text-base font-semibold text-cu-text">File type not allowed</h2>
+                        <p class="mt-1 text-sm text-cu-muted">Only PDF, PNG, JPG, or JPEG files up to 10 MB can be added to the file queue.</p>
+                    </div>
+                    <button
+                        type="button"
+                        @click="closeInvalidModal()"
+                        aria-label="Close invalid file warning"
+                        class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-cu-border bg-cu-surface text-cu-muted transition hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                        <flux:icon icon="x-mark" class="size-4" />
+                    </button>
+                </div>
+
+                <div class="mt-4 max-h-60 overflow-y-auto rounded-xl border border-cu-border">
+                    <template x-for="file in rejectedFiles" :key="file.id">
+                        <div class="border-b border-cu-border px-4 py-3 last:border-b-0">
+                            <p class="truncate text-sm font-medium text-cu-text" x-text="file.name"></p>
+                            <p class="mt-1 text-xs text-rose-700 dark:text-rose-300" x-text="file.error"></p>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="mt-5 flex justify-end">
+                    <button
+                        type="button"
+                        @click="closeInvalidModal()"
+                        class="inline-flex items-center justify-center rounded-lg border border-cu-border bg-cu-surface px-4 py-2 text-sm font-semibold text-cu-text transition hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                        Got it
+                    </button>
                 </div>
             </div>
         </div>
@@ -422,12 +502,12 @@ new class extends Component
                         @dragleave.prevent="dragActive = false"
                         @drop.prevent="dragActive = false; readFiles($event.dataTransfer.files)"
                     >
-                        <button type="button" @click="$refs.upload.click()" class="mx-auto flex size-12 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue ring-1 ring-cu-blue/20 transition hover:bg-cu-blue/20">
+                        <button type="button" @click="$refs.upload.click()" :disabled="submitting" class="mx-auto flex size-12 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700 ring-1 ring-cu-blue/20 transition hover:bg-cu-blue/20 disabled:cursor-not-allowed disabled:opacity-60">
                             <flux:icon icon="arrow-up-tray" class="size-5" />
                         </button>
                         <h3 class="mt-3 text-base font-semibold text-cu-text">Drop files here or click to upload</h3>
-                        <p class="mt-1 text-sm text-cu-muted">PDF, PNG, JPG, or JPEG files up to {{ $this->pipelineLimits()['maxFileMb'] }} MB each.</p>
-                        <button type="button" @click="$refs.upload.click()" class="mt-4 inline-flex items-center gap-2 rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-semibold text-cu-text transition hover:bg-black/5 dark:hover:bg-white/5">
+                        <p class="mt-1 text-sm text-cu-muted">PDF, PNG, JPG, or JPEG files up to 10 MB each.</p>
+                        <button type="button" @click="$refs.upload.click()" :disabled="submitting" class="mt-4 inline-flex items-center gap-2 rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-semibold text-cu-text transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/5">
                             <flux:icon icon="paper-clip" class="size-4" />
                             Choose files
                         </button>
@@ -443,7 +523,7 @@ new class extends Component
                         >
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div class="flex items-center gap-3">
-                                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue">
+                                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700">
                                         <flux:icon icon="arrow-up-tray" class="size-5" />
                                     </span>
                                     <div>
@@ -451,7 +531,7 @@ new class extends Component
                                         <p class="text-xs text-cu-muted">Drop another batch here or choose from your device.</p>
                                     </div>
                                 </div>
-                                <button type="button" @click="$refs.upload.click()" class="inline-flex items-center justify-center gap-2 rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-semibold text-cu-text transition hover:bg-black/5 dark:hover:bg-white/5">
+                                <button type="button" @click="$refs.upload.click()" :disabled="submitting" class="inline-flex items-center justify-center gap-2 rounded-xl border border-cu-border bg-cu-surface px-4 py-2.5 text-sm font-semibold text-cu-text transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/5">
                                     <flux:icon icon="paper-clip" class="size-4" />
                                     Choose files
                                 </button>
@@ -463,14 +543,14 @@ new class extends Component
                                 <div>
                                     <p class="text-sm font-semibold text-cu-text">File queue</p>
                                     <p class="text-xs text-cu-muted">
-                                        <span x-text="completedCount"></span>
+                                        <span x-text="readyCount"></span>
                                         <span> of </span>
                                         <span x-text="files.length"></span>
                                         <span> ready</span>
                                     </p>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <button type="button" @click="clearFiles()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-cu-border bg-cu-surface px-3 py-2 text-xs font-semibold text-cu-text transition hover:bg-black/5 dark:hover:bg-white/5">
+                                    <button type="button" @click="clearFiles()" :disabled="submitting" class="inline-flex items-center justify-center gap-2 rounded-lg border border-cu-border bg-cu-surface px-3 py-2 text-xs font-semibold text-cu-text transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/5">
                                         Clear queue
                                     </button>
                                     <button
@@ -517,13 +597,14 @@ new class extends Component
                                         <select
                                             x-model="file.type"
                                             @change="handleTypeChange(file)"
+                                            :disabled="submitting || file.status === 'staging' || file.status === 'uploading' || file.status === 'completed'"
                                             aria-label="Document type"
                                             class="h-10 w-56 shrink-0 rounded-lg border border-cu-border bg-cu-surface px-3 text-sm text-cu-text outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-cu-purple focus:ring-2 focus:ring-cu-purple/20"
                                         >
                                             <option value="">Select type</option>
                                             <option>Business Permit</option>
                                             <option>BIR Permit</option>
-                                            <option>DTI Registration</option>
+                                            <option>Financial Statement</option>
                                         </select>
 
                                         <span class="w-28 shrink-0 rounded-full px-2.5 py-1 text-center text-xs font-medium" :class="statusClasses(file)" x-text="statusLabel(file)"></span>
@@ -532,9 +613,10 @@ new class extends Component
                                         <button
                                             type="button"
                                             @click="removeFile(file)"
+                                            :disabled="submitting"
                                             aria-label="Remove file"
                                             title="Remove file"
-                                            class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-cu-border bg-cu-surface text-cu-muted transition hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"
+                                            class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-cu-border bg-cu-surface text-cu-muted transition hover:bg-rose-500/10 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:text-rose-300"
                                         >
                                             <flux:icon icon="x-mark" class="size-4" />
                                         </button>
@@ -562,7 +644,7 @@ new class extends Component
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="archive-box" color="amber" />
-                            <p class="text-cu-muted">Each file must be {{ $this->pipelineLimits()['maxFileMb'] }} MB or smaller; the batch limit is {{ $this->pipelineLimits()['maxBatchMb'] }} MB.</p>
+                            <p class="text-cu-muted">Each file must be 10 MB or smaller.</p>
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="photo" color="emerald" />
@@ -570,7 +652,7 @@ new class extends Component
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="check-circle" color="sky" />
-                            <p class="text-cu-muted">Assign Business Permit, BIR Permit, or DTI Registration per file.</p>
+                            <p class="text-cu-muted">Assign Business Permit, BIR Permit, or Financial Statement per file.</p>
                         </div>
                     </div>
                 </div>

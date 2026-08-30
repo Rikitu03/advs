@@ -7,8 +7,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Component;
 
-new class extends Component
-{
+new class extends Component {
     public string $filter = 'all';
 
     public string $search = '';
@@ -83,11 +82,6 @@ new class extends Component
                 'path' => $document->file_path,
                 'url' => route('vendor.documents.show', $document),
                 'processing_status' => str($document->processing_status)->headline()->toString(),
-                'kind' => match (true) {
-                    str_starts_with((string) $document->mime_type, 'image/') => 'image',
-                    $document->mime_type === 'application/pdf' => 'pdf',
-                    default => 'file',
-                },
             ])->values(),
         ];
     }
@@ -151,11 +145,6 @@ new class extends Component
                         'path' => null,
                         'url' => null,
                         'processing_status' => $submission['status'],
-                        'kind' => match (pathinfo($document['file_name'], PATHINFO_EXTENSION)) {
-                            'png', 'jpg', 'jpeg' => 'image',
-                            'pdf' => 'pdf',
-                            default => 'file',
-                        },
                     ]),
                 ];
             });
@@ -232,142 +221,74 @@ new class extends Component
 
             <div class="divide-y divide-cu-border" wire:loading.class="opacity-40">
                 @forelse ($rows as $submission)
-                    <div wire:key="vendor-submission-{{ $submission['id'] }}" x-data="{ open: false }">
-                        {{-- Batch row --}}
-                        <div
-                            @click="open = !open"
-                            class="grid cursor-pointer gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 lg:grid-cols-[1.1fr_.6fr_.7fr_.7fr_.7fr] lg:items-center"
-                        >
-                            <div class="flex min-w-0 gap-3">
-                                <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-cu-blue">
-                                    <flux:icon icon="document-text" class="size-5" />
-                                </span>
-                                <div class="min-w-0">
-                                    <p class="truncate text-sm font-medium text-cu-text">{{ $submission['document_summary'] ?: 'Submission batch' }}</p>
-                                    <p class="truncate text-xs text-cu-muted">{{ $submission['ref'] }} - {{ $submission['file_summary'] }}</p>
-                                </div>
-                            </div>
-                            <div class="text-sm text-cu-muted">
-                                <p>{{ $submission['submitted_at']->format('M j, Y') }}</p>
-                            </div>
-                            <div>
-                                <x-vendor-status-badge :status="$submission['status']" />
-                            </div>
+                    <div wire:key="vendor-submission-{{ $submission['id'] }}" class="grid gap-4 px-5 py-4 transition hover:bg-black/5 dark:hover:bg-white/5 lg:grid-cols-[1.1fr_.6fr_.7fr_.7fr_.7fr] lg:items-center">
+                        <div class="flex min-w-0 gap-3">
+                            <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cu-blue/10 text-sky-700">
+                                <flux:icon icon="document-text" class="size-5" />
+                            </span>
                             <div class="min-w-0">
-                                <div class="h-2 rounded-full bg-cu-border">
-                                    <div class="h-2 rounded-full cu-gradient" style="width: {{ $submission['progress'] }}%"></div>
-                                </div>
-                                <p class="mt-1 text-xs text-cu-muted">{{ $submission['progress'] }}%</p>
-                            </div>
-                            <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
-                                <button
-                                    type="button"
-                                    @click.stop="open = !open"
-                                    :aria-expanded="open"
-                                    aria-label="Toggle submission details"
-                                    class="inline-flex items-center gap-2 rounded-lg border border-cu-border bg-cu-surface px-3 py-1.5 text-sm font-medium text-cu-text transition hover:border-cu-blue hover:bg-cu-blue/10 hover:text-cu-blue"
-                                >
-                                    <flux:icon icon="eye" class="size-4" />
-                                    Details
-                                    <flux:icon icon="chevron-down" class="size-3.5 transition-transform duration-200" ::class="open && 'rotate-180'" />
-                                </button>
+                                <p class="truncate text-sm font-medium text-cu-text">{{ $submission['document_summary'] ?: 'Submission batch' }}</p>
+                                <p class="truncate text-xs text-cu-muted">{{ $submission['ref'] }} - {{ $submission['file_summary'] }}</p>
                             </div>
                         </div>
+                        <div class="text-sm text-cu-muted">
+                            <p>{{ $submission['submitted_at']->format('M j, Y') }}</p>
+                        </div>
+                        <div>
+                            <x-vendor-status-badge :status="$submission['status']" />
+                        </div>
+                        <div class="min-w-0">
+                            <div class="h-2 rounded-full bg-cu-border">
+                                <div class="h-2 rounded-full cu-gradient" style="width: {{ $submission['progress'] }}%"></div>
+                            </div>
+                            <p class="mt-1 text-xs text-cu-muted">{{ $submission['progress'] }}%</p>
+                        </div>
+                        <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
+                            <flux:modal.trigger name="submission-{{ $submission['id'] }}">
+                                <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-cu-border bg-cu-surface px-3 py-1.5 text-sm font-medium text-cu-text transition hover:border-cu-blue hover:bg-cu-blue/10 hover:text-sky-700">
+                                    <flux:icon icon="eye" class="size-4" />
+                                    Details
+                                </button>
+                            </flux:modal.trigger>
+                        </div>
 
-                        {{-- Batch detail panel: submission summary + document light table --}}
-                        <div x-show="open" x-collapse x-cloak class="border-t border-cu-border/60 bg-black/[0.02] px-5 py-5 dark:bg-white/[0.02]">
-                            <div class="flex flex-col gap-4">
-                                <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-cu-muted">
-                                    <span class="inline-flex items-center gap-1.5">
-                                        <flux:icon icon="calendar" class="size-4" />
-                                        Submitted {{ $submission['submitted_at']->toDayDateTimeString() }}
-                                    </span>
-                                    <span class="inline-flex items-center gap-1.5">
-                                        <flux:icon icon="paper-clip" class="size-4" />
-                                        {{ $submission['file_summary'] }}
-                                    </span>
-                                    <span class="text-cu-text">{{ $submission['note'] }}</span>
-                                </div>
-
+                        <flux:modal name="submission-{{ $submission['id'] }}" class="md:w-[32rem]">
+                            <div class="space-y-5">
                                 <div>
-                                    <p class="text-sm font-semibold text-cu-text">Included files</p>
-                                    <div class="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                    <flux:heading size="lg">{{ $submission['ref'] }}</flux:heading>
+                                    <flux:subheading>{{ $submission['document_summary'] ?: 'Submission batch' }}</flux:subheading>
+                                </div>
+                                <div class="grid gap-3 sm:grid-cols-2">
+                                    <div class="rounded-xl border border-cu-border p-4">
+                                        <p class="text-xs text-cu-muted">Status</p>
+                                        <p class="mt-1 text-sm font-semibold">{{ $submission['status'] }}</p>
+                                    </div>
+                                    <div class="rounded-xl border border-cu-border p-4">
+                                        <p class="text-xs text-cu-muted">Submitted</p>
+                                        <p class="mt-1 text-sm font-semibold">{{ $submission['submitted_at']->toDayDateTimeString() }}</p>
+                                    </div>
+                                </div>
+                                <p class="text-sm text-cu-muted">{{ $submission['note'] }}</p>
+                                <div class="rounded-xl border border-cu-border p-4">
+                                    <p class="text-sm font-semibold">Included files</p>
+                                    <div class="mt-2 flex flex-col gap-2">
                                         @foreach ($submission['documents'] as $document)
-                                            @php
-                                                $statusChip = match ($document['processing_status']) {
-                                                    'Completed' => 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-                                                    'Failed' => 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
-                                                    default => 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
-                                                };
-                                            @endphp
-                                            @if ($document['url'])
-                                                <a href="{{ $document['url'] }}" target="_blank" rel="noopener"
-                                                   class="group block overflow-hidden rounded-xl border border-cu-border bg-cu-surface shadow-sm transition hover:-translate-y-0.5 hover:border-cu-purple/50 hover:shadow-md">
-                                                    <div class="relative h-44 overflow-hidden bg-black/5 dark:bg-white/5">
-                                                        @if ($document['kind'] === 'image')
-                                                            <img
-                                                                src="{{ $document['url'] }}"
-                                                                alt="Preview of {{ $document['file_name'] }}"
-                                                                loading="lazy"
-                                                                class="h-full w-full object-cover object-top"
-                                                            >
-                                                        @elseif ($document['kind'] === 'pdf')
-                                                            {{-- Stamped into the DOM only when the panel opens, so hidden
-                                                                 rows never download their PDFs. First page only; the frame
-                                                                 crops the viewer chrome. --}}
-                                                            <template x-if="open">
-                                                                <object
-                                                                    data="{{ $document['url'] }}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH"
-                                                                    type="application/pdf"
-                                                                    class="pointer-events-none h-[calc(100%+3rem)] w-full"
-                                                                    aria-hidden="true"
-                                                                    tabindex="-1"
-                                                                >
-                                                                    <div class="flex h-44 flex-col items-center justify-center gap-2 text-cu-muted">
-                                                                        <flux:icon icon="document-text" class="size-8" />
-                                                                        <span class="text-xs">PDF preview unavailable</span>
-                                                                    </div>
-                                                                </object>
-                                                            </template>
-                                                        @else
-                                                            <div class="flex h-full flex-col items-center justify-center gap-2 text-cu-muted">
-                                                                <flux:icon icon="document" class="size-8" />
-                                                                <span class="text-xs">No preview</span>
-                                                            </div>
-                                                        @endif
-                                                        <span class="absolute right-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold {{ $statusChip }}">
-                                                            {{ $document['processing_status'] }}
-                                                        </span>
-                                                        <span class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/60 to-transparent py-2 text-xs font-medium text-white opacity-0 transition group-hover:opacity-100">
-                                                            Open file
-                                                            <flux:icon icon="arrow-up-right" class="size-3" />
-                                                        </span>
-                                                    </div>
-                                                    <div class="border-t border-cu-border px-3 py-2.5">
-                                                        <p class="truncate text-sm font-medium text-cu-text">{{ $document['type'] }}</p>
-                                                        <p class="truncate text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }}</p>
-                                                    </div>
-                                                </a>
-                                            @else
-                                                <div class="overflow-hidden rounded-xl border border-cu-border bg-cu-surface shadow-sm">
-                                                    <div class="relative flex h-44 flex-col items-center justify-center gap-2 bg-black/5 text-cu-muted dark:bg-white/5">
-                                                        <flux:icon icon="document-text" class="size-8" />
-                                                        <span class="text-xs">Sample submission</span>
-                                                        <span class="absolute right-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold {{ $statusChip }}">
-                                                            {{ $document['processing_status'] }}
-                                                        </span>
-                                                    </div>
-                                                    <div class="border-t border-cu-border px-3 py-2.5">
-                                                        <p class="truncate text-sm font-medium text-cu-text">{{ $document['type'] }}</p>
-                                                        <p class="truncate text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }}</p>
-                                                    </div>
-                                                </div>
-                                            @endif
+                                            <div class="rounded-lg bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
+                                                @if ($document['url'])
+                                                    <a href="{{ $document['url'] }}" target="_blank" rel="noopener" class="block rounded-lg transition hover:text-sky-700 dark:hover:text-sky-300">
+                                                        <p class="font-medium text-cu-text">{{ $document['type'] }}</p>
+                                                        <p class="text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }} - {{ $document['processing_status'] }}</p>
+                                                    </a>
+                                                @else
+                                                    <p class="font-medium text-cu-text">{{ $document['type'] }}</p>
+                                                    <p class="text-xs text-cu-muted">{{ $document['file_name'] }} - {{ $document['size'] }} - {{ $document['processing_status'] }}</p>
+                                                @endif
+                                            </div>
                                         @endforeach
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        </flux:modal>
                     </div>
                 @empty
                     <div class="flex flex-col items-center gap-2 px-5 py-16 text-center">
