@@ -188,16 +188,28 @@ class SystemSetting extends Model
             'Model Confidence Thresholds' => [
                 ['key' => 'classification_confidence_threshold', 'label' => 'Classification confidence (0–1)', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.70, 'hint' => 'ResNet-50 confidence below this flags the document.'],
                 ['key' => 'yolo_detection_confidence', 'label' => 'YOLOv8 detection confidence (0–1)', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.50, 'hint' => 'Minimum detection confidence for signature/stamp crops.'],
-                ['key' => 'signature_distance_threshold', 'label' => 'Signature distance threshold', 'type' => 'float', 'min' => 0, 'max' => 5, 'step' => 0.01, 'default' => 1.20, 'hint' => 'Maximum Euclidean distance for a signature to match its enrollment embedding.'],
-                ['key' => 'stamp_similarity_threshold', 'label' => 'Stamp similarity threshold (0–1)', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.85, 'hint' => 'Minimum cosine similarity for a stamp to match its enrollment vector.'],
+                ['key' => 'signature_distance_threshold', 'label' => 'Signature distance threshold', 'type' => 'float', 'min' => 0, 'max' => 5, 'step' => 0.01, 'default' => 1.243976, 'hint' => 'Maximum Euclidean distance for a signature to match its enrollment embedding.'],
+                ['key' => 'stamp_similarity_threshold', 'label' => 'Stamp similarity threshold (0–1)', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.80, 'hint' => 'Minimum cosine similarity for a stamp to match its enrollment vector.'],
+                ['key' => 'stamp_tamper_threshold', 'label' => 'Stamp texture authenticity threshold', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.50, 'hint' => 'Minimum genuine probability from the stamp texture classifier.'],
             ],
 
             'Risk Score Composition' => [
-                ['key' => 'risk_weight_text', 'label' => 'Weight: text validation', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.25, 'hint' => 'Contribution of OCR/keyword coverage to the composite risk score.'],
-                ['key' => 'risk_weight_classification', 'label' => 'Weight: classification', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.25, 'hint' => 'Contribution of ResNet-50 confidence.'],
-                ['key' => 'risk_weight_signature', 'label' => 'Weight: signature', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.25, 'hint' => 'Contribution of signature similarity.'],
-                ['key' => 'risk_weight_stamp', 'label' => 'Weight: stamp', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.25, 'hint' => 'Contribution of stamp similarity.'],
+                ['key' => 'risk_weight_text', 'label' => 'Weight: text validation', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.20, 'hint' => 'Contribution of OCR/keyword coverage to the composite risk score.'],
+                ['key' => 'risk_weight_classification', 'label' => 'Weight: classification', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.20, 'hint' => 'Contribution of classification authenticity.'],
+                ['key' => 'risk_weight_signature', 'label' => 'Weight: signature', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.20, 'hint' => 'Contribution of signature authenticity.'],
+                ['key' => 'risk_weight_stamp', 'label' => 'Weight: stamp', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.20, 'hint' => 'Contribution of stamp authenticity.'],
+                ['key' => 'risk_weight_tamper', 'label' => 'Weight: forensic authenticity', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.20, 'hint' => 'Contribution of Stage T forensic authenticity.'],
                 ['key' => 'missing_component_penalty', 'label' => 'Missing-component penalty', 'type' => 'int', 'min' => 0, 'max' => 100, 'default' => 15, 'hint' => 'Risk points added when a required component (signature / stamp) is missing.'],
+            ],
+
+            'Forensic Analysis' => [
+                ['key' => 'tamper_authenticity_threshold', 'label' => 'Forensic authenticity threshold', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.50, 'hint' => 'Minimum aggregate Stage T authenticity score.'],
+                ['key' => 'tamper_hard_threshold', 'label' => 'Forensic hard-confidence threshold', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.01, 'default' => 0.80, 'hint' => 'A Stage T signal at or above this value forces High Risk.'],
+                ['key' => 'tamper_weight_metadata', 'label' => 'Forensic weight: metadata', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.20, 'hint' => 'Stage T metadata contribution.'],
+                ['key' => 'tamper_weight_ela', 'label' => 'Forensic weight: ELA', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.25, 'hint' => 'Stage T error-level-analysis contribution.'],
+                ['key' => 'tamper_weight_copy_move', 'label' => 'Forensic weight: copy move', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.25, 'hint' => 'Stage T copy-move contribution.'],
+                ['key' => 'tamper_weight_font', 'label' => 'Forensic weight: font', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.15, 'hint' => 'Stage T font-anomaly contribution.'],
+                ['key' => 'tamper_weight_cross_reference', 'label' => 'Forensic weight: cross-reference', 'type' => 'float', 'min' => 0, 'max' => 1, 'step' => 0.05, 'default' => 0.15, 'hint' => 'Stage T cross-reference contribution.'],
             ],
 
             'Risk Bands & Retention' => [

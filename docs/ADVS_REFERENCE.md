@@ -4,7 +4,7 @@
 
 ---
 
-> **Implementation phase plans:** this reference defines *what* the system does; the *how/when* now lives in three concern-split phase plans under [`docs/phases/`](docs/phases/) — [pipeline integration](docs/phases/PIPELINE_INTEGRATION_PHASES.md) · [model training](docs/phases/MODEL_TRAINING_PHASES.md) · [UI functions](docs/phases/UI_FUNCTION_PHASES.md) — each folding in the Negofood client-interview direction ([gap plan](docs/CLIENT_INTERVIEW_GAP_PLAN.md)).
+> **Implementation phase plans:** this reference defines *what* the system does; the *how/when* now lives in three concern-split phase plans under [`phases/`](phases/) — [pipeline integration](phases/PIPELINE_INTEGRATION_PHASES.md) · [model training](phases/MODEL_TRAINING_PHASES.md) · [UI functions](phases/UI_FUNCTION_PHASES.md) — each folding in the Negofood client-interview direction ([gap plan](CLIENT_INTERVIEW_GAP_PLAN.md)).
 
 ---
 
@@ -14,7 +14,7 @@ The ADVS is a web-based system built on a **Laravel 11 backend with Python infer
 
 The system is **on-demand, not calendar-driven**. It activates whenever a vendor submits documents — whether that's an initial application, a renewal, or an update triggered by an expiring credential or new regulation. The implementing organization decides the cadence; ADVS simply processes whatever arrives.
 
-> **Approved update (Negofood client interview, 2026-06-29):** a **renewal scheduler** is being added that proactively flags expiring/expired credentials and sends renewal reminders — a deliberate **calendar-driven** dimension layered on top of the on-demand core. This is the one approved departure from the statement above. See the compliance-lifecycle plan in [`docs/phases/PIPELINE_INTEGRATION_PHASES.md`](docs/phases/PIPELINE_INTEGRATION_PHASES.md) (Phase P5) and [`docs/CLIENT_INTERVIEW_GAP_PLAN.md`](docs/CLIENT_INTERVIEW_GAP_PLAN.md).
+> **Approved update (Negofood client interview, 2026-06-29):** a **renewal scheduler** is being added that proactively flags expiring/expired credentials and sends renewal reminders — a deliberate **calendar-driven** dimension layered on top of the on-demand core. This is the one approved departure from the statement above. See the compliance-lifecycle plan in [`phases/PIPELINE_INTEGRATION_PHASES.md`](phases/PIPELINE_INTEGRATION_PHASES.md) (Phase P5) and [`CLIENT_INTERVIEW_GAP_PLAN.md`](CLIENT_INTERVIEW_GAP_PLAN.md).
 
 Three distinct user roles interact with the system: **Vendors** (who submit documents), **Compliance Officers** (who review validation results and render accreditation decisions), and **System Administrators** (who manage users, configure thresholds, and oversee the platform). Each role has a scoped view of the system enforced by role-based access control.
 
@@ -164,7 +164,7 @@ This section walks through exactly what happens from the moment a file enters th
 **What happens**:
 1. The preprocessed image is passed to **PyTesseract** (`pytesseract.image_to_string()`), which performs its own internal processing (segmentation into lines/words/characters, feature extraction, deep-learning-based character classification, and post-processing with dictionary correction).
 2. The raw extracted text is passed through **NLP post-processing** for further correction and sentence structuring.
-3. The cleaned text is compared against **predefined templates** — expected field names, required keywords, formatting patterns specific to each document type (e.g., a BIR permit must contain certain registration numbers, a financial statement must contain specific headers).
+3. The cleaned text is compared against **predefined templates** — expected field names, required keywords, formatting patterns specific to each document type (e.g., a BIR certificate must contain certain registration numbers, a DTI Business Name Registration must contain a certificate number and TRN).
 
 **Validation logic**: The system checks for:
 - **Required fields present**: Does the extracted text contain the expected sections/keywords for this document type?
@@ -191,7 +191,7 @@ This section walks through exactly what happens from the moment a file enters th
 - Saved format: HDF5 (`resnet50_authenticity.h5`) with pickled LabelEncoder
 
 **What happens**:
-1. The model produces a **probability distribution** over all document classes (e.g., `[0.02, 0.01, 0.96, 0.04]` for classes like BIR Permit, Financial Statement, etc.).
+1. The model produces a **probability distribution** over all document classes (e.g., `[0.02, 0.01, 0.96, 0.04]` for classes like BIR Permit, DTI Registration, etc.).
 2. The index with the highest probability is decoded back to the class label using the saved LabelEncoder.
 3. The **confidence score** is the maximum probability value (e.g., 96%).
 
@@ -229,7 +229,9 @@ This section walks through exactly what happens from the moment a file enters th
 
 **Input**: Cropped signature region from YOLOv8.
 
-> **The signature reference is enrolled at vendor registration — not during the pipeline.** Every vendor captures a reference signature during sign-up (registration **step 2**, before email verification): they photograph three signatures on white bond paper, an authenticity check rejects software-edited/filtered images, and the accepted capture is embedded once into the vendor's **128-dimensional reference embedding** and stored on the vendor record (`users.signature_path` / `vendor_embeddings.signature_embedding`). Because the reference exists **before any document is ever submitted**, the pipeline **always runs in verification mode** — there is no "first submission auto-enrolls" branch here. (This is the opposite of the logo handling in §4b, where references are keyed by city and seeded on first approval.)
+> **The signature reference is enrolled at vendor registration — not during the pipeline.** Every vendor captures a reference signature during sign-up (registration **step 2**, before email verification): they photograph three separated signatures on white bond paper, arranged in one row or one column. An authenticity check rejects software-edited/filtered images, and the accepted capture is embedded once into the vendor's **128-dimensional reference embedding** and stored on the vendor record (`users.signature_path` / `vendor_embeddings.signature_embedding`). Because the reference exists **before any document is ever submitted**, the pipeline **always runs in verification mode** — there is no "first submission auto-enrolls" branch here. (This is the opposite of the logo handling in §4b, where references are keyed by city and seeded on first approval.)
+
+Registration detection is calibrated independently from Stage 4 document detection. It prefers an optional dedicated enrollment detector and otherwise falls back to the document detector using `SIGNATURE_ENROLL_DETECTION_CONFIDENCE` and `SIGNATURE_ENROLL_DETECTION_IMGSZ`. These settings must not change the document-wide `YOLO_DETECTION_CONFIDENCE` behavior.
 
 **Verification (every submission)**:
 1. The new cropped signature is preprocessed (resized to fixed input size, pixel values normalized).
@@ -257,7 +259,7 @@ This section walks through exactly what happens from the moment a file enters th
 > **Logo references are keyed by the document's issuer, not by the vendor.** Official stamps, logos, and seals belong to whoever **issues** the document. `document_types.issuer_scope` records which kind, and that drives how the reference is keyed:
 > - **`national`** (e.g. BIR Permit, SEC GIS) — one logo agency-wide; the reference is keyed by **document type alone** (the BIR logo is identical on every BIR document, in any city).
 > - **`lgu`** (e.g. Business Permit) — one seal per city; the reference is keyed by **(document type, city)** (Pasig's business-permit seal differs from Quezon City's).
-> - **`null`** (e.g. audited Financial Statement, Signed Contract) — no official issuer logo; the reference lookup is skipped (only the tamper check runs).
+> - **`null`** (e.g. Signed Contract) — no official issuer logo; the reference lookup is skipped (only the tamper check runs).
 >
 > References live in the **`logo_references`** table. There is **no per-vendor stamp embedding** and no per-vendor enrollment step. (This is the opposite of the signature handling in §4a, which uses one per-vendor reference enrolled at registration.)
 
@@ -458,7 +460,7 @@ All file paths are stored as references in the database, not the files themselve
 | Signature reference embedding | Database, **per vendor** (`users.signature_path` + `vendor_embeddings.signature_embedding`) | 128-dimensional float vector, serialized as JSON or binary blob |
 | Logo / stamp / seal reference vector | Database, **per issuer** (the `logo_references` table, keyed by `document_type` for national issuers and `(document_type, city)` for LGU issuers) | Float vector per issuer (dimension depends on EfficientNet variant), serialized similarly |
 
-The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. financial statements, signed contracts) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
+The **signature** reference embedding is created during the vendor's **registration** (step 2, before email verification) — it exists before any document is submitted, so the pipeline only ever *verifies* against it. The **logo / stamp / seal** reference is **not** stored per vendor and **not** created automatically: it is keyed by the **issuer** — `document_type` for national agencies (BIR/SEC) and `(document_type, city)` for LGUs — and is seeded only when a compliance officer **approves the first document carrying that issuer's logo** (see §4b). Document types with `issuer_scope = null` (e.g. Signed Contract) have no logo reference. Once stored, the signature reference persists for the lifetime of the vendor's account; an issuer's logo reference persists for the lifetime of the issuer entry and is updated only by an explicit re-enrollment. The legacy per-vendor `vendor_embeddings.stamp_*` columns are **superseded** by this per-issuer model.
 
 ### Global Document Catalog & "Available Documents" Storage
 
@@ -519,6 +521,8 @@ All configurable parameters that the implementing organization would set:
 | `MORPH_KERNEL_SIZE` | 2 × 2 | Kernel dimensions for morphological opening |
 | `CLASSIFICATION_CONFIDENCE_THRESHOLD` | 0.70 | Minimum ResNet-50 confidence to pass |
 | `YOLO_DETECTION_CONFIDENCE` | 0.50 | Minimum YOLOv8 detection confidence |
+| `SIGNATURE_ENROLL_DETECTION_CONFIDENCE` | 0.20 | Registration-only minimum confidence for the three-signature capture; benchmarked separately from document detection |
+| `SIGNATURE_ENROLL_DETECTION_IMGSZ` | 1280 | Registration-only YOLO inference size for thin handwritten strokes on blank paper |
 | `SIGNATURE_DISTANCE_THRESHOLD` | Empirical | Maximum Euclidean distance for signature match |
 | `STAMP_SIMILARITY_THRESHOLD` | 0.85 | Minimum cosine similarity for a logo match against the detected city's reference (85%) |
 | `RISK_WEIGHT_TEXT` | 0.20 | Weight of text validation in composite risk |

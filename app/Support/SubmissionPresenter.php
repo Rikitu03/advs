@@ -6,6 +6,7 @@ use App\Models\Submission;
 use App\Models\ValidationResult;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Maps Eloquent submissions onto the array shape the admin Volt pages render
@@ -80,6 +81,16 @@ class SubmissionPresenter
         $thresholds = config('advs.thresholds');
 
         $typeNames = self::typeNames();
+        $signatureReferenceUrl = self::signatureReferenceUrl($submission->vendor_id);
+        $logoReferenceUrls = self::logoReferenceUrls(
+            $submission->documents
+                ->pluck('validationResult.logo_reference_id')
+                ->filter()
+                ->map(fn ($id): int => (int) $id)
+                ->unique()
+                ->values()
+                ->all(),
+        );
 
         $summary['documents'] = $submission->documents->map(fn ($document): array => [
             'id' => $document->id,
@@ -92,8 +103,11 @@ class SubmissionPresenter
             'kind' => self::previewKind($document->mime_type),
         ])->values()->all();
 
-        $summary['ocr_excerpt'] = $result?->ocr_extracted_text
-            ?? 'OCR stage not yet available — no extracted text for this submission.';
+        [
+            $summary['ocr_filters'],
+            $summary['ocr_by_document'],
+            $summary['ocr_fields_by_document'],
+        ] = self::ocrByDocument($submission);
 
         $summary['flags_by_document'] = self::flagGroups($submission, $typeNames);
 
@@ -102,7 +116,7 @@ class SubmissionPresenter
         // §6 drill-down filter: one component set per document type present in
         // the submission, plus 'all' (the highest-risk document overall).
         $filters = [['key' => 'all', 'label' => 'All']];
-        $sets = ['all' => self::components($result, $thresholds)];
+        $sets = ['all' => self::components($result, $thresholds, $signatureReferenceUrl, $logoReferenceUrls)];
 
         $byRisk
             ->groupBy(fn ($document) => $document->document_type_id ?? 0)
@@ -112,9 +126,9 @@ class SubmissionPresenter
                 'result' => $group->first()?->validationResult,
             ])
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
-            ->each(function (array $type) use (&$filters, &$sets, $thresholds): void {
+            ->each(function (array $type) use (&$filters, &$sets, $thresholds, $signatureReferenceUrl, $logoReferenceUrls): void {
                 $filters[] = ['key' => $type['key'], 'label' => $type['label']];
-                $sets[$type['key']] = self::components($type['result'], $thresholds);
+                $sets[$type['key']] = self::components($type['result'], $thresholds, $signatureReferenceUrl, $logoReferenceUrls);
             });
 
         $summary['component_filters'] = $filters;
@@ -131,8 +145,12 @@ class SubmissionPresenter
      * @param  array<string, float|string>  $thresholds
      * @return array<string, array<string, mixed>>
      */
-    private static function components(?ValidationResult $result, array $thresholds): array
-    {
+    private static function components(
+        ?ValidationResult $result,
+        array $thresholds,
+        ?string $signatureReferenceUrl = null,
+        array $logoReferenceUrls = [],
+    ): array {
         $signatureSimilarity = $result?->signature_score !== null ? (int) round($result->signature_score * 100) : null;
         $stampSimilarity = $result?->stamp_score !== null ? (int) round($result->stamp_score * 100) : null;
 
@@ -154,29 +172,117 @@ class SubmissionPresenter
                     : 'Stage not yet available.',
             ],
             'signature' => [
-                'detected' => (bool) ($result?->signature_detected ?? false),
+                // 'detected' = YOLOv8 found the region (signature_bbox); 'verified' =
+                // the Siamese comparison actually ran. These differ whenever a region
+                // was found but no vendor reference is enrolled yet — don't blame the
+                // detector for a missing-reference condition (see MlPipelineService).
+                'detected' => $result !== null && $result->signature_bbox !== null,
+                'verified' => (bool) ($result?->signature_detected ?? false),
                 'similarity' => $signatureSimilarity,
                 'distance' => $result?->signature_distance !== null ? round($result->signature_distance, 3) : '—',
                 'distance_threshold' => 'empirical',
                 'pass' => (bool) ($result?->signature_passed ?? false),
+                'crop' => self::cropData($result, $result?->signature_bbox),
+                'reference_image_url' => $signatureReferenceUrl,
                 'detail' => match (true) {
                     $result === null || $result->signature_detected === null => 'Stage not yet available.',
-                    ! $result->signature_detected => 'No signature region detected.',
-                    default => 'Compared against the reference enrolled at registration.',
+                    $result->signature_bbox === null => 'No signature region detected.',
+                    $result->signature_passed !== null => 'Compared against the reference enrolled at registration.',
+                    default => 'Signature region detected, but no reference is enrolled for this vendor yet.',
                 },
             ],
             'stamp' => [
-                'detected' => (bool) ($result?->stamp_detected ?? false),
+                'detected' => $result !== null && $result->stamp_bbox !== null,
+                'verified' => (bool) ($result?->stamp_detected ?? false),
                 'similarity' => $stampSimilarity,
                 'cosine' => $result?->stamp_similarity !== null ? round($result->stamp_similarity, 3) : '—',
+                'similarity_threshold' => (int) round((float) $thresholds['stamp'] * 100),
                 'pass' => (bool) ($result?->stamp_passed ?? false),
+                'crop' => self::cropData($result, $result?->stamp_bbox),
+                'reference_image_url' => $result?->logo_reference_id === null
+                    ? null
+                    : ($logoReferenceUrls[$result->logo_reference_id] ?? null),
                 'detail' => match (true) {
                     $result === null || $result->stamp_detected === null => 'Stage not yet available.',
-                    ! $result->stamp_detected => 'No stamp/logo region detected.',
-                    default => 'Compared against the issuer reference logo.',
+                    $result->stamp_bbox === null => 'No stamp/logo region detected.',
+                    $result->stamp_passed !== null => 'Compared against the issuer reference logo.',
+                    default => 'Stamp/logo region detected, but no reference logo is on file for this issuer yet.',
                 },
             ],
         ];
+    }
+
+    /**
+     * Cropped-region preview data for a detected signature/stamp box: the
+     * authenticated document-stream URL plus the pixel box to crop to. Bbox
+     * pixel coordinates come from YOLOv8 running on the uploaded raster
+     * image, so they only line up 1:1 with a raster upload — a PDF's box is
+     * relative to its 300-DPI *rendered* page, not the PDF bytes an <img>
+     * would load, so PDFs get no crop preview (text detail only).
+     *
+     * @param  list<float>|null  $box
+     * @return array{url: string, box: list<float>}|null
+     */
+    private static function cropData(?ValidationResult $result, ?array $box): ?array
+    {
+        $document = $box !== null ? $result?->document : null;
+        if ($document === null || self::previewKind($document->mime_type) !== 'image' || ! self::validBoundingBox($box)) {
+            return null;
+        }
+
+        return [
+            'url' => route('admin.documents.show', $document->id),
+            'box' => $box,
+        ];
+    }
+
+    /**
+     * Inference output is external input; malformed boxes must not break the
+     * officer report renderer or produce invalid CSS dimensions.
+     *
+     * @param  list<float>|null  $box
+     */
+    private static function validBoundingBox(?array $box): bool
+    {
+        if ($box === null || count($box) !== 4 || ! collect($box)->every(fn ($value): bool => is_numeric($value) && is_finite((float) $value))) {
+            return false;
+        }
+
+        return (float) $box[0] >= 0.0
+            && (float) $box[1] >= 0.0
+            && (float) $box[2] > (float) $box[0]
+            && (float) $box[3] > (float) $box[1];
+    }
+
+    private static function signatureReferenceUrl(int $vendorId): ?string
+    {
+        $path = DB::table('vendor_embeddings')
+            ->where('vendor_id', $vendorId)
+            ->value('signature_image_path');
+        $path = is_string($path) ? ltrim($path, '/') : null;
+
+        return $path !== null && str_starts_with($path, 'signatures/') && Storage::disk('local')->exists($path)
+            ? route('admin.signature.show', ['vendor' => $vendorId])
+            : null;
+    }
+
+    /**
+     * @param  list<int>  $logoReferenceIds
+     * @return array<int, string>
+     */
+    private static function logoReferenceUrls(array $logoReferenceIds): array
+    {
+        if ($logoReferenceIds === []) {
+            return [];
+        }
+
+        return DB::table('logo_references')
+            ->whereIn('id', $logoReferenceIds)
+            ->pluck('reference_image_path', 'id')
+            ->map(fn ($path): ?string => is_string($path) ? ltrim($path, '/') : null)
+            ->filter(fn ($path): bool => $path !== null && str_starts_with($path, 'logo_references/') && Storage::disk('local')->exists($path))
+            ->mapWithKeys(fn ($path, $id): array => [(int) $id => route('admin.logo-references.show', ['logoReference' => $id])])
+            ->all();
     }
 
     /**
@@ -219,6 +325,115 @@ class SubmissionPresenter
     }
 
     /**
+     * Per-document OCR output for the drill-down's filter tabs, in file order —
+     * one tab per document (keyed by document id), since OCR output is
+     * intrinsically per-file, not per-type.
+     *
+     * Returns the extracted key/value rows the panel renders, plus the raw text
+     * behind them (kept for the collapsed "raw text" view, and the only thing to
+     * show for results written before `ocr_fields` existed).
+     *
+     * @return array{
+     *     0: list<array{key: string, label: string}>,
+     *     1: array<string, string>,
+     *     2: array<string, list<array<string, mixed>>>,
+     * }
+     */
+    private static function ocrByDocument(Submission $submission): array
+    {
+        $filters = [];
+        $texts = [];
+        $fields = [];
+
+        foreach ($submission->documents as $document) {
+            $key = (string) $document->id;
+            $result = $document->validationResult;
+
+            $filters[] = ['key' => $key, 'label' => $document->original_filename];
+            $texts[$key] = $result?->ocr_extracted_text
+                ?? 'OCR stage not yet available — no extracted text for this document.';
+            $fields[$key] = self::ocrFieldRows($result?->ocr_fields);
+        }
+
+        return [$filters, $texts, $fields];
+    }
+
+    /**
+     * Flatten the API's field map into ordered rows for the key/value panel.
+     * Template order is preserved (the map arrives in field-spec order), so a
+     * document type always reads the same way.
+     *
+     * @param  array<string, mixed>|null  $fields
+     * @return list<array{key: string, label: string, value: string|null, required: bool, warning: array{label: string, reasons: list<string>}|null}>
+     */
+    private static function ocrFieldRows(?array $fields): array
+    {
+        $rows = [];
+
+        foreach ($fields ?? [] as $key => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $value = $field['value'] ?? null;
+
+            $rows[] = [
+                'key' => (string) $key,
+                // The API names each field as the form itself captions it
+                // ("Registered Activity(ies)"); humanizeFieldName is the fallback
+                // for a payload written before names were sent.
+                'label' => $field['name'] ?? self::humanizeFieldName((string) $key),
+                'value' => ($value === null || $value === '') ? null : (string) $value,
+                'required' => (bool) ($field['required'] ?? false),
+                'warning' => self::fieldWarning($field),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Chip label + officer-readable reasons for one field's warning tokens, or
+     * null when the pipeline had nothing to say about the value. Tokens are
+     * raised in Python (ocr_dryrun.annotate_field_warnings) so the format
+     * patterns that judge a value live with the field specs that define it.
+     *
+     * Listed in priority order — the chip shows the first token present, the
+     * tooltip lists them all.
+     *
+     * @param  array<string, mixed>  $field
+     * @return array{label: string, reasons: list<string>}|null
+     */
+    private static function fieldWarning(array $field): ?array
+    {
+        $catalog = [
+            'format_mismatch' => ['Format', 'Value does not match the format expected for this field.'],
+            'noisy_text' => ['Noisy', 'Value contains character patterns typical of noisy OCR output.'],
+            'not_found' => ['Not found', 'This required field was not found in the document.'],
+            'low_confidence' => ['Low confidence', 'OCR read this value with low confidence.'],
+        ];
+
+        $raised = array_filter((array) ($field['warnings'] ?? []), 'is_string');
+        $tokens = array_values(array_intersect(array_keys($catalog), $raised));
+
+        if ($tokens === []) {
+            return null;
+        }
+
+        $confidence = $field['confidence'] ?? null;
+
+        return [
+            'label' => $catalog[$tokens[0]][0],
+            'reasons' => array_map(
+                fn (string $token): string => $token === 'low_confidence' && $confidence !== null
+                    ? sprintf('OCR read this value with low confidence (%d%%).', (int) round((float) $confidence))
+                    : $catalog[$token][1],
+                $tokens,
+            ),
+        ];
+    }
+
+    /**
      * Turns a machine flag token into an officer-readable phrase. Tokens already
      * written as prose (they contain a space) are left untouched.
      *
@@ -244,15 +459,28 @@ class SubmissionPresenter
     }
 
     /**
-     * Humanises a snake_case field key, preserving domain acronyms (TIN, RDO).
+     * Humanises a snake_case field key, preserving domain acronyms (TIN, RDO, OCN,
+     * TRN). A few keys don't tokenise cleanly and get a whole-key label instead.
      */
     private static function humanizeFieldName(string $field): string
     {
-        $acronyms = ['tin' => 'TIN', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID'];
+        $field = trim($field);
+
+        $overrides = [
+            'trn_no' => 'TRN',
+            'tax_types' => 'Registered Activities',
+        ];
+
+        if (isset($overrides[$field])) {
+            return $overrides[$field];
+        }
+
+        $acronyms = ['tin' => 'TIN', 'rdo' => 'RDO', 'no' => 'No', 'id' => 'ID',
+            'ocn' => 'OCN', 'trn' => 'TRN', 'psic' => 'PSIC'];
 
         $words = array_map(
             fn (string $word): string => $acronyms[$word] ?? ucfirst($word),
-            explode('_', trim($field)),
+            explode('_', $field),
         );
 
         return implode(' ', $words);

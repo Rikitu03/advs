@@ -61,7 +61,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _limit_threads(count: int) -> None:
-    """Best-effort CPU-thread cap (HF free tier — don't oversubscribe).
+    """Best-effort CPU-thread cap; ``count`` defaults to ``min(4, cpu_count)``
+    (see Settings.num_threads) so the free tier stays at 2 while the Oracle A1
+    deploy target gets its 4 — TrOCR field recognition is thread-bound
+    (measured 15.8s/crop at 2 threads vs 10.3s at 8).
 
     Env vars must be set before TF/torch initialise their thread pools, which
     happens on first model load inside the registry, i.e. after this runs.

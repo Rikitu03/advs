@@ -16,10 +16,12 @@ from fastapi import HTTPException
 
 from .compat import load_script
 from .config import Settings
+from .manifest import ArtifactManifest
 
 logger = logging.getLogger("advs.api.registry")
 
-MODEL_NAMES = ("classifier", "detector", "siamese", "stamp")
+MODEL_NAMES = ("classifier", "detector", "signature_enroll_detector", "siamese", "stamp",
+               "stamp_classifier", "rapid_detector", "trocr", "trocr_accurate")
 
 
 class ModelRegistry:
@@ -27,6 +29,7 @@ class ModelRegistry:
         self.settings = settings
         self._models: dict[str, Any] = {}
         self._status: dict[str, dict[str, Any]] = {}
+        self.manifest = ArtifactManifest(settings.manifest_path)
 
     # ------------------------------------------------------------- lifecycle
     def load_all(self) -> None:
@@ -35,18 +38,54 @@ class ModelRegistry:
             "detector": (str(self.settings.detector_path), self._load_detector),
             "siamese": (str(self.settings.siamese_path), self._load_siamese),
             "stamp": (str(self.settings.stamp_path), self._load_stamp),
+            "stamp_classifier": (str(self.settings.stamp_classifier_path),
+                                 self._load_stamp_classifier),
+            # A local snapshot directory (transformers save_pretrained()
+            # layout), not a single file, but the same "configured path must
+            # exist" gate as everything else — unset/missing means "not
+            # loaded", never a network fetch. This is what keeps existing
+            # tests (empty tmp model_dir) fast and offline.
+            # Two TrOCR recognizers, routed per template by routers/ocr.py: the
+            # fast one by default, the accurate one for the templates that
+            # measurably need it (BIR). Baking only one is a supported setup —
+            # the router falls back to whichever is loaded.
+            "trocr": (str(self.settings.trocr_path), self._load_trocr),
+            "trocr_accurate": (str(self.settings.trocr_accurate_path), self._load_trocr_accurate),
         }
         for name, (path, loader) in loaders.items():
-            self._load(name, path, loader)
+            is_dir = name in ("trocr", "trocr_accurate")
+            self._load(name, path, loader, is_dir=is_dir)
+
+        enrollment_path = self.settings.signature_enroll_detector_model_path
+        if enrollment_path is None:
+            self._status["signature_enroll_detector"] = {
+                "loaded": False,
+                "path": None,
+                "error": "not_configured",
+            }
+        else:
+            self._load(
+                "signature_enroll_detector",
+                str(enrollment_path),
+                self._load_signature_enroll_detector,
+            )
+
+        # RapidOCR bundles its own PP-OCRv4 detector ONNX weights inside the
+        # pip package — no local path to gate on. Always attempt; it's a
+        # fast (~15MB), fully offline load, the same spirit as importing any
+        # other installed dependency rather than a "trained weights" model.
+        self._load_ungated("rapid_detector", self._load_rapid_detector)
 
     def clear(self) -> None:
         self._models.clear()
         self._status.clear()
 
-    def _load(self, name: str, path: str, loader: Callable[[], Any]) -> None:
+    def _load(self, name: str, path: str, loader: Callable[[], Any], *, is_dir: bool = False) -> None:
         from pathlib import Path
 
-        if not Path(path).is_file():
+        p = Path(path)
+        exists = p.is_dir() if is_dir else p.is_file()
+        if not exists:
             self._status[name] = {"loaded": False, "path": path, "error": "weights_not_found"}
             logger.info("model %s not loaded: no weights at %s", name, path)
             return
@@ -58,9 +97,50 @@ class ModelRegistry:
             self._status[name] = {"loaded": False, "path": path, "error": str(exc)}
             logger.exception("model %s failed to load from %s", name, path)
 
+    def _load_ungated(self, name: str, loader: Callable[[], Any]) -> None:
+        """For models with no configured weight path at all (e.g. bundled
+        inside their own pip package) — still fail-forward on a load error,
+        just without a path-existence gate to check first."""
+        try:
+            self._models[name] = loader()
+            self._status[name] = {"loaded": True, "path": None, "error": None}
+            logger.info("model %s loaded (no configured path)", name)
+        except Exception as exc:
+            self._status[name] = {"loaded": False, "path": None, "error": str(exc)}
+            logger.exception("model %s failed to load", name)
+
     # --------------------------------------------------------------- access
     def status(self) -> dict[str, dict[str, Any]]:
         return self._status
+
+    def model_paths(self) -> dict[str, Any]:
+        return {
+            "classifier": self.settings.classifier_path,
+            "detector": self.settings.detector_path,
+            "siamese": self.settings.siamese_path,
+            "stamp": self.settings.stamp_path,
+            "stamp_classifier": self.settings.stamp_classifier_path,
+            "trocr": self.settings.trocr_path,
+            "trocr_accurate": self.settings.trocr_accurate_path,
+        }
+
+    def artifact_report(self) -> dict:
+        return self.manifest.report(self.model_paths(), self._status)
+
+    def readiness_errors(self) -> list[str]:
+        return self.manifest.readiness_errors(self.model_paths(), self._status)
+
+    def output_dimension(self, name: str) -> int | None:
+        model = self._models.get(name)
+        shape = getattr(model, "output_shape", None)
+        if isinstance(shape, list) and shape and isinstance(shape[0], (list, tuple)):
+            shape = shape[0]
+        if isinstance(shape, (list, tuple)) and shape:
+            try:
+                return int(shape[-1])
+            except (TypeError, ValueError):
+                pass
+        return self.manifest.output_dimension(name)
 
     def get(self, name: str) -> Any | None:
         return self._models.get(name)
@@ -95,6 +175,11 @@ class ModelRegistry:
 
         return YOLO(str(self.settings.detector_path))
 
+    def _load_signature_enroll_detector(self) -> Any:
+        from ultralytics import YOLO
+
+        return YOLO(str(self.settings.signature_enroll_detector_model_path))
+
     def _load_siamese(self) -> Any:
         # SIAMESE_MODEL_PATH defaults to the encoder (siamese_encoder.h5), not
         # the twin-tower siamese_signature.h5 — the API only computes embeddings.
@@ -106,3 +191,25 @@ class ModelRegistry:
         import tensorflow as tf
 
         return tf.keras.models.load_model(self.settings.stamp_path)
+
+    def _load_stamp_classifier(self) -> Any:
+        # Trusted artefact: produced and consumed only by ADVS's own code
+        # (train_stamp.py). Never unpickle a stamp_classifier.pkl from an
+        # untrusted source.
+        import pickle
+
+        with open(self.settings.stamp_classifier_path, "rb") as fh:
+            return pickle.load(fh)
+
+    def _load_rapid_detector(self) -> Any:
+        from rapidocr_onnxruntime import RapidOCR
+
+        return RapidOCR()
+
+    def _load_trocr(self) -> Any:
+        # roi_field_ocr owns TrOCR loading for both layouts (torch snapshot vs
+        # ONNX export) — one place decides which runtime a baked dir needs.
+        return load_script("roi_field_ocr").load_trocr(self.settings.trocr_path)
+
+    def _load_trocr_accurate(self) -> Any:
+        return load_script("roi_field_ocr").load_trocr(self.settings.trocr_accurate_path)

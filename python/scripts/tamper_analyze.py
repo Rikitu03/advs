@@ -20,7 +20,8 @@ Input payload:
       "fields":        {"tin": "...", ...},       # optional extracted fields
       "issue_date":    "2019-01-14",              # optional printed issue date (metadata)
       "weights":       {"ela": 0.25, ...},        # optional blend override
-      "tamper_threshold": 0.50                    # optional gate override
+      "tamper_threshold": 0.50,                   # optional gate override
+      "hard_confidence": 0.80                     # optional hard-flag gate
     }
 
 Output result: the ``aggregate()`` dict — ``tamper_score`` (0 clean .. 1 tampered),
@@ -42,7 +43,7 @@ PY_ROOT = Path(__file__).resolve().parents[1]
 if str(PY_ROOT) not in sys.path:
     sys.path.insert(0, str(PY_ROOT))
 
-from forensics import DEFAULT_TAMPER_THRESHOLD, aggregate  # noqa: E402
+from forensics import DEFAULT_HARD_CONFIDENCE, DEFAULT_TAMPER_THRESHOLD, aggregate  # noqa: E402
 from forensics import copy_move, cross_reference, ela, font_consistency, metadata  # noqa: E402
 
 
@@ -67,6 +68,7 @@ def run(payload: dict) -> dict:
         techniques,
         weights=payload.get("weights"),
         tamper_threshold=float(payload.get("tamper_threshold", DEFAULT_TAMPER_THRESHOLD)),
+        hard_confidence=float(payload.get("hard_confidence", DEFAULT_HARD_CONFIDENCE)),
     )
 
 

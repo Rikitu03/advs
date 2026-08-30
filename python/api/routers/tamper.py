@@ -20,7 +20,15 @@ from ..uploads import is_pdf, load_pages, save_upload
 
 router = APIRouter()
 
-CONTEXT_KEYS = ("ocr_text", "ocr_words", "fields", "issue_date", "weights", "tamper_threshold")
+CONTEXT_KEYS = (
+    "ocr_text",
+    "ocr_words",
+    "fields",
+    "issue_date",
+    "weights",
+    "tamper_threshold",
+    "hard_confidence",
+)
 
 
 def run_tamper_stage(original: Path, page_images: list[Path], context: dict) -> dict:

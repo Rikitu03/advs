@@ -3,13 +3,30 @@
 namespace Tests\Feature\Document;
 
 use App\Services\Document\RiskScoreService;
+use App\Services\SystemSettingsService;
 use Tests\TestCase;
 
 class RiskScoreServiceTest extends TestCase
 {
     private function service(): RiskScoreService
     {
-        return new RiskScoreService;
+        return new RiskScoreService($this->createMock(SystemSettingsService::class));
+    }
+
+    /** @return array<string, int|float> */
+    private function settings(): array
+    {
+        return [
+            'RISK_WEIGHT_TEXT' => 0.20,
+            'RISK_WEIGHT_CLASSIFICATION' => 0.20,
+            'RISK_WEIGHT_SIGNATURE' => 0.20,
+            'RISK_WEIGHT_STAMP' => 0.20,
+            'RISK_WEIGHT_TAMPER' => 0.20,
+            'MISSING_COMPONENT_PENALTY' => 15,
+            'HIGH_RISK_THRESHOLD' => 61,
+            'MEDIUM_RISK_THRESHOLD' => 31,
+            'TAMPER_HARD_THRESHOLD' => 0.80,
+        ];
     }
 
     public function test_clean_document_scores_low(): void
@@ -21,7 +38,7 @@ class RiskScoreServiceTest extends TestCase
             'stamp' => 0.95,
             'tamper_authenticity' => 0.97,
             'tamper_confidence' => 0.05,
-        ]);
+        ], $this->settings());
 
         $this->assertSame('low', $result['level']);
         $this->assertFalse($result['hard_override']);
@@ -39,7 +56,7 @@ class RiskScoreServiceTest extends TestCase
             'stamp' => 0.9,
             'tamper_authenticity' => 1.0,
             'tamper_confidence' => 0.0,
-        ]);
+        ], $this->settings());
 
         $this->assertEqualsWithDelta(18.0, $result['score'], 0.01);
         $this->assertEqualsWithDelta(0.0, $result['penalties'], 0.01);
@@ -54,7 +71,7 @@ class RiskScoreServiceTest extends TestCase
             'stamp' => 1.0,
             'tamper_authenticity' => 1.0,
             'tamper_confidence' => 0.0,
-        ]);
+        ], $this->settings());
 
         // Blend is 0 (all present components clean); only the missing penalty remains.
         $this->assertEqualsWithDelta(15.0, $result['score'], 0.01);
@@ -70,7 +87,7 @@ class RiskScoreServiceTest extends TestCase
             'stamp' => 0.99,
             'tamper_authenticity' => 0.40,
             'tamper_confidence' => 0.85, // >= 0.80 hard threshold
-        ]);
+        ], $this->settings());
 
         $this->assertTrue($result['hard_override']);
         $this->assertSame('high', $result['level']);
@@ -88,7 +105,7 @@ class RiskScoreServiceTest extends TestCase
             'stamp' => 1.0,
             'tamper_authenticity' => null,
             'tamper_confidence' => 0.0,
-        ]);
+        ], $this->settings());
 
         $this->assertEqualsWithDelta(0.0, $result['score'], 0.01);
         $this->assertArrayNotHasKey('tamper', $result['breakdown']);

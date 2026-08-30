@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Jobs\EnrollReferenceJob;
 use App\Models\Document;
 use App\Models\Notification;
 use App\Models\Submission;
@@ -10,6 +11,7 @@ use App\Models\ValidationResult;
 use App\Models\Vendor;
 use Database\Seeders\DocumentTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -130,6 +132,54 @@ class OfficerWorkflowTest extends TestCase
         $this->assertStringContainsString('Garcia Textiles', $officerNotification->body);
     }
 
+    public function test_approval_queues_issuer_logo_reference_seeding(): void
+    {
+        Bus::fake();
+        $this->seed(DocumentTypeSeeder::class);
+
+        $submission = $this->makePendingSubmission('Garcia Textiles', 22.0, 'low');
+        $typeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $typed = $submission->documents()->firstOrFail();
+        $typed->update(['document_type_id' => $typeId]);
+        // A document with no resolved type has no issuer to key a reference by.
+        $untyped = Document::factory()->for($submission)->create([
+            'vendor_id' => $submission->vendor_id,
+            'document_type_id' => null,
+        ]);
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'approve')
+            ->call('submitDecision');
+
+        // §5 Stage 4b: an approved document's logo "becomes the reference".
+        Bus::assertDispatched(
+            EnrollReferenceJob::class,
+            fn (EnrollReferenceJob $job): bool => $job->document->is($typed) && $job->officerId === $this->officer->id,
+        );
+        Bus::assertNotDispatched(
+            EnrollReferenceJob::class,
+            fn (EnrollReferenceJob $job): bool => $job->document->is($untyped),
+        );
+    }
+
+    public function test_resubmission_request_does_not_seed_any_reference(): void
+    {
+        Bus::fake();
+        $submission = $this->makePendingSubmission('Tan Imports', 84.0, 'high');
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->call('startDecision', 'resubmit')
+            ->set('comments', 'Please resubmit corrected documents.')
+            ->call('submitDecision');
+
+        // Only an APPROVED document may become an issuer's reference.
+        Bus::assertNotDispatched(EnrollReferenceJob::class);
+    }
+
     public function test_risk_breakdown_can_be_filtered_by_document_type(): void
     {
         $this->seed(DocumentTypeSeeder::class);
@@ -183,6 +233,88 @@ class OfficerWorkflowTest extends TestCase
 
         // Unknown filter keys are refused.
         $component->call('setComponentFilter', 'type-999999')->assertStatus(400);
+    }
+
+    public function test_ocr_text_panel_can_be_filtered_by_document(): void
+    {
+        $submission = $this->makePendingSubmission('Reyes Manufacturing', 40.0, 'medium');
+        $vendor = $submission->vendor;
+
+        // Replace the helper's untyped document with two distinct-text documents.
+        $submission->documents()->delete();
+
+        $bir = Document::factory()->for($submission)->for($vendor)->create([
+            'original_filename' => 'bir-certificate.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $bir->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE CERTIFICATE',
+        ]);
+
+        $permit = Document::factory()->for($submission)->for($vendor)->create([
+            'original_filename' => 'business-permit.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $permit->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'CITY OF DIGOS BUSINESS PERMIT',
+        ]);
+
+        $this->actingAs($this->officer);
+
+        // Default selection is the first document in file order.
+        $component = Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            ->assertSet('ocrDocumentFilter', (string) $bir->id)
+            ->assertSee('BUREAU OF INTERNAL REVENUE CERTIFICATE')
+            ->assertDontSee('CITY OF DIGOS BUSINESS PERMIT');
+
+        // Filtering to the other document swaps in its own OCR text.
+        $component->call('setOcrDocumentFilter', (string) $permit->id)
+            ->assertSee('CITY OF DIGOS BUSINESS PERMIT')
+            ->assertDontSee('BUREAU OF INTERNAL REVENUE CERTIFICATE');
+
+        // Unknown document ids are refused.
+        $component->call('setOcrDocumentFilter', '999999')->assertStatus(400);
+    }
+
+    public function test_ocr_panel_renders_extracted_field_pairs_and_flags_suspect_values(): void
+    {
+        $submission = $this->makePendingSubmission('Reyes Manufacturing', 40.0, 'medium');
+        $submission->documents()->delete();
+
+        $document = Document::factory()->for($submission)->for($submission->vendor)->create([
+            'original_filename' => 'bir-certificate.png',
+            'processing_status' => Document::STATUS_COMPLETED,
+        ]);
+        ValidationResult::factory()->create([
+            'document_id' => $document->id,
+            'submission_id' => $submission->id,
+            'ocr_extracted_text' => 'BUREAU OF INTERNAL REVENUE',
+            'ocr_fields' => [
+                'tin' => ['name' => 'TIN', 'value' => '009-028-463-000', 'required' => true,
+                    'matched' => true, 'confidence' => 96.0, 'warnings' => []],
+                'trade_name' => ['name' => 'Trade Name', 'value' => 'EE Bincn', 'required' => true,
+                    'matched' => true, 'confidence' => 88.0, 'warnings' => ['noisy_text']],
+            ],
+        ]);
+
+        $this->actingAs($this->officer);
+
+        Volt::test('admin.submissions.show', ['submission' => (string) $submission->id])
+            // Label + value pairs replace the raw dump as the panel's content.
+            ->assertSee('TIN')
+            ->assertSee('009-028-463-000')
+            ->assertSee('Trade Name')
+            ->assertSee('EE Bincn')
+            // The suspect value carries a warning chip; the clean one does not.
+            ->assertSee('Noisy')
+            ->assertSee('Value contains character patterns typical of noisy OCR output.')
+            // The engine name is no longer asserted anywhere in the panel — values
+            // can come from Tesseract or the ROI+TrOCR pass.
+            ->assertDontSee('PyTesseract');
     }
 
     public function test_officer_can_request_resubmission_with_a_reason(): void

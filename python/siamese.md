@@ -5,9 +5,9 @@
 > model. This is the **M4** track in the phase plans.
 >
 > Read alongside:
-> - **What Stage 4a does** — [`../ADVS_System_Reference.md`](../ADVS_System_Reference.md) §5 Stage 4a, §8 (storage), §9 (`SIGNATURE_DISTANCE_THRESHOLD`, `RISK_WEIGHT_SIGNATURE`).
+> - **What Stage 4a does** — [`../docs/ADVS_REFERENCE.md`](../docs/ADVS_REFERENCE.md) §5 Stage 4a, §8 (storage), §9 (`SIGNATURE_DISTANCE_THRESHOLD`, `RISK_WEIGHT_SIGNATURE`).
 > - **The Python lifecycle** — [`DEVELOPMENT_PHASES.md`](DEVELOPMENT_PHASES.md) Phase 6 (Siamese) — this doc expands it.
-> - **How we build** — [`../CLAUDE.md`](../CLAUDE.md) §6 (Python I/O contract) · Phase 6.
+> - **How we build** — [`../README.md`](../README.md) and [`README.md`](README.md).
 > - **M-phase tracking** — [`../docs/phases/MODEL_TRAINING_PHASES.md`](../docs/phases/MODEL_TRAINING_PHASES.md) (M4).
 
 **Legend:** ✅ done · 🟡 partial · ⚠️ present but inadequate · ❌ not started · ⏸ deferred.
@@ -42,7 +42,7 @@ the three artefacts into `python/models/`.
 **same vendor** whose reference signature was captured at registration — i.e. forgery / impersonation
 detection, not signature *recognition*.
 
-**Pipeline placement — Stage 4a** ([reference §5 Stage 4a](../ADVS_System_Reference.md)):
+**Pipeline placement — Stage 4a** ([reference §5 Stage 4a](../docs/ADVS_REFERENCE.md)):
 
 ```
 Stage 4 (YOLOv8) detects a `signature` crop
@@ -214,7 +214,7 @@ Both routes return **503 `model_not_loaded`** until the weights exist. Preproces
 
 ## 8. Named inference contract (Laravel handoff) — ❌ not built yet
 
-Phase 10 must deliver [`signature_verify.py`](scripts/) matching the [CLAUDE.md §6](../CLAUDE.md)
+The FastAPI signature endpoints must preserve the serving contract documented in [`README.md`](README.md)
 `--input <json>` / `--output <json>` CLI contract (the pipeline calls the CLI, not the HTTP API,
 per the current design):
 

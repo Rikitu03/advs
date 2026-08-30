@@ -7,4 +7,4 @@ DB and are passed in requests; the composite risk score (Stage 5) is computed
 by Laravel's RiskScoreService, never here.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

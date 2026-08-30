@@ -6,7 +6,7 @@
 >
 > Context: [`../DEVELOPMENT_PHASES.md`](../DEVELOPMENT_PHASES.md) (Phase 1 taxonomy lock-in, Phase 2
 > dataset generation) · [`../../docs/CLIENT_INTERVIEW_GAP_PLAN.md`](../../docs/CLIENT_INTERVIEW_GAP_PLAN.md)
-> (Negofood food-business / vendor scope) · [`../../ADVS_System_Reference.md`](../../ADVS_System_Reference.md)
+> (Negofood food-business / vendor scope) · [`../../docs/ADVS_REFERENCE.md`](../../docs/ADVS_REFERENCE.md)
 > (Stage 3 + §9 `CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.70`).
 
 ---

@@ -9,9 +9,9 @@
 > - UI functions → [UI_FUNCTION_PHASES.md](./UI_FUNCTION_PHASES.md)
 >
 > Sources this plan integrates:
-> - **Model architectures & I/O contracts** — [ADVS_System_Reference.md](../../ADVS_System_Reference.md) (Stages 3, 4, 4a, 4b, T; §8 model files; §9 thresholds).
-> - **Training spec** — [training_script.md](../../training_script.md) (the single end-to-end training script brief).
-> - **How we build (Python)** — [CLAUDE.md §6](../../CLAUDE.md) (script I/O contract, logging) and §5–§6 phases.
+> - **Model architectures & I/O contracts** — [ADVS reference](../ADVS_REFERENCE.md) (Stages 3, 4, 4a, 4b, T; §8 model files; §9 thresholds).
+> - **Historical training spec** — [archived training brief](../archive/TRAINING_SCRIPT_LEGACY.md).
+> - **How we build (Python)** — [README.md](../../README.md), [AGENTS.md](../../AGENTS.md), and [python/README.md](../../python/README.md).
 > - **New client direction** — [CLIENT_INTERVIEW_GAP_PLAN.md](../CLIENT_INTERVIEW_GAP_PLAN.md): the food-business domain changes the **document-type classes**; the compliance features (expiry/checklist/renewal) need **no new ML model** (field extraction is OCR + rules).
 > - **Existing dataset plans** — [bir-synthetic-dataset-generator](../superpowers/plans/2026-06-19-bir-synthetic-dataset-generator.md) and [business-permit-classifier-dataset](../superpowers/plans/2026-06-28-business-permit-classifier-dataset.md).
 
@@ -62,7 +62,7 @@ The interview changes **what the classifier must recognize**, not the model zoo:
 | 4 | **EfficientNet-B0** | Stamp/logo feature extraction + tamper texture | Stage 4b — `stamp_verify.py` | `efficientnet_stamp.h5` + `stamp_classifier.pkl` / `stamp_threshold.txt` |
 | 5 | **Tamper fusion** *(planned)* | Fuse the 5 Stage-T forensic signals into one authenticity score | Stage T — `tamper_analyze.py` | *(deterministic blend today; ML model is a future phase)* |
 
-> Thresholds live in [ADVS_System_Reference.md §9](../../ADVS_System_Reference.md) and are **configurable**,
+> Thresholds live in [ADVS reference §9](../ADVS_REFERENCE.md) and are **configurable**,
 > not hard-coded magic numbers — e.g. `CLASSIFICATION_CONFIDENCE_THRESHOLD=0.70`,
 > `STAMP_SIMILARITY_THRESHOLD=0.85`, `YOLO_DETECTION_CONFIDENCE=0.50`, `SIGNATURE_DISTANCE_THRESHOLD`
 > (empirical, set by EER). Training **produces** the empirical ones; the rest are operator-set.
@@ -76,7 +76,7 @@ The interview changes **what the classifier must recognize**, not the model zoo:
 | Synthetic dataset generators | 🟡 Partial | BIR (Form 2303) + Business Permit generators implemented & unit-tested; emit clean + Augraphy-degraded variants with a dedup manifest. Food-domain types not yet generated. |
 | OCR dry-run / field specs | 🟡 Partial | `ocr_dryrun.py` with `FIELD_SPECS` regexes exists (validated harness); not yet the production `ocr_runner.py`. |
 | Stage-T forensics | ✅ Built (deterministic) | `tamper_analyze.py` over `python/forensics`; weighted blend of 5 techniques; ML fusion is the planned next step. |
-| Training scripts | 🟡 Partial | `train_classifier.py` present; full multi-model training per [training_script.md](../../training_script.md) not consolidated. |
+| Training scripts | 🟡 Partial | Model-specific trainers exist; packaging and evaluation remain tracked in this document. |
 | Named inference contracts | ❌ Missing | `preprocess.py`, `ocr_runner.py`, `classify_document.py`, `signature_verify.py`, `stamp_verify.py`, `enroll_reference.py` (the orchestrator expects these — see pipeline track P0). |
 | Trained weights | ❌ Not present | gitignored; must be produced by these phases or obtained from the team drive. |
 
@@ -93,7 +93,7 @@ the DB `document_types` codes, and `issuer_scope` all agree.
   `financial_statement`, `fake`, …). There is **one** name per class — no phantom folders (a prior bug
   pointed a generator at a non-existent `business_registration`; the canonical code is `business_permit`).
 - Confirm each class's `issuer_scope` and `requires_expiry` match Phase P1's `DocumentTypeSeeder`.
-- Confirm the detection/signature/stamp layouts from [training_script.md](../../training_script.md):
+- Confirm the detection/signature/stamp layouts from the [archived training brief](../archive/TRAINING_SCRIPT_LEGACY.md):
   `data/detection/{images,labels}` (YOLO txt, class 0=signature, 1=stamp), `data/signatures/raw/<vendor>`,
   `data/stamps/{genuine,forged}`.
 
@@ -129,7 +129,7 @@ data dirs). Generator unit tests green.
 
 ## Phase M2 — ResNet-50 document classifier
 
-**Goal:** Train the multi-class authenticity/type classifier per the [training_script.md](../../training_script.md) spec.
+**Goal:** Train the multi-class authenticity/type classifier per the current dataset and API contract.
 
 **Tasks:**
 - 512×512 RGB input via `image_dataset_from_directory`; in-pipeline augmentation (flip, ±10° rotation, ±10% zoom).
@@ -210,7 +210,7 @@ the wet-ink-vs-reproduction tamper texture check.
 ## Phase M6 — Named inference contracts (handoff to the pipeline)
 
 **Goal:** Deliver the exact CLI scripts the Laravel orchestrator calls, matching the
-[CLAUDE.md §6](../../CLAUDE.md) I/O contract — this is the seam the pipeline track (P0/P3) consumes.
+[python/README.md](../../python/README.md) API contract — this is the integration consumed by the pipeline track.
 
 **Tasks — implement each as `--input <json>`/`--output <json>`, exit 0 / non-zero, errors to stderr:**
 - `preprocess.py` — grayscale → binarize(150) → morph-open(2×2) → invert → save PNG.
@@ -224,7 +224,7 @@ the wet-ink-vs-reproduction tamper texture check.
 - Singleton model loading in `utils/model_loader.py` (load `.h5`/`.pt` once per process).
 
 **Definition of Done:** `pytest python/tests/ -v` green across all five+ contracts; manual runs match the
-contract examples in [CLAUDE.md §6](../../CLAUDE.md); the pipeline track can drive a live document through
+contract examples in [python/README.md](../../python/README.md); the pipeline track can drive a live document through
 all stages.
 
 ---

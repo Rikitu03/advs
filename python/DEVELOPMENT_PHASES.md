@@ -7,9 +7,9 @@
 > their own plans (linked below); this doc owns everything Python.
 >
 > Read alongside:
-> - **What the system does** — [`../ADVS_System_Reference.md`](../ADVS_System_Reference.md) (Stages 1–T, §9 thresholds, §8 model files).
-> - **How we build** — [`../CLAUDE.md`](../CLAUDE.md) (§6 Python integration & I/O contract).
-> - **Training brief** — [`../training_script.md`](../training_script.md).
+> - **What the system does** — [`../docs/ADVS_REFERENCE.md`](../docs/ADVS_REFERENCE.md) (Stages 1–T, §9 thresholds, §8 model files).
+> - **How we build** — [`../README.md`](../README.md) and [`../AGENTS.md`](../AGENTS.md).
+> - **Historical training brief** — [`../docs/archive/TRAINING_SCRIPT_LEGACY.md`](../docs/archive/TRAINING_SCRIPT_LEGACY.md).
 > - **Concern-split phase plans** — [`../docs/phases/MODEL_TRAINING_PHASES.md`](../docs/phases/MODEL_TRAINING_PHASES.md) (the M-phases this doc expands), [`../docs/phases/PIPELINE_INTEGRATION_PHASES.md`](../docs/phases/PIPELINE_INTEGRATION_PHASES.md), [`../docs/phases/UI_FUNCTION_PHASES.md`](../docs/phases/UI_FUNCTION_PHASES.md).
 > - **Client direction** — [`../docs/CLIENT_INTERVIEW_GAP_PLAN.md`](../docs/CLIENT_INTERVIEW_GAP_PLAN.md) (Negofood Solution, 2026-06-29): the food-business interview that **expanded the document-type taxonomy** — the dominant driver of the remaining dataset work.
 
@@ -210,7 +210,7 @@ gitignored (`git status --short` clean for data dirs); generator tests green.
 
 ## Phase 4 — ResNet-50 document classifier ❌ · (M2)
 
-**Goal:** Train the multi-class type/authenticity classifier ([scripts/train_classifier.py](scripts/train_classifier.py), [training_script.md §1](../training_script.md)).
+**Goal:** Train the multi-class type/authenticity classifier ([scripts/train_classifier.py](scripts/train_classifier.py), [historical training brief §1](../docs/archive/TRAINING_SCRIPT_LEGACY.md)).
 **Tasks:** 512×512 input; augment (flip, ±10° rotate, ±10% zoom); frozen-base phase 1 (`Adam 1e-4`, ≤20
 epochs) → unfreeze last 30 layers phase 2 (`Adam 1e-5`, ≤10 epochs); class weights for imbalance;
 callbacks (checkpoint/early-stop/reduce-LR); save `resnet50_authenticity.h5` + `class_names.json`.
@@ -294,7 +294,7 @@ fallback and preserve the `hard_flag` override (`TAMPER_HARD_THRESHOLD`).
 
 ## Phase 10 — Named inference contracts (Laravel handoff) ❌ · (M6)
 
-**Goal:** Deliver the exact CLI scripts the orchestrator calls, matching the [CLAUDE.md §6](../CLAUDE.md)
+**Goal:** Maintain inference interfaces that match the current FastAPI contract in [README.md](README.md)
 `--input <json>` / `--output <json>` contract (exit 0 / non-zero, errors → stderr). **This is the seam
 that turns trained models into a working pipeline.**
 **Build:**
@@ -306,7 +306,7 @@ that turns trained models into a working pipeline.**
 - `stamp_verify.py` — YOLO crop → EfficientNet → tamper + issuer lookup → `{match, similarity_score}` / reason flags.
 - `enroll_reference.py` — seed an issuer reference → `{vector_path}`.
 - `utils/model_loader.py` — load each `.h5`/`.pt` **once per process** (singleton).
-**DoD:** `pytest python/tests/ -v` green across all six; manual runs match the [CLAUDE.md §6](../CLAUDE.md)
+**DoD:** `pytest python/tests/ -v` is green; manual runs match the [FastAPI contract](README.md)
 examples; pipeline Phase P0/P3 can drive a live document end-to-end.
 
 ---

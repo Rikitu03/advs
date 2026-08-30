@@ -100,12 +100,38 @@ return [
         'token' => env('ML_API_TOKEN'),
 
         // ML inference on CPU is slow; give the request room, fail forward after.
-        'timeout' => (int) env('ML_API_TIMEOUT', 180),
+        // 300, not 180: Stage 2's ROI+TrOCR field recognition dominates the call
+        // on a BIR page — measured 203s for OCR alone (11 field crops on the
+        // accurate recognizer) before classification, detection, verification
+        // and forensics are added. At 180 that page timed out, which blanked
+        // BOTH Stage 2 and Stage 3 in the officer drill-down. The API's own
+        // ROI_BUDGET_SECONDS=210 is what actually bounds the work; this is the
+        // outer limit that must sit above it.
+        'timeout' => (int) env('ML_API_TIMEOUT', 300),
         'connect_timeout' => (int) env('ML_API_CONNECT_TIMEOUT', 10),
-        'retries' => (int) env('ML_API_RETRIES', 2),
+        'retries' => (int) env('ML_API_RETRIES', 1),
 
-        // OCR field template the API applies (bir | none).
-        'template' => env('ML_API_TEMPLATE', 'bir'),
+        // Fallback OCR field template for document types with no dedicated
+        // template (bir | business_permit | dti | none). The three vendor-
+        // submittable types are routed per-type in MlPipelineService::ocrTemplateFor().
+        'template' => env('ML_API_TEMPLATE', 'none'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Registration signature enrollment (§5 Stage 4a — captured at sign-up)
+    |--------------------------------------------------------------------------
+    |
+    | The vendor uploads one photo of THREE signatures on bond paper. The ML API
+    | (POST {ml.base_url}{endpoint}) detects and embeds them; SignatureEnrollmentService
+    | applies these gates: exactly `expected_count` signatures, mean pairwise cosine
+    | >= `consistency_threshold`, and no forensic hard-flag (edited / pasted on top).
+    */
+
+    'signature' => [
+        'enroll_endpoint' => env('ML_API_SIGNATURE_ENROLL_ENDPOINT', '/v1/signature/enroll'),
+        'expected_count' => (int) env('SIGNATURE_ENROLL_COUNT', 3),
+        'consistency_threshold' => (float) env('SIGNATURE_CONSISTENCY_THRESHOLD', 0.80),
     ],
 
 ];

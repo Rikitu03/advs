@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
@@ -97,6 +98,18 @@ class Document extends Model
     public function tamperAnalysis(): HasOne
     {
         return $this->hasOne(TamperAnalysis::class);
+    }
+
+    /** @return HasMany<PipelineRun, $this> */
+    public function pipelineRuns(): HasMany
+    {
+        return $this->hasMany(PipelineRun::class);
+    }
+
+    /** @return HasMany<PipelinePageResult, $this> */
+    public function pipelinePageResults(): HasMany
+    {
+        return $this->hasMany(PipelinePageResult::class);
     }
 
     /**

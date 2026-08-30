@@ -69,6 +69,18 @@ class Submission extends Model
         return $this->hasMany(Document::class);
     }
 
+    /** @return HasMany<PipelineRun, $this> */
+    public function pipelineRuns(): HasMany
+    {
+        return $this->hasMany(PipelineRun::class);
+    }
+
+    /** @return HasMany<PipelinePageResult, $this> */
+    public function pipelinePageResults(): HasMany
+    {
+        return $this->hasMany(PipelinePageResult::class);
+    }
+
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
