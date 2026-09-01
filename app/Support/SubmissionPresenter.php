@@ -94,7 +94,13 @@ class SubmissionPresenter
      */
     public static function detail(Submission $submission): array
     {
-        $submission->loadMissing(['vendor.user', 'reviewer', 'documents.validationResult', 'documents.tamperAnalysis']);
+        $submission->loadMissing([
+            'vendor.user',
+            'vendor.representative',
+            'reviewer',
+            'documents.validationResult',
+            'documents.tamperAnalysis',
+        ]);
 
         $summary = self::summary($submission);
 
@@ -607,28 +613,7 @@ class SubmissionPresenter
                 ->all();
         }
 
-        $registrationMap = [
-            'registered_name' => ['company_name'],
-            'business_name' => ['company_name', 'trade_name'],
-            'trade_name' => ['trade_name'],
-            'tin' => ['tin'],
-            'ocn' => ['registration_number'],
-            'certificate_no' => ['dti_registration_number', 'registration_number'],
-            'trn_no' => ['dti_registration_number'],
-            'dti_registration_number' => ['dti_registration_number'],
-            'sec_registration_number' => ['sec_registration_number'],
-            'permit_no' => ['business_permit_number'],
-            'business_permit_number' => ['business_permit_number'],
-            'registration_number' => ['registration_number'],
-            'name_of_proprietor' => ['company_name'],
-            'business_owner' => ['company_name'],
-            'business_location' => ['business_address'],
-            'business_address' => ['business_address'],
-            'registered_address' => ['business_address'],
-            'kind_of_business' => ['nature_of_business'],
-            'nature_of_business' => ['nature_of_business'],
-            'city_issued' => ['business_city'],
-        ];
+        $candidateResolver = new OcrVendorCandidateResolver;
 
         foreach ($fields ?? [] as $key => $field) {
             if (! is_array($field)) {
@@ -639,18 +624,14 @@ class SubmissionPresenter
             }
 
             $value = $field['value'] ?? null;
-            $registrationKeys = $registrationMap[(string) $key] ?? [];
-            $registrationValues = collect($registrationKeys)
-                ->mapWithKeys(fn (string $registrationKey): array => [$registrationKey => $vendor?->getAttribute($registrationKey)])
-                ->filter(fn (?string $registrationValue): bool => $registrationValue !== null && trim($registrationValue) !== '')
-                ->all();
-            $comparison = $value === null || $value === '' || $registrationKeys === [] || $registrationValues === []
+            $candidates = $candidateResolver->resolve((string) $key, $vendor);
+            $comparison = $value === null || $value === '' || $candidates === []
                 ? null
-                : collect($registrationValues)->contains(
-                    fn (string $registrationValue, string $registrationKey): bool => OcrVendorMatchScore::compare(
+                : collect($candidates)->contains(
+                    fn (array $candidate): bool => OcrVendorMatchScore::compare(
                         $value === null ? null : (string) $value,
-                        $registrationValue,
-                        $registrationKey === 'business_address'
+                        $candidate['value'],
+                        $candidate['is_address'],
                     ) === true,
                 );
 
@@ -663,13 +644,13 @@ class SubmissionPresenter
                     ? 'Transaction Reference Number (TRN)'
                     : ($field['name'] ?? self::humanizeFieldName((string) $key)),
                 'value' => ($value === null || $value === '') ? null : (string) $value,
-                'registration_key' => $registrationKeys === [] ? null : implode('|', $registrationKeys),
-                'registration_label' => $registrationKeys === []
+                'registration_key' => $candidates === [] ? null : implode('|', array_column($candidates, 'key')),
+                'registration_label' => $candidates === []
                     ? null
-                    : implode(' / ', array_map(self::humanizeFieldName(...), $registrationKeys)),
-                'registration_value' => $registrationValues === []
+                    : implode(' / ', array_values(array_unique(array_column($candidates, 'label')))),
+                'registration_value' => $candidates === []
                     ? null
-                    : implode(' / ', $registrationValues),
+                    : implode(' / ', array_values(array_unique(array_column($candidates, 'value')))),
                 'comparison' => $comparison,
                 'required' => (bool) ($field['required'] ?? false),
                 'warning' => self::fieldWarning($field),
