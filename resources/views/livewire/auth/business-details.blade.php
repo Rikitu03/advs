@@ -17,8 +17,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
     public string $business_entity_type = '';
     public string $tin = '';
     public string $dti_registration_number = '';
-    public string $sec_registration_number = '';
-    public string $business_permit_number = '';
     public string $nature_of_business = '';
     public string $business_street = '';
     public string $business_barangay = '';
@@ -40,11 +38,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
         return Vendor::entityRequiresDti($this->business_entity_type);
     }
 
-    public function requiresSec(): bool
-    {
-        return Vendor::entityRequiresSec($this->business_entity_type);
-    }
-
     /**
      * @return array<string, array<int, mixed>>
      */
@@ -56,8 +49,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
             'business_entity_type' => ['required', Rule::in(array_keys(Vendor::BUSINESS_ENTITY_TYPES))],
             'tin' => ['required', 'string', 'max:20', $this->tinRule()],
             'dti_registration_number' => ['nullable', 'required_if:business_entity_type,sole_proprietorship', 'string', 'max:50', $this->registrationNumberRule()],
-            'sec_registration_number' => ['nullable', 'required_if:business_entity_type,partnership,corporation', 'string', 'max:50', $this->registrationNumberRule()],
-            'business_permit_number' => ['required', 'string', 'max:50'],
             'nature_of_business' => ['required', 'string', 'max:150'],
             'business_street' => ['required', 'string', 'max:255'],
             'business_barangay' => ['required', 'string', 'max:120'],
@@ -87,8 +78,8 @@ new #[Layout('components.layouts.auth')] class extends Component {
     }
 
     /**
-     * Closure rule: validate a DTI/SEC certificate number's format, but only when
-     * a value was supplied (the field is conditional on entity type).
+     * Validate a DTI certificate number's format when the sole-proprietorship
+     * registration field is populated.
      */
     protected function registrationNumberRule(): \Closure
     {
@@ -137,11 +128,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 <flux:input wire:model="dti_registration_number" :label="__('DTI Registration Number')" placeholder="e.g. 12345678" required />
             @endif
 
-            @if ($this->requiresSec())
-                <flux:input wire:model="sec_registration_number" :label="__('SEC Registration Number')" placeholder="e.g. CS2001234567" required />
-            @endif
-
-            <flux:input wire:model="business_permit_number" :label="__('Business Permit Number')" placeholder="e.g. BP-2024-000123" required />
             <flux:input wire:model="nature_of_business" :label="__('Nature / line of business')" placeholder="e.g. Freight forwarding and logistics" required />
 
             <flux:heading size="sm" class="mt-2">{{ __('Business address') }}</flux:heading>
