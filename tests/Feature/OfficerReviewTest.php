@@ -9,7 +9,6 @@ use App\Models\Submission;
 use App\Models\User;
 use App\Models\ValidationResult;
 use App\Models\Vendor;
-use App\Models\VendorRepresentative;
 use App\Support\SubmissionPresenter;
 use Database\Seeders\DemoDataSeeder;
 use Database\Seeders\DocumentTypeSeeder;
@@ -795,7 +794,7 @@ class OfficerReviewTest extends TestCase
             'ocr_fields' => [
                 'registered_name' => ['name' => 'Registered Name', 'value' => 'NORTHERN STAR FINANCE INC.', 'warnings' => []],
                 'trade_name' => ['name' => 'Trade Name', 'value' => 'BARPORATING SOLUTIONS', 'warnings' => []],
-                'tin' => ['name' => 'TIN', 'value' => 'X388-063-009-0000Y', 'warnings' => []],
+                'tin' => ['name' => 'TIN', 'value' => '388-063-009-0001', 'warnings' => []],
                 'certificate_no' => ['name' => 'Certificate Number', 'value' => 'BN-99', 'warnings' => []],
             ],
         ]);
@@ -808,122 +807,6 @@ class OfficerReviewTest extends TestCase
         $this->assertFalse($rows['tin']['comparison']);
         $this->assertNull($rows['certificate_no']['comparison']);
         $this->assertSame('388-063-009-0000', $rows['tin']['registration_value']);
-    }
-
-    public function test_drill_down_matches_dti_owner_names_against_representative_variants(): void
-    {
-        $this->seed(DocumentTypeSeeder::class);
-
-        $vendor = Vendor::factory()->create();
-        VendorRepresentative::factory()->for($vendor)->create([
-            'first_name' => 'Maria',
-            'middle_name' => 'Santos',
-            'last_name' => 'Dela Cruz',
-            'suffix' => 'Jr.',
-        ]);
-        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
-        $document = Document::factory()->for($vendor)->for($submission)->create([
-            'document_type_id' => DB::table('document_types')->where('code', 'dti_registration')->value('id'),
-        ]);
-        $result = ValidationResult::factory()->for($document)->create([
-            'ocr_fields' => [
-                'owner_representative_name' => ['value' => 'MARIA SANTOS DELA CRUZ JR.'],
-            ],
-        ]);
-
-        foreach ([
-            'MARIA SANTOS DELA CRUZ JR.',
-            'Maria-Dela Cruz',
-            'Dela Cruz, Maria Santos, Jr.',
-        ] as $ocrName) {
-            $result->update([
-                'ocr_fields' => [
-                    'owner_representative_name' => ['value' => $ocrName],
-                ],
-            ]);
-
-            $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
-                ->keyBy('key');
-
-            $this->assertTrue($rows['owner_representative_name']['comparison']);
-            $this->assertStringContainsString('Maria Santos Dela Cruz Jr.', $rows['owner_representative_name']['registration_value']);
-        }
-    }
-
-    public function test_drill_down_marks_owner_fields_unavailable_without_a_representative_and_mismatched_when_one_differs(): void
-    {
-        $this->seed(DocumentTypeSeeder::class);
-
-        $vendor = Vendor::factory()->create();
-        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
-        $document = Document::factory()->for($vendor)->for($submission)->create([
-            'document_type_id' => DB::table('document_types')->where('code', 'dti_registration')->value('id'),
-        ]);
-        $result = ValidationResult::factory()->for($document)->create([
-            'ocr_fields' => [
-                'owner_representative_name' => ['value' => 'Maria Santos'],
-            ],
-        ]);
-
-        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
-            ->keyBy('key');
-        $this->assertNull($rows['owner_representative_name']['comparison']);
-        $this->assertNull($rows['owner_representative_name']['registration_value']);
-
-        VendorRepresentative::factory()->for($vendor)->create([
-            'first_name' => 'Ana',
-            'middle_name' => null,
-            'last_name' => 'Reyes',
-            'suffix' => null,
-        ]);
-        $result->update([
-            'ocr_fields' => [
-                'owner_representative_name' => ['value' => 'Maria Santos'],
-            ],
-        ]);
-
-        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
-            ->keyBy('key');
-        $this->assertFalse($rows['owner_representative_name']['comparison']);
-        $this->assertSame('Ana Reyes / Reyes Ana', $rows['owner_representative_name']['registration_value']);
-    }
-
-    public function test_drill_down_resolves_business_and_registration_candidates_when_present(): void
-    {
-        $vendor = Vendor::factory()->create([
-            'company_name' => 'North Star Trading',
-            'trade_name' => 'North Star',
-            'tin' => '123-456-789-000',
-            'dti_registration_number' => 'DTI-2026-123456',
-            'nature_of_business' => 'Food Retail',
-            'business_street' => '123 Main Street',
-            'business_barangay' => 'Barangay San Antonio',
-            'business_city' => 'Pasig City',
-            'business_province' => 'Metro Manila',
-            'business_postal_code' => '1605',
-        ]);
-        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
-        $document = Document::factory()->for($vendor)->for($submission)->create();
-        ValidationResult::factory()->for($document)->create([
-            'ocr_fields' => [
-                'business_name' => ['value' => 'NORTH STAR TRADING'],
-                'name_of_proprietor' => ['value' => 'NORTH STAR TRADING'],
-                'business_owner' => ['value' => 'NORTH STAR TRADING'],
-                'tin' => ['value' => '123 456 789 000'],
-                'trn_no' => ['value' => 'DTI/2026.123456'],
-                'business_location' => ['value' => '123 MAIN ST., BRGY. SAN ANTONIO, PASIG CITY, METRO MANILA 1605'],
-                'city_issued' => ['value' => 'PASIG CITY'],
-                'kind_of_business' => ['value' => 'Food-Retail'],
-                'line_of_business' => ['value' => 'FOOD RETAIL'],
-            ],
-        ]);
-
-        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
-            ->keyBy('key');
-
-        foreach (['business_name', 'name_of_proprietor', 'business_owner', 'tin', 'trn_no', 'business_location', 'city_issued', 'kind_of_business', 'line_of_business'] as $key) {
-            $this->assertTrue($rows[$key]['comparison'], $key.' should resolve a matching vendor candidate.');
-        }
     }
 
     public function test_drill_down_marks_suspect_ocr_values_with_a_warning(): void

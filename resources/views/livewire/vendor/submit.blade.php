@@ -151,21 +151,17 @@ new class extends Component
 
     private function documentTypeIdFor(string $type): ?int
     {
-        [$codes, $names] = match ($type) {
-            'BIR Registration', 'BIR Permit' => [
-                ['bir_certificate'],
-                ['BIR Certificate of Registration', 'BIR Registration', 'BIR Permit'],
-            ],
-            'Business Permit' => [['business_permit'], ['Business Permit']],
-            'DTI Registration' => [['dti_registration'], ['DTI Business Name Registration', 'DTI Registration']],
-            default => [[$type], [$type]],
+        $aliases = match ($type) {
+            'BIR Permit' => ['bir_certificate', 'bir_permit', 'BIR Certificate of Registration', 'BIR Permit'],
+            'Business Permit' => ['business_permit', 'Business Permit'],
+            'DTI Registration' => ['dti_registration', 'DTI Business Name Registration', 'DTI Registration'],
+            default => [$type],
         };
 
         $id = DB::table('document_types')
-            ->where(function ($query) use ($codes, $names): void {
-                $query->whereIn('code', $codes)->orWhereIn('name', $names);
+            ->where(function ($query) use ($aliases): void {
+                $query->whereIn('code', $aliases)->orWhereIn('name', $aliases);
             })
-            ->orderByRaw('case when code = ? then 0 else 1 end', [$codes[0]])
             ->value('id');
 
         return $id !== null ? (int) $id : null;
@@ -509,7 +505,7 @@ new class extends Component
                                         >
                                             <option value="">Select type</option>
                                             <option>Business Permit</option>
-                                            <option>BIR Registration</option>
+                                            <option>BIR Permit</option>
                                             <option>DTI Registration</option>
                                         </select>
 
@@ -558,7 +554,7 @@ new class extends Component
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="check-circle" color="sky" />
-                            <p class="text-cu-muted">Assign Business Permit, BIR Registration, or DTI Registration per file.</p>
+                            <p class="text-cu-muted">Assign Business Permit, BIR Permit, or DTI Registration per file.</p>
                         </div>
                     </div>
                 </div>

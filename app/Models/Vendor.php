@@ -92,6 +92,14 @@ class Vendor extends Model
     }
 
     /**
+     * Whether the given entity type registers with the SEC.
+     */
+    public static function entityRequiresSec(?string $entityType): bool
+    {
+        return in_array($entityType, ['partnership', 'corporation'], true);
+    }
+
+    /**
      * The composed, human-readable business address from its structured parts.
      */
     protected function businessAddress(): Attribute

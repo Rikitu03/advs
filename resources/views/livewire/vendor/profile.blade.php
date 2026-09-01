@@ -51,12 +51,10 @@ new class extends Component {
                             <dd class="mt-0.5 text-sm">{{ $vendor->sec_registration_number }}</dd>
                         </div>
                     @endif
-                    @if ($vendor->business_permit_number)
-                        <div>
-                            <dt class="text-xs text-cu-muted">{{ __('Business Permit No.') }}</dt>
-                            <dd class="mt-0.5 text-sm">{{ $vendor->business_permit_number }}</dd>
-                        </div>
-                    @endif
+                    <div>
+                        <dt class="text-xs text-cu-muted">{{ __('Business Permit No.') }}</dt>
+                        <dd class="mt-0.5 text-sm">{{ $vendor->business_permit_number ?? '—' }}</dd>
+                    </div>
                     <div>
                         <dt class="text-xs text-cu-muted">{{ __('Nature of business') }}</dt>
                         <dd class="mt-0.5 text-sm">{{ $vendor->nature_of_business ?? '—' }}</dd>

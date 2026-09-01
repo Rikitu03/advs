@@ -14,9 +14,12 @@ class VendorBusinessProfileTest extends TestCase
         $this->assertFalse(Vendor::entityRequiresDti(null));
     }
 
-    public function test_factory_uses_null_for_the_legacy_business_permit_number(): void
+    public function test_entity_requires_sec_for_partnerships_and_corporations(): void
     {
-        $this->assertNull(Vendor::factory()->definition()['business_permit_number']);
+        $this->assertTrue(Vendor::entityRequiresSec('partnership'));
+        $this->assertTrue(Vendor::entityRequiresSec('corporation'));
+        $this->assertFalse(Vendor::entityRequiresSec('sole_proprietorship'));
+        $this->assertFalse(Vendor::entityRequiresSec('cooperative'));
     }
 
     public function test_business_address_accessor_joins_structured_parts(): void

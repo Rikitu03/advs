@@ -31,6 +31,10 @@ class CreateVendorProfile
                     'dti_registration_number' => Vendor::entityRequiresDti($entityType)
                         ? $this->nullable($data, 'dti_registration_number')
                         : null,
+                    'sec_registration_number' => Vendor::entityRequiresSec($entityType)
+                        ? $this->nullable($data, 'sec_registration_number')
+                        : null,
+                    'business_permit_number' => $data['business_permit_number'],
                     'nature_of_business' => $data['nature_of_business'],
                     'business_street' => $data['business_street'],
                     'business_barangay' => $data['business_barangay'],

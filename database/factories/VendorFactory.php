@@ -26,7 +26,7 @@ class VendorFactory extends Factory
             'tin' => $this->faker->numerify('###-###-###-000'),
             'dti_registration_number' => $this->faker->numerify('DTI-#######'),
             'sec_registration_number' => null,
-            'business_permit_number' => null,
+            'business_permit_number' => $this->faker->numerify('BP-#######'),
             'nature_of_business' => 'Food retail and distribution',
             'business_street' => $this->faker->streetAddress(),
             'business_barangay' => 'Barangay '.$this->faker->numberBetween(1, 200),

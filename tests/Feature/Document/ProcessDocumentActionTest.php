@@ -33,11 +33,6 @@ class ProcessDocumentActionTest extends TestCase
             'sec_registration_number' => null,
             'business_permit_number' => null,
             'registration_number' => null,
-            'business_street' => null,
-            'business_barangay' => null,
-            'business_city' => null,
-            'business_province' => null,
-            'business_postal_code' => null,
         ]);
         Storage::disk('local')->put($document->file_path, 'fake-document-bytes');
 
