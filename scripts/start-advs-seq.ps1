@@ -2,14 +2,11 @@
 # Usage: Right-click → Run with PowerShell, or execute from PowerShell: .\scripts\start-advs-seq.ps1
 
 [CmdletBinding()]
-param(
-    [switch] $ResetDatabase
-)
+param()
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $pythonDirectory = Join-Path $repo 'python'
 $pythonExecutable = Join-Path $pythonDirectory 'env\Scripts\python.exe'
-$resetDatabase = $ResetDatabase
 Write-Host "Repository root: $repo"
 
 function Run-Command {
@@ -27,10 +24,6 @@ function Run-Command {
 
 try {
     # 1) Prep steps (run sequentially and stop on first failure)
-    if ($resetDatabase) {
-        Run-Command -cmd "php artisan migrate:fresh --no-interaction" -exitOnError
-        Run-Command -cmd "php artisan db:seed --no-interaction" -exitOnError
-    }
 
     Run-Command -cmd "npm run build" -exitOnError
     Run-Command -cmd "php artisan optimize:clear" -exitOnError

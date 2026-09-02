@@ -79,13 +79,10 @@ TESSERACT_CMD=C:/Program Files/Tesseract-OCR/tesseract.exe
 Build the database and frontend assets:
 
 ```powershell
-php artisan migrate:fresh --seed --no-interaction
+php artisan migrate --no-interaction
 php artisan storage:link
 npm.cmd run build
 ```
-
-`migrate:fresh` deletes existing application data. For an existing database,
-use `php artisan migrate --no-interaction` instead.
 
 ## Start the Application
 
