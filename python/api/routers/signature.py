@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .. import embedding as emb
 from ..config import Settings
@@ -32,6 +32,7 @@ router = APIRouter()
 # registration flow expects exactly 3 (Laravel enforces the count); this only
 # bounds the work if the detector floods the page with boxes.
 MAX_ENROLL_SIGNATURES = 10
+ENROLL_SIGNATURE_IOU_THRESHOLD = 0.5
 
 
 def _normalize_contrast(image: Image.Image) -> Image.Image:
@@ -103,6 +104,36 @@ def _crop_box(page: Image.Image, box: list[float]) -> Image.Image:
     return page.crop((x1, y1, x2, y2))
 
 
+def _intersection_over_union(first: list[float], second: list[float]) -> float:
+    first_x1, first_y1, first_x2, first_y2 = first
+    second_x1, second_y1, second_x2, second_y2 = second
+    intersection_width = max(0.0, min(first_x2, second_x2) - max(first_x1, second_x1))
+    intersection_height = max(0.0, min(first_y2, second_y2) - max(first_y1, second_y1))
+    intersection = intersection_width * intersection_height
+    first_area = max(0.0, first_x2 - first_x1) * max(0.0, first_y2 - first_y1)
+    second_area = max(0.0, second_x2 - second_x1) * max(0.0, second_y2 - second_y1)
+    union = first_area + second_area - intersection
+    return intersection / union if union else 0.0
+
+
+def _select_signature_boxes(detections: list[dict]) -> list[dict]:
+    selected: list[dict] = []
+    for detection in sorted(
+        (d for d in detections if d["label"] == "signature"),
+        key=lambda d: d["confidence"],
+        reverse=True,
+    ):
+        if all(
+            _intersection_over_union(detection["box"], chosen["box"])
+            < ENROLL_SIGNATURE_IOU_THRESHOLD
+            for chosen in selected
+        ):
+            selected.append(detection)
+        if len(selected) == MAX_ENROLL_SIGNATURES:
+            break
+    return selected
+
+
 def _enrollment_forensics(original: Path) -> dict:
     """LENIENT edited/pasted-on-top check for registration (§5 Stage 4a authenticity
     gate). Runs only the two pixel/provenance techniques that evidence a real edit —
@@ -168,7 +199,7 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
     detector_name = "signature_enroll_detector" if registry.get("signature_enroll_detector") else "detector"
 
     data = await file.read()
-    image = _decode_image(data)
+    image = ImageOps.exif_transpose(_decode_image(data))
     
     logger.info(
         "signature_enroll: image=%dx%d, detector=%s, confidence=%.2f, imgsz=%d",
@@ -185,11 +216,7 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
         imgsz=settings.signature_enroll_detection_imgsz,
     )
     
-    signature_boxes = sorted(
-        (d for d in detection["detections"] if d["label"] == "signature"),
-        key=lambda d: d["confidence"],
-        reverse=True,
-    )[:MAX_ENROLL_SIGNATURES]
+    signature_boxes = _select_signature_boxes(detection["detections"])
     
     logger.info(
         "signature_enroll: raw_detections=%d, signature_detections=%d",
@@ -211,11 +238,7 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
             imgsz=settings.signature_enroll_detection_imgsz,
         )
         
-        signature_boxes = sorted(
-            (d for d in enhanced_detection["detections"] if d["label"] == "signature"),
-            key=lambda d: d["confidence"],
-            reverse=True,
-        )[:MAX_ENROLL_SIGNATURES]
+        signature_boxes = _select_signature_boxes(enhanced_detection["detections"])
         
         logger.info(
             "signature_enroll: enhanced raw_detections=%d, signature_detections=%d",

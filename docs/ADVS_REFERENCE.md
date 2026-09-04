@@ -529,7 +529,7 @@ All configurable parameters that the implementing organization would set:
 | `CLASSIFICATION_CONFIDENCE_THRESHOLD` | 0.70 | Minimum ResNet-50 confidence to pass |
 | `YOLO_DETECTION_CONFIDENCE` | 0.50 | Minimum YOLOv8 detection confidence |
 | `SIGNATURE_ENROLL_DETECTION_CONFIDENCE` | 0.20 | Registration-only minimum confidence for the three-signature capture; benchmarked separately from document detection |
-| `SIGNATURE_ENROLL_DETECTION_IMGSZ` | 1280 | Registration-only YOLO inference size for thin handwritten strokes on blank paper |
+| `SIGNATURE_ENROLL_DETECTION_IMGSZ` | 640 | Registration-only YOLO inference size calibrated for the enrollment detector and preview input |
 | `SIGNATURE_DISTANCE_THRESHOLD` | Empirical | Maximum Euclidean distance for signature match |
 | `STAMP_SIMILARITY_THRESHOLD` | 0.85 | Minimum cosine similarity for a logo match against the detected city's reference (85%) |
 | `RISK_WEIGHT_TEXT` | 0.20 | Weight of text validation in composite risk |

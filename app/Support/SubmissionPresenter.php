@@ -794,13 +794,13 @@ class SubmissionPresenter
      */
     private static function typeMetadata(): Collection
     {
-        return DB::table('document_types')
+        return once(fn (): Collection => DB::table('document_types')
             ->get(['id', 'name', 'code', 'issuer_scope'])
             ->mapWithKeys(fn (object $type): array => [(int) $type->id => [
                 'name' => (string) $type->name,
                 'code' => (string) $type->code,
                 'issuer_scope' => is_string($type->issuer_scope) ? $type->issuer_scope : null,
-            ]]);
+            ]]));
     }
 
     /**

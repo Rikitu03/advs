@@ -31,7 +31,7 @@ class LoginResponse implements LoginResponseContract
         }
 
         /** @var User $user */
-        $user = $request->user();
+        $user = app('$current_user');
 
         return redirect()->intended(route($user->dashboardRoute()));
     }

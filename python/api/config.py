@@ -34,10 +34,10 @@ class Settings(BaseSettings):
     classifier_model_path: Path | None = None   # default: MODEL_DIR/resnet50_best.keras
     class_names_path: Path | None = None        # default: MODEL_DIR/class_names.json
     detector_model_path: Path | None = None     # default: MODEL_DIR/yolov8_document.pt
-    # Optional single-purpose detector for the registration photo. When unset,
-    # enrollment falls back to the document detector with enrollment-only
-    # inference settings.
-    signature_enroll_detector_model_path: Path | None = None
+    # Single-purpose detector for the registration photo. If this artifact is
+    # unavailable, enrollment falls back to the document detector with
+    # enrollment-only inference settings.
+    signature_enroll_detector_model_path: Path | None = PY_ROOT / "models" / "signature_detector_best_raw.pt"
     siamese_model_path: Path | None = None      # default: MODEL_DIR/siamese_encoder.h5
     stamp_model_path: Path | None = None        # default: MODEL_DIR/efficientnet_feature_extractor.h5
     stamp_classifier_model_path: Path | None = None  # default: MODEL_DIR/stamp_classifier.pkl
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # paper, unlike the full document pages used by Stage 4. Keep their detector
     # calibration isolated from document validation.
     signature_enroll_detection_confidence: float = Field(default=0.20, ge=0.0, le=1.0)
-    signature_enroll_detection_imgsz: int = Field(default=1280, ge=320, le=4096)
+    signature_enroll_detection_imgsz: int = Field(default=640, ge=320, le=4096)
     stamp_similarity_threshold: float = 0.85
     # NOT a new §9 parameter. train_stamp.py fits a binary LogisticRegression
     # (class 1 = genuine wet ink, class 0 = photocopy/edit) whose own predict()

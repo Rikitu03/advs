@@ -6,6 +6,7 @@ use App\Models\RetentionPolicy;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Policies\RetentionPolicyPolicy;
+use Illuminate\Support\Facades\Auth;
 use App\Policies\SystemSettingPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Support\Facades\Gate;

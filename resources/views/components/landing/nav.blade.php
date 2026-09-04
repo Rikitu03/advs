@@ -1,6 +1,7 @@
 {{-- Floating rounded nav card. Light-only by design: the landing page never opts
      into the app's `.dark` theme, so no `dark:` variants appear anywhere in it. --}}
-<div class="sticky top-0 z-50 px-4 pt-4 md:px-6 md:pt-7">
+
+    <div class="sticky top-0 z-50 px-4 pt-4 md:px-6 md:pt-7">
     <nav
         x-data="{ open: false }"
         class="mx-auto max-w-[1230px] rounded-[28px] bg-white/85 shadow-[0_10px_40px_-12px_rgb(30_30_30/0.18)] ring-1 ring-black/5 backdrop-blur-xl md:rounded-[35px]"

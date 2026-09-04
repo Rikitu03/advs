@@ -1,4 +1,10 @@
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/python/env/Scripts/python.exe",
-  "python.analysis.extraPaths": ["${workspaceFolder}/python"]
+  "python.analysis.extraPaths": ["${workspaceFolder}/python"],
+  "Laravel.appBinding.diagnostics": false,
+  "Laravel.inertia.diagnostics": false,
+  "Laravel.middleware.diagnostics": false,
+  "Laravel.route.diagnostics": false,
+  "Laravel.storage.diagnostics": false,
+  "Laravel.view.diagnostics": false
 }

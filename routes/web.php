@@ -230,3 +230,8 @@ Route::middleware(['auth'])->group(function () {
     Volt::route('settings/preference', 'settings.preference')->name('settings.preference');
     Volt::route('settings/appearance', 'settings.appearance')->name('settings.appearance');
 });
+
+Route::get('/test-debugbar', function () {
+    \Debugbar::enable();
+    return view('welcome'); // or any existing view
+});
