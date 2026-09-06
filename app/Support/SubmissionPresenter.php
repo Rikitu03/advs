@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\Document;
 use App\Models\PipelineRun;
 use App\Models\Submission;
+use App\Models\ValidationResult;
 use App\Models\Vendor;
 use App\Services\Document\IssuerCity;
 use App\Services\Document\OcrVendorMatchScore;
@@ -201,6 +202,7 @@ class SubmissionPresenter
         $result = $document?->validationResult;
         $signatureSimilarity = $result?->signature_score !== null ? (int) round($result->signature_score * 100) : null;
         $stampSimilarity = $result?->stamp_score !== null ? (int) round($result->stamp_score * 100) : null;
+        $signatureComparisons = self::signatureComparisons($document, $result, $signatureReferenceUrl);
         $references = self::stampReferences(
             $document,
             $typeMetadata ?? collect(),
@@ -237,6 +239,7 @@ class SubmissionPresenter
                 'distance_threshold' => 'empirical',
                 'pass' => (bool) ($result?->signature_passed ?? false),
                 'crop' => self::cropData($document, $result?->signature_bbox),
+                'comparisons' => $signatureComparisons,
                 'reference_image_url' => $signatureReferenceUrl,
                 'detail' => match (true) {
                     $result === null || $result->signature_detected === null => 'Stage not yet available.',
@@ -266,6 +269,60 @@ class SubmissionPresenter
                 },
             ],
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function signatureComparisons(
+        ?Document $document,
+        ?ValidationResult $result,
+        ?string $referenceImageUrl,
+    ): array {
+        $stored = $result?->signature_comparisons;
+
+        if (is_array($stored) && $stored !== []) {
+            return collect($stored)
+                ->filter(fn (mixed $comparison): bool => is_array($comparison))
+                ->map(function (array $comparison) use ($document, $referenceImageUrl): array {
+                    $distance = $comparison['distance'] ?? null;
+                    $score = $comparison['score'] ?? $comparison['similarity'] ?? null;
+
+                    return [
+                        'page_index' => $comparison['page_index'] ?? null,
+                        'confidence' => $comparison['confidence'] ?? null,
+                        'match' => $comparison['match'] ?? null,
+                        'pass' => (bool) ($comparison['match'] ?? false),
+                        'similarity' => $score !== null ? (int) round((float) $score * 100) : null,
+                        'distance' => $distance !== null ? round((float) $distance, 3) : '—',
+                        'distance_threshold' => $comparison['threshold'] ?? 'empirical',
+                        'crop' => self::cropData($document, $comparison['box'] ?? null),
+                        'reference_image_url' => $referenceImageUrl,
+                    ];
+                })
+                ->sortBy([
+                    ['page_index', 'asc'],
+                    ['confidence', 'desc'],
+                ])
+                ->values()
+                ->all();
+        }
+
+        if ($result?->signature_bbox === null && $result?->signature_detected !== true) {
+            return [];
+        }
+
+        return [[
+            'page_index' => null,
+            'confidence' => null,
+            'match' => $result?->signature_passed,
+            'pass' => (bool) ($result?->signature_passed ?? false),
+            'similarity' => $result?->signature_score !== null ? (int) round($result->signature_score * 100) : null,
+            'distance' => $result?->signature_distance !== null ? round($result->signature_distance, 3) : '—',
+            'distance_threshold' => 'empirical',
+            'crop' => self::cropData($document, $result?->signature_bbox),
+            'reference_image_url' => $referenceImageUrl,
+        ]];
     }
 
     /**

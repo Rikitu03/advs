@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # --- §9 tunables ---
     classification_confidence_threshold: float = 0.70
-    yolo_detection_confidence: float = 0.50
+    yolo_detection_confidence: float = 0.20
     # Registration photos contain three large signatures on otherwise blank
     # paper, unlike the full document pages used by Stage 4. Keep their detector
     # calibration isolated from document validation.
@@ -123,7 +123,7 @@ class Settings(BaseSettings):
 
     @property
     def detector_path(self) -> Path:
-        return self.detector_model_path or self.model_dir / "yolov8_nano_moredata_best.pt"
+        return self.detector_model_path or self.model_dir / "yolov8nanomoredatabest-2.pt"
 
     @property
     def siamese_path(self) -> Path:

@@ -224,6 +224,10 @@ def _best_box(detections: list[dict], labels: tuple[str, ...]) -> dict | None:
     return max(candidates, key=lambda d: d["confidence"]) if candidates else None
 
 
+def _signature_boxes(detections: list[dict]) -> list[dict]:
+    return [detection for detection in detections if detection["label"] == "signature"]
+
+
 def _page_images(pages_bgr: list) -> list[Image.Image]:
     import cv2
     return [Image.fromarray(cv2.cvtColor(page, cv2.COLOR_BGR2RGB)) for page in pages_bgr]
@@ -301,6 +305,21 @@ def _aggregate_verification(page_stages: list[dict], score_key: str) -> dict:
     completed = [stage for stage in page_stages if stage.get("status") == "completed"]
     if completed:
         return completed[0]
+    return page_stages[0] if page_stages else _skipped("no_pages")
+
+
+def _aggregate_signature_verification(page_stages: list[dict]) -> dict:
+    comparisons = [
+        {**comparison, "page_index": page_index}
+        for page_index, stage in enumerate(page_stages, start=1)
+        for comparison in stage.get("comparisons", [])
+    ]
+    completed = [stage for stage in page_stages if stage.get("status") == "completed"]
+    if comparisons:
+        selected = min(comparisons, key=lambda comparison: float(comparison.get("similarity", 0.0)))
+        return {**selected, "comparisons": comparisons}
+    if completed:
+        return {**completed[0], "comparisons": []}
     return page_stages[0] if page_stages else _skipped("no_pages")
 
 
@@ -552,7 +571,7 @@ async def validate(
                     flags.append("detection_failed")
 
             siamese = registry.get("siamese")
-            signature_box = _best_box(detections, ("signature",))
+            signature_boxes = _signature_boxes(detections)
             if siamese is None:
                 stages["signature"] = _skipped("model_not_loaded")
                 page_timings["signature"] = 0.0
@@ -562,16 +581,29 @@ async def validate(
             elif stages["detection"].get("status") != "completed":
                 stages["signature"] = _skipped("detection_unavailable")
                 page_timings["signature"] = 0.0
-            elif signature_box is None:
+            elif not signature_boxes:
                 stages["signature"] = _skipped("no_signature_detected")
                 page_timings["signature"] = 0.0
             else:
                 try:
-                    result, elapsed = _timed(lambda: run_signature_verify(
-                        siamese, _crop(page, signature_box["box"]), sig_reference, settings
-                    ))
-                    stages["signature"] = _completed(result)
-                    page_timings["signature"] = elapsed
+                    comparisons = []
+                    elapsed_total = 0.0
+                    for signature_box in signature_boxes:
+                        result, elapsed = _timed(lambda box=signature_box: run_signature_verify(
+                            siamese, _crop(page, box["box"]), sig_reference, settings
+                        ))
+                        comparisons.append({
+                            **result,
+                            "box": signature_box["box"],
+                            "confidence": signature_box["confidence"],
+                        })
+                        elapsed_total += elapsed
+                    selected = min(comparisons, key=lambda comparison: float(comparison["similarity"]))
+                    stages["signature"] = _completed({
+                        **selected,
+                        "comparisons": comparisons,
+                    })
+                    page_timings["signature"] = elapsed_total
                 except Exception as exc:
                     logger.exception("signature stage failed on page %s", page_index)
                     stages["signature"] = _failed(f"error: {exc}")
@@ -685,8 +717,8 @@ async def validate(
         ]),
         "ocr": ocr_stage,
         "detection": _aggregate_detection([page["stages"]["detection"] for page in page_results]),
-        "signature": _aggregate_verification(
-            [page["stages"]["signature"] for page in page_results], "similarity"
+        "signature": _aggregate_signature_verification(
+            [page["stages"]["signature"] for page in page_results]
         ),
         "stamp": _aggregate_verification(
             [page["stages"]["stamp"] for page in page_results], "similarity_score"

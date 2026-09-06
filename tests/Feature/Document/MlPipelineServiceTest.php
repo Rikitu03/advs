@@ -87,6 +87,48 @@ class MlPipelineServiceTest extends TestCase
         $this->assertSame([], $mapped['flags']);
     }
 
+    public function test_maps_every_signature_comparison_and_keeps_the_aggregate_result(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'detection' => ['detections' => [
+                ['label' => 'signature', 'confidence' => 0.91, 'box' => [10, 20, 30, 40]],
+                ['label' => 'signature', 'confidence' => 0.84, 'box' => [50, 60, 70, 80]],
+            ]],
+            'signature' => [
+                'match' => false,
+                'distance' => 1.4,
+                'threshold' => 1.243976,
+                'similarity' => 0.416,
+                'comparisons' => [
+                    [
+                        'page_index' => 1,
+                        'box' => [10, 20, 30, 40],
+                        'confidence' => 0.91,
+                        'match' => true,
+                        'distance' => 0.7,
+                        'threshold' => 1.243976,
+                        'similarity' => 0.588,
+                    ],
+                    [
+                        'page_index' => 1,
+                        'box' => [50, 60, 70, 80],
+                        'confidence' => 0.84,
+                        'match' => false,
+                        'distance' => 1.4,
+                        'threshold' => 1.243976,
+                        'similarity' => 0.416,
+                    ],
+                ],
+            ],
+        ])['columns'];
+
+        $this->assertCount(2, $mapped['signature_comparisons']);
+        $this->assertSame([50, 60, 70, 80], $mapped['signature_comparisons'][1]['box']);
+        $this->assertEqualsWithDelta(0.4374, $mapped['signature_comparisons'][1]['score'], 0.0005);
+        $this->assertSame([50, 60, 70, 80], $mapped['signature_bbox']);
+        $this->assertFalse($mapped['signature_passed']);
+    }
+
     public function test_curated_stamp_match_does_not_claim_a_database_reference_id(): void
     {
         $mapped = $this->service()->mapStages([

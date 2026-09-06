@@ -287,6 +287,14 @@ class MlPipelineService
         if ($this->ran($signature)) {
             $distance = $this->float($signature['distance'] ?? null);
             $threshold = $this->float($signature['threshold'] ?? null);
+            $columns['signature_comparisons'] = $this->signatureComparisons($signature['comparisons'] ?? []);
+            $aggregateBox = $signature['box'] ?? collect($signature['comparisons'] ?? [])
+                ->filter(fn (mixed $comparison): bool => is_array($comparison) && is_array($comparison['box'] ?? null))
+                ->sortBy(fn (array $comparison): float => (float) ($comparison['similarity'] ?? 0.0))
+                ->value('box');
+            if (is_array($aggregateBox)) {
+                $columns['signature_bbox'] = $aggregateBox;
+            }
             $columns['signature_detected'] = true;
             $columns['signature_distance'] = $distance;
             $columns['signature_passed'] = $signature['match'] ?? null;
@@ -295,6 +303,7 @@ class MlPipelineService
                 $flags[] = 'signature_mismatch';
             }
         } elseif ($signature !== null) {
+            $columns['signature_comparisons'] = [];
             $columns['signature_detected'] = false;
             if (($signature['reason'] ?? null) === 'no_reference_embedding') {
                 // Distinct from a genuine detection miss: the region may well have
@@ -340,6 +349,31 @@ class MlPipelineService
         }
 
         return ['columns' => $columns, 'flags' => array_values(array_unique($flags))];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $comparisons
+     * @return list<array<string, mixed>>
+     */
+    private function signatureComparisons(array $comparisons): array
+    {
+        return collect($comparisons)
+            ->filter(fn (mixed $comparison): bool => is_array($comparison))
+            ->map(fn (array $comparison): array => [
+                'page_index' => isset($comparison['page_index']) ? (int) $comparison['page_index'] : null,
+                'box' => $comparison['box'] ?? null,
+                'confidence' => $this->float($comparison['confidence'] ?? null),
+                'match' => $comparison['match'] ?? null,
+                'distance' => $this->float($comparison['distance'] ?? null),
+                'similarity' => $this->float($comparison['similarity'] ?? null),
+                'threshold' => $this->float($comparison['threshold'] ?? null),
+                'score' => $this->calibratedSignatureScore(
+                    $this->float($comparison['distance'] ?? null),
+                    $this->float($comparison['threshold'] ?? null),
+                ),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

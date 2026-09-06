@@ -4,6 +4,7 @@
     $detected = $data['detected'] ?? false;
     $verified = $data['verified'] ?? false;
     $pass = $data['pass'] ?? false;
+    $comparisons = $data['comparisons'] ?? [];
     $queryRing = $pass ? 'border-emerald-500/40' : 'border-rose-500/40';
     $queryInk = $pass ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300';
 @endphp
@@ -26,52 +27,67 @@
     </div>
 @else
     <div class="flex flex-col gap-4">
-        <div class="grid gap-4 sm:grid-cols-2">
-            {{-- Query --}}
-            <div class="rounded-xl border {{ $queryRing }} bg-cu-surface p-4">
-                <div class="mb-2 flex items-center justify-between">
-                    <span class="text-xs font-medium text-cu-muted">Query (this submission)</span>
-                    <x-pass-fail :pass="$pass" />
+        @foreach ($comparisons as $index => $comparison)
+            @php
+                $comparisonPass = $comparison['pass'] ?? false;
+                $comparisonInk = $comparisonPass ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300';
+            @endphp
+            <div class="rounded-xl border {{ $comparisonPass ? 'border-emerald-500/40' : 'border-rose-500/40' }} bg-cu-surface p-4">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-cu-muted">Signature {{ $index + 1 }}</span>
+                        @if ($comparison['page_index'] ?? null)
+                            <span class="text-xs text-cu-muted">Page {{ $comparison['page_index'] }}</span>
+                        @endif
+                        @if (($comparison['confidence'] ?? null) !== null)
+                            <span class="text-xs text-cu-muted">{{ round((float) $comparison['confidence'] * 100) }}% detected</span>
+                        @endif
+                    </div>
+                    <x-pass-fail :pass="$comparisonPass" />
                 </div>
-                <div class="flex min-h-24 items-center justify-center rounded-lg bg-black/[0.03] p-2 dark:bg-white/[0.03] {{ $queryInk }}">
-                    @if ($data['crop'] ?? null)
-                        <x-detection-crop :url="$data['crop']['url']" :box="$data['crop']['box']" label="Detected signature" />
-                    @else
-                        <span class="text-xs text-cu-muted">Not available for this document</span>
-                    @endif
-                </div>
-            </div>
 
-            {{-- Reference --}}
-            <div class="rounded-xl border border-cu-border bg-cu-surface p-4">
-                <div class="mb-2 flex items-center justify-between">
-                    <span class="text-xs font-medium text-cu-muted">Reference (enrolled)</span>
-                    <flux:icon icon="check-badge" class="size-4 text-cu-blue" />
-                </div>
-                <div class="flex h-24 items-center justify-center rounded-lg bg-black/[0.03] text-cu-muted dark:bg-white/[0.03]">
-                    @if ($data['reference_image_url'] ?? null)
-                        <img src="{{ $data['reference_image_url'] }}" alt="Enrolled signature reference" class="max-h-full max-w-full object-contain" />
-                    @else
-                        <span class="text-xs">Reference image unavailable</span>
-                    @endif
-                </div>
-            </div>
-        </div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <div class="mb-2 text-xs font-medium text-cu-muted">Query (this submission)</div>
+                        <div class="flex min-h-24 items-center justify-center rounded-lg bg-black/[0.03] p-2 dark:bg-white/[0.03] {{ $comparisonInk }}">
+                            @if ($comparison['crop'] ?? null)
+                                <x-detection-crop :url="$comparison['crop']['url']" :box="$comparison['crop']['box']" label="Detected signature" />
+                            @else
+                                <span class="text-xs text-cu-muted">Not available for this document</span>
+                            @endif
+                        </div>
+                    </div>
 
-        {{-- Metrics --}}
-        <div class="grid gap-3 sm:grid-cols-3">
-            <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
-                <p class="text-xs text-cu-muted">Similarity</p>
-                <p class="text-lg font-semibold {{ $queryInk }}">{{ $data['similarity'] }}%</p>
+                    <div>
+                        <div class="mb-2 flex items-center justify-between">
+                            <span class="text-xs font-medium text-cu-muted">Reference (enrolled)</span>
+                            <flux:icon icon="check-badge" class="size-4 text-cu-blue" />
+                        </div>
+                        <div class="flex min-h-24 items-center justify-center rounded-lg bg-black/[0.03] text-cu-muted dark:bg-white/[0.03]">
+                            @if ($comparison['reference_image_url'] ?? null)
+                                <img src="{{ $comparison['reference_image_url'] }}" alt="Enrolled signature reference" class="max-h-24 max-w-full object-contain" />
+                            @else
+                                <span class="text-xs">Reference image unavailable</span>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
+                        <p class="text-xs text-cu-muted">Similarity</p>
+                        <p class="text-lg font-semibold {{ $comparisonInk }}">{{ $comparison['similarity'] ?? '—' }}%</p>
+                    </div>
+                    <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
+                        <p class="text-xs text-cu-muted">Embedding distance (128-D)</p>
+                        <p class="text-lg font-semibold text-cu-text">{{ $comparison['distance'] ?? '—' }}</p>
+                    </div>
+                    <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
+                        <p class="text-xs text-cu-muted">Distance threshold</p>
+                        <p class="text-lg font-semibold text-cu-text">≤ {{ $comparison['distance_threshold'] ?? 'empirical' }}</p>
+                    </div>
+                </div>
             </div>
-            <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
-                <p class="text-xs text-cu-muted">Embedding distance (128-D)</p>
-                <p class="text-lg font-semibold text-cu-text">{{ $data['distance'] }}</p>
-            </div>
-            <div class="rounded-lg bg-black/[0.03] px-3 py-2 dark:bg-white/[0.03]">
-                <p class="text-xs text-cu-muted">Distance threshold</p>
-                <p class="text-lg font-semibold text-cu-text">≤ {{ $data['distance_threshold'] }}</p>
-            </div>
-        </div>
+        @endforeach
     </div>
 @endunless

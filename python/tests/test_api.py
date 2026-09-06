@@ -787,6 +787,42 @@ class _StubDetector:
         return [_StubResult(self.names, [_StubBox(1, 0.9, [5.0, 5.0, 60.0, 60.0])])]
 
 
+class _TwoSignatureDetector(_StubDetector):
+    def predict(self, source=None, conf=0.0, verbose=False):
+        return [_StubResult(self.names, [
+            _StubBox(0, 0.92, [5.0, 5.0, 60.0, 60.0]),
+            _StubBox(0, 0.81, [100.0, 100.0, 180.0, 180.0]),
+        ])]
+
+
+def test_validate_compares_every_detected_signature(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path, signature_distance_threshold=0.5))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _TwoSignatureDetector()
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        reference = client.post(
+            "/v1/signature/embed", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()["embedding"]
+
+        response = client.post(
+            "/v1/validate",
+            headers=AUTH,
+            files=_upload(jpeg_bytes),
+            data={"signature_reference": json.dumps(reference)},
+        )
+
+    assert response.status_code == 200
+    signature = response.json()["stages"]["signature"]
+    assert len(signature["comparisons"]) == 2
+    assert [comparison["box"] for comparison in signature["comparisons"]] == [
+        [5.0, 5.0, 60.0, 60.0],
+        [100.0, 100.0, 180.0, 180.0],
+    ]
+    assert all("distance" in comparison for comparison in signature["comparisons"])
+
+
 def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
     """A reproduction detected on the crop must reach the officer as a flag even
     though the issuer has no reference logo yet (§5 Stage 4b)."""

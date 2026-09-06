@@ -223,6 +223,59 @@ class OfficerReviewTest extends TestCase
             ->assertSee(route('admin.documents.show', $document->id));
     }
 
+    public function test_drill_down_renders_each_signature_comparison_row(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'mime_type' => 'image/png',
+        ]);
+
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => true,
+            'signature_bbox' => [50, 60, 70, 80],
+            'signature_score' => 0.4374,
+            'signature_distance' => 1.4,
+            'signature_passed' => false,
+            'signature_comparisons' => [
+                [
+                    'page_index' => 1,
+                    'box' => [10, 20, 30, 40],
+                    'confidence' => 0.91,
+                    'match' => true,
+                    'distance' => 0.7,
+                    'similarity' => 0.7186,
+                    'threshold' => 1.243976,
+                    'score' => 0.7186,
+                ],
+                [
+                    'page_index' => 1,
+                    'box' => [50, 60, 70, 80],
+                    'confidence' => 0.84,
+                    'match' => false,
+                    'distance' => 1.4,
+                    'similarity' => 0.416,
+                    'threshold' => 1.243976,
+                    'score' => 0.4374,
+                ],
+            ],
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertCount(2, $components['signature']['comparisons']);
+        $this->assertSame([10, 20, 30, 40], $components['signature']['comparisons'][0]['crop']['box']);
+        $this->assertSame([50, 60, 70, 80], $components['signature']['comparisons'][1]['crop']['box']);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('Signature 1')
+            ->assertSee('Signature 2')
+            ->assertSee('91% detected')
+            ->assertSee('84% detected');
+    }
+
     public function test_business_permit_issuer_evidence_panel_remains_removed(): void
     {
         $this->seed(DocumentTypeSeeder::class);
