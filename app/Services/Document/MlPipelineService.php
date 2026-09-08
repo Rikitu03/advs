@@ -322,7 +322,13 @@ class MlPipelineService
         if ($this->ran($stamp) && ($stamp['stamp_tampered'] ?? null) !== null) {
             $columns['stamp_tampered'] = (bool) $stamp['stamp_tampered'];
         }
+        if ($this->ran($stamp)) {
+            $columns['stamp_comparisons'] = $this->stampComparisons($stamp['comparisons'] ?? []);
+        }
         if ($this->ran($stamp) && ($stamp['reason'] ?? null) === null) {
+            if (is_array($stamp['box'] ?? null)) {
+                $columns['stamp_bbox'] = $stamp['box'];
+            }
             $similarity = $this->float($stamp['similarity_score'] ?? null);
             $columns['stamp_detected'] = true;
             $columns['stamp_similarity'] = $similarity;
@@ -337,6 +343,7 @@ class MlPipelineService
                 $flags[] = 'stamp_mismatch';
             }
         } elseif ($stamp !== null) {
+            $columns['stamp_comparisons'] ??= [];
             $columns['stamp_detected'] = false;
             $reason = $stamp['reason'] ?? null;
             if ($issuerScope === null) {
@@ -349,6 +356,47 @@ class MlPipelineService
         }
 
         return ['columns' => $columns, 'flags' => array_values(array_unique($flags))];
+    }
+
+    /**
+     * Normalize every detected issuer-logo comparison without storing vectors.
+     * Aggregate stamp fields remain mapped separately for risk scoring.
+     *
+     * @param  array<int, mixed>  $comparisons
+     * @return list<array<string, mixed>>
+     */
+    private function stampComparisons(array $comparisons): array
+    {
+        return collect($comparisons)
+            ->filter(fn (mixed $comparison): bool => is_array($comparison))
+            ->map(fn (array $comparison): array => [
+                'page_index' => isset($comparison['page_index']) ? (int) $comparison['page_index'] : null,
+                'box' => $comparison['box'] ?? null,
+                'confidence' => $this->float($comparison['confidence'] ?? null),
+                'match' => $comparison['match'] ?? null,
+                'similarity_score' => $this->float($comparison['similarity_score'] ?? null),
+                'threshold' => $this->float($comparison['threshold'] ?? null),
+                'stamp_tampered' => isset($comparison['stamp_tampered'])
+                    ? (bool) $comparison['stamp_tampered']
+                    : null,
+                'genuine_probability' => $this->float($comparison['genuine_probability'] ?? null),
+                'reference_source' => $comparison['reference_source'] ?? null,
+                'best_reference_key' => $comparison['best_reference_key'] ?? null,
+                'reference_matches' => collect($comparison['reference_matches'] ?? [])
+                    ->filter(fn (mixed $match): bool => is_array($match))
+                    ->map(fn (array $match): array => [
+                        'key' => $match['key'] ?? null,
+                        'label' => $match['label'] ?? null,
+                        'source' => $match['source'] ?? null,
+                        'city' => $match['city'] ?? null,
+                        'similarity_score' => $this->float($match['similarity_score'] ?? null),
+                        'match' => $match['match'] ?? null,
+                    ])
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

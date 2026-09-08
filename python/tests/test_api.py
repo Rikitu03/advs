@@ -795,6 +795,14 @@ class _TwoSignatureDetector(_StubDetector):
         ])]
 
 
+class _TwoStampDetector(_StubDetector):
+    def predict(self, source=None, conf=0.0, verbose=False):
+        return [_StubResult(self.names, [
+            _StubBox(1, 0.92, [5.0, 5.0, 60.0, 60.0]),
+            _StubBox(1, 0.81, [100.0, 100.0, 180.0, 180.0]),
+        ])]
+
+
 def test_validate_compares_every_detected_signature(tmp_path, jpeg_bytes):
     pytest.importorskip("tensorflow")
 
@@ -821,6 +829,41 @@ def test_validate_compares_every_detected_signature(tmp_path, jpeg_bytes):
         [100.0, 100.0, 180.0, 180.0],
     ]
     assert all("distance" in comparison for comparison in signature["comparisons"])
+
+
+def test_validate_compares_every_detected_stamp_and_selects_best_pair(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path, stamp_similarity_threshold=0.5))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _TwoStampDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        reference = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()["vector"]
+
+        response = client.post(
+            "/v1/validate",
+            headers=AUTH,
+            files=_upload(jpeg_bytes),
+            data={
+                "document_type": "unsupported_national",
+                "issuer_scope": "national",
+                "stamp_references": json.dumps({"": reference}),
+            },
+        )
+
+    assert response.status_code == 200
+    stamp = response.json()["stages"]["stamp"]
+    assert len(stamp["comparisons"]) == 2
+    assert [comparison["box"] for comparison in stamp["comparisons"]] == [
+        [5.0, 5.0, 60.0, 60.0],
+        [100.0, 100.0, 180.0, 180.0],
+    ]
+    best = max(stamp["comparisons"], key=lambda comparison: comparison["similarity_score"])
+    assert stamp["box"] == best["box"]
+    assert stamp["best_reference_key"] == "enrolled-reference"
+    assert stamp["similarity_score"] == pytest.approx(best["similarity_score"])
 
 
 def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):

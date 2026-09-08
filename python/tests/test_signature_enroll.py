@@ -263,6 +263,25 @@ def test_enroll_prefers_a_dedicated_detector_when_configured(tmp_path, jpeg_byte
     assert enrollment_detector.calls[0]["imgsz"] == 640
 
 
+def test_enroll_uses_request_confidence_override(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    detector = _three_signature_detector()
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        response = client.post(
+            "/v1/signature/enroll",
+            headers=AUTH,
+            files=_upload(jpeg_bytes),
+            data={"signature_enroll_detection_confidence": "0.35"},
+        )
+
+    assert response.status_code == 200
+    assert detector.calls[0]["conf"] == pytest.approx(0.35)
+
+
 def test_enroll_uses_the_default_dedicated_detector_path(tmp_path):
     settings = Settings(
         api_token=TOKEN,

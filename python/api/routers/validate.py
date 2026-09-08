@@ -228,6 +228,10 @@ def _signature_boxes(detections: list[dict]) -> list[dict]:
     return [detection for detection in detections if detection["label"] == "signature"]
 
 
+def _stamp_boxes(detections: list[dict]) -> list[dict]:
+    return [detection for detection in detections if detection["label"] in ("stamp", "logo")]
+
+
 def _page_images(pages_bgr: list) -> list[Image.Image]:
     import cv2
     return [Image.fromarray(cv2.cvtColor(page, cv2.COLOR_BGR2RGB)) for page in pages_bgr]
@@ -320,6 +324,33 @@ def _aggregate_signature_verification(page_stages: list[dict]) -> dict:
         return {**selected, "comparisons": comparisons}
     if completed:
         return {**completed[0], "comparisons": []}
+    return page_stages[0] if page_stages else _skipped("no_pages")
+
+
+def _aggregate_stamp_verification(page_stages: list[dict]) -> dict:
+    comparisons = [
+        {**comparison, "page_index": page_index}
+        for page_index, stage in enumerate(page_stages, start=1)
+        for comparison in stage.get("comparisons", [])
+    ]
+    scored = [
+        comparison for comparison in comparisons
+        if comparison.get("similarity_score") is not None
+    ]
+    if scored:
+        selected = max(
+            scored,
+            key=lambda comparison: (
+                float(comparison["similarity_score"]),
+                float(comparison.get("confidence", 0.0)),
+                -int(comparison["page_index"]),
+            ),
+        )
+        return {**selected, "comparisons": comparisons}
+
+    completed = [stage for stage in page_stages if stage.get("status") == "completed"]
+    if completed:
+        return {**completed[0], "comparisons": comparisons}
     return page_stages[0] if page_stages else _skipped("no_pages")
 
 
@@ -611,7 +642,7 @@ async def validate(
                     flags.append("signature_failed")
 
             stamp_model = registry.get("stamp")
-            stamp_box = _best_box(detections, ("stamp", "logo"))
+            stamp_boxes = _stamp_boxes(detections)
             permit_evidence = page_ocr.get("business_permit") or {}
             detected_city = canonical_city(
                 permit_evidence.get("issuer_city_canonical")
@@ -629,7 +660,7 @@ async def validate(
             elif stages["detection"].get("status") != "completed":
                 stages["stamp"] = _skipped("detection_unavailable")
                 page_timings["stamp"] = 0.0
-            elif stamp_box is None:
+            elif not stamp_boxes:
                 stages["stamp"] = _skipped("no_stamp_detected")
                 page_timings["stamp"] = 0.0
             else:
@@ -649,25 +680,50 @@ async def validate(
                         logo_reference, reference_flag = resolve_issuer_reference(
                             logo_references, single_logo_reference, scope, resolved_city
                         )
-                    result, elapsed = _timed(lambda: run_stamp_verify(
-                        stamp_model,
-                        _crop(page, stamp_box["box"]),
-                        logo_reference,
-                        settings,
-                        normalized_type,
-                        resolved_city,
-                        classifier=registry.get("stamp_classifier"),
-                        missing_reason=reference_flag or "unreferenced_logo",
-                        reference_candidates=curated_references,
-                    ))
-                    stages["stamp"] = _completed(result)
-                    page_timings["stamp"] = elapsed
-                    if result.get("reason"):
-                        flags.append(result["reason"])
-                    if result.get("stamp_tampered") is True:
-                        flags.append("stamp_tampered")
-                    if result.get("stamp_tampered") is None:
-                        flags.append("stamp_tamper_unavailable")
+                    comparisons = []
+                    elapsed_total = 0.0
+                    for stamp_box in stamp_boxes:
+                        result, elapsed = _timed(lambda box=stamp_box: run_stamp_verify(
+                            stamp_model,
+                            _crop(page, box["box"]),
+                            logo_reference,
+                            settings,
+                            normalized_type,
+                            resolved_city,
+                            classifier=registry.get("stamp_classifier"),
+                            missing_reason=reference_flag or "unreferenced_logo",
+                            reference_candidates=curated_references,
+                        ))
+                        comparisons.append({
+                            **result,
+                            "box": stamp_box["box"],
+                            "confidence": stamp_box["confidence"],
+                        })
+                        elapsed_total += elapsed
+
+                        if result.get("reason"):
+                            flags.append(result["reason"])
+                        if result.get("stamp_tampered") is True:
+                            flags.append("stamp_tampered")
+                        if result.get("stamp_tampered") is None:
+                            flags.append("stamp_tamper_unavailable")
+
+                    scored = [
+                        comparison for comparison in comparisons
+                        if comparison.get("similarity_score") is not None
+                    ]
+                    selected = max(
+                        scored,
+                        key=lambda comparison: (
+                            float(comparison["similarity_score"]),
+                            float(comparison.get("confidence", 0.0)),
+                        ),
+                    ) if scored else comparisons[0]
+                    stages["stamp"] = _completed({
+                        **selected,
+                        "comparisons": comparisons,
+                    })
+                    page_timings["stamp"] = elapsed_total
                 except Exception as exc:
                     logger.exception("stamp stage failed on page %s", page_index)
                     stages["stamp"] = _failed(f"error: {exc}")
@@ -720,8 +776,8 @@ async def validate(
         "signature": _aggregate_signature_verification(
             [page["stages"]["signature"] for page in page_results]
         ),
-        "stamp": _aggregate_verification(
-            [page["stages"]["stamp"] for page in page_results], "similarity_score"
+        "stamp": _aggregate_stamp_verification(
+            [page["stages"]["stamp"] for page in page_results]
         ),
         "tamper": _aggregate_tamper([page["stages"]["tamper"] for page in page_results]),
     }

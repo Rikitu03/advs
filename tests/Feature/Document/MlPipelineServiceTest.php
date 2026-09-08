@@ -147,6 +147,85 @@ class MlPipelineServiceTest extends TestCase
         $this->assertNull($mapped['columns']['logo_reference_id']);
     }
 
+    public function test_maps_every_stamp_comparison_and_keeps_the_aggregate_result(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'detection' => ['detections' => [
+                ['label' => 'stamp', 'confidence' => 0.91, 'box' => [10, 20, 30, 40]],
+                ['label' => 'stamp', 'confidence' => 0.84, 'box' => [50, 60, 70, 80]],
+            ]],
+            'stamp' => [
+                'match' => false,
+                'similarity_score' => 0.63,
+                'threshold' => 0.85,
+                'reason' => null,
+                'box' => [50, 60, 70, 80],
+                'reference_source' => 'enrolled',
+                'best_reference_key' => 'bir-seal',
+                'comparisons' => [
+                    [
+                        'page_index' => 1,
+                        'box' => [10, 20, 30, 40],
+                        'confidence' => 0.91,
+                        'match' => true,
+                        'similarity_score' => 0.91,
+                        'threshold' => 0.85,
+                        'reference_source' => 'enrolled',
+                        'best_reference_key' => 'bir-seal',
+                        'reference_matches' => [
+                            ['key' => 'bir-seal', 'label' => 'BIR Seal', 'source' => 'enrolled', 'similarity_score' => 0.91, 'match' => true],
+                        ],
+                    ],
+                    [
+                        'page_index' => 1,
+                        'box' => [50, 60, 70, 80],
+                        'confidence' => 0.84,
+                        'match' => false,
+                        'similarity_score' => 0.63,
+                        'threshold' => 0.85,
+                        'reference_source' => 'enrolled',
+                        'best_reference_key' => 'bir-seal',
+                        'reference_matches' => [
+                            ['key' => 'bir-seal', 'label' => 'BIR Seal', 'source' => 'enrolled', 'similarity_score' => 0.63, 'match' => false],
+                        ],
+                    ],
+                ],
+            ],
+        ], ['issuer_scope' => 'national', 'logo_reference_ids' => ['' => 42]])['columns'];
+
+        $this->assertCount(2, $mapped['stamp_comparisons']);
+        $this->assertSame([10, 20, 30, 40], $mapped['stamp_comparisons'][0]['box']);
+        $this->assertSame([50, 60, 70, 80], $mapped['stamp_comparisons'][1]['box']);
+        $this->assertSame(0.84, $mapped['stamp_comparisons'][1]['confidence']);
+        $this->assertSame([50, 60, 70, 80], $mapped['stamp_bbox']);
+        $this->assertFalse($mapped['stamp_passed']);
+        $this->assertSame(42, $mapped['logo_reference_id']);
+    }
+
+    public function test_maps_stamp_comparisons_when_issuer_reference_is_missing(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'stamp' => [
+                'match' => false,
+                'reason' => 'unreferenced_logo',
+                'comparisons' => [[
+                    'page_index' => 1,
+                    'box' => [10, 20, 30, 40],
+                    'confidence' => 0.91,
+                    'match' => false,
+                    'similarity_score' => null,
+                    'threshold' => null,
+                    'reference_matches' => [],
+                ]],
+            ],
+        ], ['issuer_scope' => 'national']);
+
+        $this->assertCount(1, $mapped['columns']['stamp_comparisons']);
+        $this->assertSame([10, 20, 30, 40], $mapped['columns']['stamp_comparisons'][0]['box']);
+        $this->assertFalse($mapped['columns']['stamp_detected']);
+        $this->assertContains('unreferenced_logo', $mapped['flags']);
+    }
+
     public function test_maps_classification_authenticity_separately_from_confidence(): void
     {
         $stages = [

@@ -209,6 +209,13 @@ class SubmissionPresenter
             $logoReferences ?? collect(),
             $document === null ? [] : ($stampEvidence[$document->id] ?? []),
         );
+        $stampComparisons = self::stampComparisons(
+            $document,
+            $result,
+            $typeMetadata ?? collect(),
+            $logoReferences ?? collect(),
+            $stampEvidence,
+        );
 
         return [
             'text' => [
@@ -259,6 +266,7 @@ class SubmissionPresenter
                 'scan_copy_texture' => (bool) ($result?->stamp_tampered ?? false),
                 'crop' => self::cropData($document, $result?->stamp_bbox),
                 'references' => $references,
+                'comparisons' => $stampComparisons,
                 'reference_image_url' => $references[0]['url'] ?? null,
                 'detail' => match (true) {
                     $result === null || $result->stamp_detected === null => 'Stage not yet available.',
@@ -323,6 +331,94 @@ class SubmissionPresenter
             'crop' => self::cropData($document, $result?->signature_bbox),
             'reference_image_url' => $referenceImageUrl,
         ]];
+    }
+
+    /**
+     * Normalize one issuer-reference comparison per detected stamp/logo.
+     * Older rows only have singular aggregate fields, so they receive one
+     * compatibility item rather than fabricated comparisons.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function stampComparisons(
+        ?Document $document,
+        ?ValidationResult $result,
+        Collection $typeMetadata,
+        Collection $logoReferences,
+        array $stampEvidence,
+    ): array {
+        $stored = $result?->stamp_comparisons;
+
+        if (is_array($stored) && $stored !== []) {
+            return collect($stored)
+                ->filter(fn (mixed $comparison): bool => is_array($comparison))
+                ->map(function (array $comparison) use ($document, $typeMetadata, $logoReferences): array {
+                    $matches = collect($comparison['reference_matches'] ?? [])
+                        ->filter(fn (mixed $match): bool => is_array($match) && is_string($match['key'] ?? null))
+                        ->keyBy('key')
+                        ->all();
+                    $references = self::stampReferences(
+                        $document,
+                        $typeMetadata,
+                        $logoReferences,
+                        [
+                            'best_reference_key' => $comparison['best_reference_key'] ?? null,
+                            'matches' => $matches,
+                        ],
+                    );
+
+                    return self::formatStampComparison($document, $comparison, $references);
+                })
+                ->values()
+                ->all();
+        }
+
+        if ($result?->stamp_bbox === null && $result?->stamp_detected !== true) {
+            return [];
+        }
+
+        $aggregate = $stampEvidence[$document?->id] ?? [];
+        $references = self::stampReferences($document, $typeMetadata, $logoReferences, $aggregate);
+
+        return [self::formatStampComparison($document, [
+            'page_index' => null,
+            'box' => $result?->stamp_bbox,
+            'confidence' => null,
+            'match' => $result?->stamp_passed,
+            'similarity_score' => $result?->stamp_similarity,
+            'threshold' => null,
+            'stamp_tampered' => $result?->stamp_tampered,
+            'best_reference_key' => $aggregate['best_reference_key'] ?? null,
+        ], $references)];
+    }
+
+    /**
+     * @param  array<string, mixed>  $comparison
+     * @param  list<array<string, mixed>>  $references
+     * @return array<string, mixed>
+     */
+    private static function formatStampComparison(?Document $document, array $comparison, array $references): array
+    {
+        $similarity = is_numeric($comparison['similarity_score'] ?? null)
+            ? (float) $comparison['similarity_score']
+            : null;
+
+        return [
+            'page_index' => $comparison['page_index'] ?? null,
+            'confidence' => $comparison['confidence'] ?? null,
+            'match' => $comparison['match'] ?? null,
+            'pass' => (bool) ($comparison['match'] ?? false),
+            'similarity' => $similarity === null ? null : (int) round($similarity * 100),
+            'cosine' => $similarity === null ? '—' : round($similarity, 3),
+            'similarity_threshold' => isset($comparison['threshold']) && is_numeric($comparison['threshold'])
+                ? (int) round((float) $comparison['threshold'] * 100)
+                : null,
+            'texture_checked' => $comparison['stamp_tampered'] !== null,
+            'scan_copy_texture' => (bool) ($comparison['stamp_tampered'] ?? false),
+            'crop' => self::cropData($document, $comparison['box'] ?? null),
+            'references' => $references,
+            'reference_image_url' => $references[0]['url'] ?? null,
+        ];
     }
 
     /**
@@ -439,26 +535,29 @@ class SubmissionPresenter
         );
 
         if ($curated !== []) {
-            return array_map(
-                function (array $reference) use ($matches, $bestReferenceKey): array {
-                    $match = is_array($matches[$reference['key']] ?? null) ? $matches[$reference['key']] : null;
-                    $similarity = is_numeric($match['similarity_score'] ?? null)
-                        ? (float) $match['similarity_score']
-                        : null;
+            $reference = collect($curated)->first(
+                fn (array $candidate): bool => $candidate['key'] === $bestReferenceKey,
+            ) ?? ($bestReferenceKey === null ? $curated[0] : null);
 
-                    return [
-                        'key' => $reference['key'],
-                        'label' => $reference['label'],
-                        'source' => 'curated',
-                        'url' => route('admin.issuer-logo-references.show', ['reference' => $reference['key']]),
-                        'similarity' => $similarity === null ? null : (int) round($similarity * 100),
-                        'cosine' => $similarity === null ? null : round($similarity, 3),
-                        'match' => is_bool($match['match'] ?? null) ? $match['match'] : null,
-                        'best' => $bestReferenceKey === $reference['key'],
-                    ];
-                },
-                $curated,
-            );
+            if ($reference === null) {
+                return [];
+            }
+
+            $match = is_array($matches[$reference['key']] ?? null) ? $matches[$reference['key']] : null;
+            $similarity = is_numeric($match['similarity_score'] ?? null)
+                ? (float) $match['similarity_score']
+                : null;
+
+            return [[
+                'key' => $reference['key'],
+                'label' => $reference['label'],
+                'source' => 'curated',
+                'url' => route('admin.issuer-logo-references.show', ['reference' => $reference['key']]),
+                'similarity' => $similarity === null ? null : (int) round($similarity * 100),
+                'cosine' => $similarity === null ? null : round($similarity, 3),
+                'match' => is_bool($match['match'] ?? null) ? $match['match'] : null,
+                'best' => true,
+            ]];
         }
 
         $databaseReference = self::databaseLogoReference($document, $type, $logoReferences);

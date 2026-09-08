@@ -26,6 +26,7 @@ class SystemSettingSeeder extends Seeder
             ['morph_kernel_size', '2', 'Kernel dimension for morphological opening'],
             ['classification_confidence_threshold', '0.70', 'Minimum ResNet-50 confidence to pass'],
             ['yolo_detection_confidence', '0.20', 'Minimum YOLOv8 detection confidence'],
+            ['signature_enroll_detection_confidence', '0.20', 'Minimum YOLOv8 confidence for registration signature enrollment'],
             ['signature_distance_threshold', '1.243976', 'Maximum Euclidean distance for signature match'],
             ['stamp_similarity_threshold', '0.80', 'Minimum cosine similarity for stamp match (0-1)'],
             ['stamp_tamper_threshold', '0.50', 'Minimum genuine probability for the stamp texture classifier'],

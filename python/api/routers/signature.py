@@ -180,7 +180,11 @@ async def signature_verify(
 
 
 @router.post("/v1/signature/enroll", response_model=SignatureEnrollResponse)
-async def signature_enroll(request: Request, file: UploadFile = File(...)) -> dict:
+async def signature_enroll(
+    request: Request,
+    file: UploadFile = File(...),
+    signature_enroll_detection_confidence: float | None = Form(None),
+) -> dict:
     """Registration-time signature reference capture (§5 Stage 4a).
 
     The vendor uploads one photo of THREE signatures on bond paper. This detects the
@@ -193,6 +197,16 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
     """
     registry = request.app.state.registry
     settings: Settings = request.app.state.settings
+    detection_confidence = (
+        settings.signature_enroll_detection_confidence
+        if signature_enroll_detection_confidence is None
+        else signature_enroll_detection_confidence
+    )
+    if not 0.0 <= detection_confidence <= 1.0:
+        raise HTTPException(
+            status_code=422,
+            detail="signature_enroll_detection_confidence must be between 0 and 1.",
+        )
     detector = registry.get("signature_enroll_detector") or registry.require("detector")
     siamese = registry.require("siamese")
     
@@ -204,7 +218,7 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
     logger.info(
         "signature_enroll: image=%dx%d, detector=%s, confidence=%.2f, imgsz=%d",
         image.width, image.height, detector_name,
-        settings.signature_enroll_detection_confidence,
+        detection_confidence,
         settings.signature_enroll_detection_imgsz,
     )
 
@@ -212,7 +226,7 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
         detector,
         image,
         settings,
-        confidence=settings.signature_enroll_detection_confidence,
+        confidence=detection_confidence,
         imgsz=settings.signature_enroll_detection_imgsz,
     )
     
@@ -234,7 +248,7 @@ async def signature_enroll(request: Request, file: UploadFile = File(...)) -> di
             detector,
             enhanced_image,
             settings,
-            confidence=settings.signature_enroll_detection_confidence,
+            confidence=detection_confidence,
             imgsz=settings.signature_enroll_detection_imgsz,
         )
         

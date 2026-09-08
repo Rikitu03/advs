@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Signature;
 
+use App\Models\SystemSetting;
 use App\Services\Signature\SignatureEnrollmentResult;
 use App\Services\Signature\SignatureEnrollmentService;
 use Illuminate\Support\Facades\Http;
@@ -53,6 +54,19 @@ class SignatureEnrollmentServiceTest extends TestCase
         $this->assertEqualsWithDelta(0.92, $result->consistency, 1e-9);
         $this->assertSame([0.1, 0.2, 0.3], $result->centroid);
         $this->assertCount(3, $result->samples);
+    }
+
+    public function test_enrollment_detection_confidence_is_sent_to_the_api(): void
+    {
+        SystemSetting::set('signature_enroll_detection_confidence', 0.35);
+        $this->fakeEnroll();
+
+        $this->enroll();
+
+        Http::assertSent(function ($request): bool {
+            return str_contains($request->body(), 'signature_enroll_detection_confidence')
+                && str_contains($request->body(), '0.35');
+        });
     }
 
     public function test_wrong_signature_count_is_rejected(): void

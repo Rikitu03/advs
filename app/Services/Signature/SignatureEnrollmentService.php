@@ -3,6 +3,7 @@
 namespace App\Services\Signature;
 
 use App\Services\Document\MlPipelineService;
+use App\Services\SystemSettingsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -21,6 +22,8 @@ use RuntimeException;
  */
 class SignatureEnrollmentService
 {
+    public function __construct(private readonly SystemSettingsService $settings) {}
+
     public const REASON_COUNT = 'expected_signature_count';
 
     public const REASON_SIMILARITY = 'signatures_not_similar';
@@ -46,7 +49,9 @@ class SignatureEnrollmentService
                 ->timeout((int) ($ml['timeout'] ?? 180))
                 ->retry(max(1, (int) ($ml['retries'] ?? 1)), 200, throw: false)
                 ->attach('file', $contents, $filename)
-                ->post($endpoint);
+                ->post($endpoint, [
+                    'signature_enroll_detection_confidence' => (float) ($this->settings->pipelineSnapshot()['SIGNATURE_ENROLL_DETECTION_CONFIDENCE'] ?? 0.20),
+                ]);
         } catch (ConnectionException $exc) {
             throw new RuntimeException("ML API unreachable at {$ml['base_url']}: {$exc->getMessage()}", previous: $exc);
         }

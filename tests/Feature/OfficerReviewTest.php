@@ -409,8 +409,8 @@ class OfficerReviewTest extends TestCase
             route('admin.issuer-logo-references.show', 'bir-permit-logo'),
             $components['stamp']['reference_image_url'],
         );
-        $this->assertSame(['bir-permit-logo', 'bir-seal'], array_column($components['stamp']['references'], 'key'));
-        $this->assertSame(['curated', 'curated'], array_column($components['stamp']['references'], 'source'));
+        $this->assertSame(['bir-permit-logo'], array_column($components['stamp']['references'], 'key'));
+        $this->assertSame(['curated'], array_column($components['stamp']['references'], 'source'));
 
         $this->actingAs($this->officer)
             ->get(route('admin.submissions.show', $submission->id))
@@ -422,10 +422,9 @@ class OfficerReviewTest extends TestCase
                 'Enrolled signature reference',
             ])
             ->assertSeeHtml('data-issuer-reference-card="bir-permit-logo"')
-            ->assertSeeHtml('data-issuer-reference-card="bir-seal"')
-            ->assertSeeInOrder(['BIR Permit Logo', 'BIR Seal'])
+            ->assertDontSeeHtml('data-issuer-reference-card="bir-seal"')
             ->assertSee('BIR Permit Logo')
-            ->assertSee('BIR Seal');
+            ->assertDontSee('BIR Seal');
 
         $this->actingAs($this->officer)
             ->get(route('admin.signature.show', $vendor->id))
@@ -555,10 +554,9 @@ class OfficerReviewTest extends TestCase
 
         $references = SubmissionPresenter::detail($submission->fresh())['component_sets']['all']['stamp']['references'];
 
-        $this->assertSame(['bir-permit-logo', 'bir-seal'], array_column($references, 'key'));
-        $this->assertSame([71, 94], array_column($references, 'similarity'));
-        $this->assertFalse($references[0]['best']);
-        $this->assertTrue($references[1]['best']);
+        $this->assertSame(['bir-seal'], array_column($references, 'key'));
+        $this->assertSame([94], array_column($references, 'similarity'));
+        $this->assertTrue($references[0]['best']);
     }
 
     public function test_reference_image_routes_return_not_found_for_stale_storage_paths(): void
