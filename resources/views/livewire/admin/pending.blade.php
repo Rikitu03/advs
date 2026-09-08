@@ -3,9 +3,11 @@
 use App\Models\Submission;
 use App\Support\SubmissionPresenter;
 use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     public string $search = '';
 
     public string $risk = 'all';
@@ -20,6 +22,7 @@ new class extends Component {
      *
      * @return Collection<int, array<string, mixed>>
      */
+    #[Computed]
     public function filtered(): Collection
     {
         $term = mb_strtolower(trim($this->search));
@@ -42,13 +45,24 @@ new class extends Component {
     }
 
     /**
+     * Total pending-review submissions, independent of the active filters.
+     */
+    #[Computed]
+    public function total(): int
+    {
+        return Submission::query()
+            ->where('status', Submission::STATUS_PENDING_REVIEW)
+            ->count();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function with(): array
     {
         return [
-            'rows' => $this->filtered(),
-            'total' => Submission::query()->where('status', Submission::STATUS_PENDING_REVIEW)->count(),
+            'rows' => $this->filtered,
+            'total' => $this->total,
         ];
     }
 }; ?>

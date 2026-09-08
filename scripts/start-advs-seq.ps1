@@ -2,14 +2,11 @@
 # Usage: Right-click → Run with PowerShell, or execute from PowerShell: .\scripts\start-advs-seq.ps1
 
 [CmdletBinding()]
-param(
-    [switch] $ResetDatabase
-)
+param()
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $pythonDirectory = Join-Path $repo 'python'
 $pythonExecutable = Join-Path $pythonDirectory 'env\Scripts\python.exe'
-$resetDatabase = $ResetDatabase
 Write-Host "Repository root: $repo"
 
 function Run-Command {
@@ -27,20 +24,18 @@ function Run-Command {
 
 try {
     # 1) Prep steps (run sequentially and stop on first failure)
-    if ($resetDatabase) {
-        Run-Command -cmd "php artisan migrate:fresh --no-interaction" -exitOnError
-        Run-Command -cmd "php artisan db:seed --no-interaction" -exitOnError
-    }
 
     Run-Command -cmd "npm run build" -exitOnError
     Run-Command -cmd "php artisan optimize:clear" -exitOnError
+    Run-Command -cmd "php artisan advs:db-ping --no-interaction" -exitOnError
 
     # 2) Start services, each in a new window
     Write-Host "Starting services in separate windows..."
 
     $startArgs = @( 
           @{ name = 'Laravel Server'; cmd = "php -d max_execution_time=0 artisan serve" },
-          @{ name = 'Queue Worker'; cmd = "php -d max_execution_time=0 artisan queue:work --tries=3 --timeout=360 --queue=document-processing,mail,default" },
+          @{ name = 'Mail Queue Worker'; cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/queue-worker.ps1 -Queue mail -Timeout 60" },
+          @{ name = 'Document Queue Worker'; cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/queue-worker.ps1 -Queue document-processing -Timeout 360" },
           @{ name = 'Vite Dev'; cmd = "npm run dev" },
           @{ name = 'Python API'; cmd = "& '$repo\start_fastapi.ps1'" }
     )

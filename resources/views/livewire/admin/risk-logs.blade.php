@@ -16,6 +16,7 @@ new class extends Component {
         'low_classification' => ['label' => 'Low classification confidence', 'icon' => 'cpu-chip', 'color' => 'amber'],
         'signature_mismatch' => ['label' => 'Signature mismatch', 'icon' => 'pencil-square', 'color' => 'rose'],
         'stamp_mismatch' => ['label' => 'Stamp mismatch', 'icon' => 'shield-exclamation', 'color' => 'rose'],
+        'stamp_texture' => ['label' => 'Stamp scan/copy texture', 'icon' => 'document-duplicate', 'color' => 'amber'],
         'tampering' => ['label' => 'Tampering', 'icon' => 'exclamation-triangle', 'color' => 'rose'],
         'other' => ['label' => 'Other', 'icon' => 'flag', 'color' => 'zinc'],
     ];
@@ -74,7 +75,7 @@ new class extends Component {
                         $logs->push([
                             'type' => $this->categorize($flag),
                             'severity' => $summary['risk_level'] === 'high' ? 'high' : 'medium',
-                            'title' => $flag,
+                            'title' => SubmissionPresenter::flagLabel($flag),
                             'detail' => $document->original_filename,
                             'raised_at' => $result->updated_at ?? $submission->created_at,
                             'submission_id' => $submission->id,
@@ -98,6 +99,7 @@ new class extends Component {
         $needle = mb_strtolower($flag);
 
         return match (true) {
+            in_array($flag, ['stamp_tampered', 'stamp_tamper_unavailable'], true) => 'stamp_texture',
             str_contains($needle, 'tamper') => 'tampering',
             str_contains($needle, 'signature') => 'signature_mismatch',
             str_contains($needle, 'stamp') || str_contains($needle, 'logo') => 'stamp_mismatch',

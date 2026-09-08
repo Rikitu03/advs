@@ -19,6 +19,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ import numpy as np
 PY_ROOT = Path(__file__).resolve().parents[1]
 
 ASSET_DIRS = ("stamps", "seal", "logo", "template/reference")
+CATALOG_MANIFEST = "manifest.json"
 FORGERY_KINDS = ("photocopy", "hue_shift", "elastic_warp", "rescale", "erase")
 CANVAS = 256  # output crops are CANVAS x CANVAS; training resizes to 224 anyway
 
@@ -38,8 +40,17 @@ def log(msg: str) -> None:
 
 
 def discover_assets(data_root: Path) -> dict[str, Path]:
-    """asset name (lowercased stem) -> source PNG under the repo art folders."""
+    """Reference key -> source image, preferring the curated manifest."""
     out: dict[str, Path] = {}
+    manifest = data_root / CATALOG_MANIFEST
+    if manifest.is_file():
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        for reference in payload.get("references", []):
+            path = data_root / Path(*Path(reference["path"]).parts)
+            if path.is_file():
+                out[str(reference["key"])] = path
+        return out
+
     for rel in ASSET_DIRS:
         folder = data_root / rel
         if not folder.is_dir():
@@ -178,8 +189,8 @@ def generate(data_root: Path, out_root: Path, per_asset: int,
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Generate the ADVS genuine/forged stamp dataset.")
-    ap.add_argument("--data-root", default=str(PY_ROOT / "data"),
-                    help="Repo data folder holding stamps/, seal/, logo/, template/reference/.")
+    ap.add_argument("--data-root", default=str(PY_ROOT / "logo_and_seals"),
+                    help="Curated issuer-reference folder containing manifest.json.")
     ap.add_argument("--out-root", default=str(PY_ROOT / "data"),
                     help="Where training/ and validation/ stamp_data are written.")
     ap.add_argument("--per-asset", type=int, default=40,

@@ -5,7 +5,9 @@ namespace App\Actions;
 use App\Models\Document;
 use App\Models\PipelineRun;
 use App\Models\ValidationResult;
+use App\Services\Document\BusinessPermitEvidence;
 use App\Services\Document\MlPipelineService;
+use App\Services\Document\OcrVendorMatchScore;
 use App\Services\Document\RiskScoreService;
 use App\Services\Document\SubmissionFinalizer;
 use App\Services\Document\TamperDetectionService;
@@ -25,6 +27,8 @@ class ProcessDocumentAction
 {
     public function __construct(
         private readonly MlPipelineService $mlPipeline,
+        private readonly OcrVendorMatchScore $ocrVendorMatchScore,
+        private readonly BusinessPermitEvidence $businessPermitEvidence,
         private readonly TamperDetectionService $tamperService,
         private readonly RiskScoreService $riskService,
         private readonly SubmissionFinalizer $finalizer,
@@ -33,6 +37,8 @@ class ProcessDocumentAction
 
     public function execute(Document $document, int $attempt = 1): ValidationResult
     {
+        $document->loadMissing(['submission.vendor.representative']);
+
         $startedAt = now();
         $settingsSnapshot = $this->settings->pipelineSnapshot();
 
@@ -52,6 +58,40 @@ class ProcessDocumentAction
         ]);
         $result->fill($mapped['columns']);
 
+        $vendor = $document->submission?->vendor;
+        $textMatch = $this->ocrVendorMatchScore->calculate(
+            $mapped['columns']['ocr_extracted_text'] ?? null,
+            $vendor,
+        );
+        $permitEvidence = $mapped['columns']['ocr_fields']['__business_permit'] ?? null;
+        $permitScore = is_array($permitEvidence)
+            ? $this->businessPermitEvidence->score($permitEvidence, $vendor)
+            : null;
+        if ($permitScore !== null) {
+            $fields = $mapped['columns']['ocr_fields'] ?? [];
+            $fields['__business_permit']['identity'] = $permitScore;
+            $result->ocr_fields = $fields;
+        }
+
+        $permitMatched = $permitScore === null
+            ? null
+            : count(array_filter(
+                $permitScore['checks'],
+                static fn (array $check): bool => ($check['available'] ?? false) && ($check['matched'] ?? false),
+            ));
+        $permitExpected = $permitScore === null
+            ? null
+            : count(array_filter(
+                $permitScore['checks'],
+                static fn (array $check): bool => ($check['available'] ?? false),
+            ));
+
+        $result->fill([
+            'text_validation_score' => $permitScore['score'] ?? $textMatch['score'],
+            'text_fields_matched' => $permitMatched ?? $textMatch['matched'],
+            'text_fields_expected' => $permitExpected ?? $textMatch['expected'],
+        ]);
+
         $verdict = [];
         $tamperStage = $response['stages']['tamper'] ?? null;
         if (is_array($tamperStage) && ($tamperStage['skipped'] ?? false) !== true) {
@@ -70,6 +110,7 @@ class ProcessDocumentAction
         $flags = array_values(array_unique(array_merge(
             $response['flags'],
             $mapped['flags'],
+            $permitScore['flags'] ?? [],
             $verdict['flags'] ?? [],
             $risk['hard_override'] ? ['Document tampering suspected'] : [],
             $this->missingStageFlags($risk['breakdown']),

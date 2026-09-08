@@ -17,7 +17,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $last_name
  * @property string|null $suffix
  * @property string $gender
- * @property string $government_id_type
+ * @property string|null $government_id_type
+ * @property string|null $government_id_number
+ * @property string|null $home_address
  */
 class VendorRepresentative extends Model
 {

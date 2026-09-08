@@ -20,6 +20,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from PIL import Image
 
 from .. import embedding as emb
+from ..compat import load_script
+from ..logo_catalog import (
+    CatalogError,
+    canonical_city,
+    embed_candidates,
+    resolve_candidates,
+)
 from ..config import Settings
 from ..registry import ModelRegistry
 from ..uploads import load_pages, save_upload
@@ -157,13 +164,6 @@ def _validate_runtime_setting(key: str, value: Any) -> None:
         raise HTTPException(status_code=422, detail="MAX_FILE_SIZE_MB must be between 1 and 100.")
 
 
-def canonical_city(value: str | None) -> str | None:
-    if value is None:
-        return None
-    squished = " ".join(str(value).split())
-    return squished.title() if squished else None
-
-
 def parse_reference_map(raw: str | None, expected_length: int | None = None) -> dict[str, list[float]]:
     if not raw:
         return {}
@@ -222,6 +222,14 @@ def _crop(page: Image.Image, box: list[float]) -> Image.Image:
 def _best_box(detections: list[dict], labels: tuple[str, ...]) -> dict | None:
     candidates = [d for d in detections if d["label"] in labels]
     return max(candidates, key=lambda d: d["confidence"]) if candidates else None
+
+
+def _signature_boxes(detections: list[dict]) -> list[dict]:
+    return [detection for detection in detections if detection["label"] == "signature"]
+
+
+def _stamp_boxes(detections: list[dict]) -> list[dict]:
+    return [detection for detection in detections if detection["label"] in ("stamp", "logo")]
 
 
 def _page_images(pages_bgr: list) -> list[Image.Image]:
@@ -304,6 +312,48 @@ def _aggregate_verification(page_stages: list[dict], score_key: str) -> dict:
     return page_stages[0] if page_stages else _skipped("no_pages")
 
 
+def _aggregate_signature_verification(page_stages: list[dict]) -> dict:
+    comparisons = [
+        {**comparison, "page_index": page_index}
+        for page_index, stage in enumerate(page_stages, start=1)
+        for comparison in stage.get("comparisons", [])
+    ]
+    completed = [stage for stage in page_stages if stage.get("status") == "completed"]
+    if comparisons:
+        selected = min(comparisons, key=lambda comparison: float(comparison.get("similarity", 0.0)))
+        return {**selected, "comparisons": comparisons}
+    if completed:
+        return {**completed[0], "comparisons": []}
+    return page_stages[0] if page_stages else _skipped("no_pages")
+
+
+def _aggregate_stamp_verification(page_stages: list[dict]) -> dict:
+    comparisons = [
+        {**comparison, "page_index": page_index}
+        for page_index, stage in enumerate(page_stages, start=1)
+        for comparison in stage.get("comparisons", [])
+    ]
+    scored = [
+        comparison for comparison in comparisons
+        if comparison.get("similarity_score") is not None
+    ]
+    if scored:
+        selected = max(
+            scored,
+            key=lambda comparison: (
+                float(comparison["similarity_score"]),
+                float(comparison.get("confidence", 0.0)),
+                -int(comparison["page_index"]),
+            ),
+        )
+        return {**selected, "comparisons": comparisons}
+
+    completed = [stage for stage in page_stages if stage.get("status") == "completed"]
+    if completed:
+        return {**completed[0], "comparisons": comparisons}
+    return page_stages[0] if page_stages else _skipped("no_pages")
+
+
 def _aggregate_tamper(page_stages: list[dict]) -> dict:
     completed = [stage for stage in page_stages if stage.get("status") == "completed"]
     if not completed:
@@ -331,7 +381,37 @@ def _aggregate_ocr(pages: list[dict]) -> tuple[dict, list[str]]:
 
     selected_fields: dict[str, dict] = {}
     values: dict[str, set[str]] = {}
-    for page in completed:
+    permit_evidence: dict[str, Any] | None = None
+    for page_index, page in enumerate(completed, start=1):
+        page_permit = page.get("business_permit")
+        if isinstance(page_permit, dict):
+            candidate = {**page_permit, "source_page": page_index}
+            if permit_evidence is None:
+                permit_evidence = {**candidate, "fields": {}, "conflicts": {}}
+            elif candidate.get("issuer_city_canonical") and not permit_evidence.get("issuer_city_canonical"):
+                permit_evidence["issuer_city_canonical"] = candidate["issuer_city_canonical"]
+                permit_evidence["issuer_city_raw"] = candidate.get("issuer_city_raw")
+                permit_evidence["issuer_city_confidence"] = candidate.get("issuer_city_confidence")
+                permit_evidence["layout_key"] = candidate.get("layout_key")
+            for key, value in (candidate.get("fields") or {}).items():
+                if not isinstance(value, dict):
+                    continue
+                current = permit_evidence["fields"].get(key)
+                if (current is not None and current.get("matched") and value.get("matched")
+                        and str(current.get("value")) != str(value.get("value"))):
+                    permit_evidence["conflicts"].setdefault(key, []).extend([
+                        current.get("value"), value.get("value"),
+                    ])
+                current_rank = (
+                    bool(current.get("matched")),
+                    101.0 if current.get("confidence") is None else float(current.get("confidence")),
+                ) if current else (False, -1.0)
+                candidate_rank = (
+                    bool(value.get("matched")),
+                    101.0 if value.get("confidence") is None else float(value.get("confidence")),
+                )
+                if current is None or candidate_rank > current_rank:
+                    permit_evidence["fields"][key] = {**value, "source_page": page_index}
         for key, field in (page.get("fields") or {}).items():
             if not field.get("matched") or field.get("value") in (None, ""):
                 continue
@@ -342,7 +422,7 @@ def _aggregate_ocr(pages: list[dict]) -> tuple[dict, list[str]]:
             current_conf = current.get("confidence") if current else None
             current_rank = -1.0 if current is None else (101.0 if current_conf is None else float(current_conf))
             if rank > current_rank:
-                selected_fields[key] = field
+                selected_fields[key] = {**field, "source_page": page_index}
 
     conflicts = [key for key, found in values.items() if len(found) > 1]
     quality_flags = [
@@ -375,11 +455,22 @@ def _aggregate_ocr(pages: list[dict]) -> tuple[dict, list[str]]:
             "conflicting_fields": conflicts,
         },
     })
-    return _completed({
+    aggregate = {
         "page_count": len(completed),
         "pages": [aggregate_page],
         "source_pages": completed,
-    }), (["ocr_field_conflict"] if conflicts else [])
+    }
+    if permit_evidence is not None:
+        permit_evidence["conflicts"] = {
+            key: list(dict.fromkeys(v for v in values if v not in (None, "")))
+            for key, values in permit_evidence.get("conflicts", {}).items()
+        }
+        permit_evidence["fields"] = {
+            key: {**value, "source_page": value.get("source_page") or permit_evidence.get("source_page")}
+            for key, value in (permit_evidence.get("fields") or {}).items()
+        }
+        aggregate["business_permit"] = permit_evidence
+    return _completed(aggregate), (["ocr_field_conflict"] if conflicts else [])
 
 
 @router.post("/v1/validate")
@@ -511,7 +602,7 @@ async def validate(
                     flags.append("detection_failed")
 
             siamese = registry.get("siamese")
-            signature_box = _best_box(detections, ("signature",))
+            signature_boxes = _signature_boxes(detections)
             if siamese is None:
                 stages["signature"] = _skipped("model_not_loaded")
                 page_timings["signature"] = 0.0
@@ -521,16 +612,29 @@ async def validate(
             elif stages["detection"].get("status") != "completed":
                 stages["signature"] = _skipped("detection_unavailable")
                 page_timings["signature"] = 0.0
-            elif signature_box is None:
+            elif not signature_boxes:
                 stages["signature"] = _skipped("no_signature_detected")
                 page_timings["signature"] = 0.0
             else:
                 try:
-                    result, elapsed = _timed(lambda: run_signature_verify(
-                        siamese, _crop(page, signature_box["box"]), sig_reference, settings
-                    ))
-                    stages["signature"] = _completed(result)
-                    page_timings["signature"] = elapsed
+                    comparisons = []
+                    elapsed_total = 0.0
+                    for signature_box in signature_boxes:
+                        result, elapsed = _timed(lambda box=signature_box: run_signature_verify(
+                            siamese, _crop(page, box["box"]), sig_reference, settings
+                        ))
+                        comparisons.append({
+                            **result,
+                            "box": signature_box["box"],
+                            "confidence": signature_box["confidence"],
+                        })
+                        elapsed_total += elapsed
+                    selected = min(comparisons, key=lambda comparison: float(comparison["similarity"]))
+                    stages["signature"] = _completed({
+                        **selected,
+                        "comparisons": comparisons,
+                    })
+                    page_timings["signature"] = elapsed_total
                 except Exception as exc:
                     logger.exception("signature stage failed on page %s", page_index)
                     stages["signature"] = _failed(f"error: {exc}")
@@ -538,13 +642,14 @@ async def validate(
                     flags.append("signature_failed")
 
             stamp_model = registry.get("stamp")
-            stamp_box = _best_box(detections, ("stamp", "logo"))
-            detected_city = canonical_city(context.get("fields", {}).get("city_issued"))
+            stamp_boxes = _stamp_boxes(detections)
+            permit_evidence = page_ocr.get("business_permit") or {}
+            detected_city = canonical_city(
+                permit_evidence.get("issuer_city_canonical")
+                or context.get("fields", {}).get("city_issued")
+            )
             resolved_city = canonical_city(city) or detected_city
             scope = issuer_scope.lower() if issuer_scope else None
-            logo_reference, reference_flag = resolve_issuer_reference(
-                logo_references, single_logo_reference, scope, resolved_city
-            )
             if scope is None or scope in ("none", "null"):
                 stages["stamp"] = _skipped("no_issuer_logo")
                 page_timings["stamp"] = 0.0
@@ -555,29 +660,70 @@ async def validate(
             elif stages["detection"].get("status") != "completed":
                 stages["stamp"] = _skipped("detection_unavailable")
                 page_timings["stamp"] = 0.0
-            elif stamp_box is None:
+            elif not stamp_boxes:
                 stages["stamp"] = _skipped("no_stamp_detected")
                 page_timings["stamp"] = 0.0
             else:
                 try:
-                    result, elapsed = _timed(lambda: run_stamp_verify(
-                        stamp_model,
-                        _crop(page, stamp_box["box"]),
-                        logo_reference,
-                        settings,
-                        normalized_type,
-                        resolved_city,
-                        classifier=registry.get("stamp_classifier"),
-                        missing_reason=reference_flag or "unreferenced_logo",
-                    ))
-                    stages["stamp"] = _completed(result)
-                    page_timings["stamp"] = elapsed
-                    if result.get("reason"):
-                        flags.append(result["reason"])
-                    if result.get("stamp_tampered") is True:
-                        flags.append("stamp_tampered")
-                    if result.get("stamp_tampered") is None:
-                        flags.append("stamp_tamper_unavailable")
+                    curated_references = []
+                    try:
+                        curated_references = embed_candidates(
+                            stamp_model,
+                            resolve_candidates(normalized_type, scope, resolved_city),
+                        )
+                    except CatalogError as exc:
+                        logger.warning("curated issuer references unavailable: %s", exc)
+
+                    logo_reference = None
+                    reference_flag = None
+                    if not curated_references:
+                        logo_reference, reference_flag = resolve_issuer_reference(
+                            logo_references, single_logo_reference, scope, resolved_city
+                        )
+                    comparisons = []
+                    elapsed_total = 0.0
+                    for stamp_box in stamp_boxes:
+                        result, elapsed = _timed(lambda box=stamp_box: run_stamp_verify(
+                            stamp_model,
+                            _crop(page, box["box"]),
+                            logo_reference,
+                            settings,
+                            normalized_type,
+                            resolved_city,
+                            classifier=registry.get("stamp_classifier"),
+                            missing_reason=reference_flag or "unreferenced_logo",
+                            reference_candidates=curated_references,
+                        ))
+                        comparisons.append({
+                            **result,
+                            "box": stamp_box["box"],
+                            "confidence": stamp_box["confidence"],
+                        })
+                        elapsed_total += elapsed
+
+                        if result.get("reason"):
+                            flags.append(result["reason"])
+                        if result.get("stamp_tampered") is True:
+                            flags.append("stamp_tampered")
+                        if result.get("stamp_tampered") is None:
+                            flags.append("stamp_tamper_unavailable")
+
+                    scored = [
+                        comparison for comparison in comparisons
+                        if comparison.get("similarity_score") is not None
+                    ]
+                    selected = max(
+                        scored,
+                        key=lambda comparison: (
+                            float(comparison["similarity_score"]),
+                            float(comparison.get("confidence", 0.0)),
+                        ),
+                    ) if scored else comparisons[0]
+                    stages["stamp"] = _completed({
+                        **selected,
+                        "comparisons": comparisons,
+                    })
+                    page_timings["stamp"] = elapsed_total
                 except Exception as exc:
                     logger.exception("stamp stage failed on page %s", page_index)
                     stages["stamp"] = _failed(f"error: {exc}")
@@ -627,18 +773,20 @@ async def validate(
         ]),
         "ocr": ocr_stage,
         "detection": _aggregate_detection([page["stages"]["detection"] for page in page_results]),
-        "signature": _aggregate_verification(
-            [page["stages"]["signature"] for page in page_results], "similarity"
+        "signature": _aggregate_signature_verification(
+            [page["stages"]["signature"] for page in page_results]
         ),
-        "stamp": _aggregate_verification(
-            [page["stages"]["stamp"] for page in page_results], "similarity_score"
+        "stamp": _aggregate_stamp_verification(
+            [page["stages"]["stamp"] for page in page_results]
         ),
         "tamper": _aggregate_tamper([page["stages"]["tamper"] for page in page_results]),
     }
     flags = [flag for page in page_results for flag in page["flags"]] + ocr_flags
     artifact_report = registry.artifact_report()
 
-    return {
+    business_permit = ocr_stage.get("business_permit") if isinstance(ocr_stage, dict) else None
+
+    response = {
         "schema_version": SCHEMA_VERSION,
         "status": "completed",
         "stages": stages,
@@ -653,3 +801,6 @@ async def validate(
             },
         },
     }
+    if isinstance(business_permit, dict):
+        response["business_permit"] = business_permit
+    return response

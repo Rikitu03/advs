@@ -37,7 +37,7 @@ class VendorSubmissionModuleTest extends TestCase
             ->assertSee('Pending Review')
             ->assertSee('File queue')
             ->assertSee('Drop files here or click to upload')
-            ->assertSee('BIR Permit')
+            ->assertSee('BIR Registration')
             ->assertSee('Business Permit')
             ->assertSee('DTI Registration')
             ->assertSee('Submit')
@@ -54,6 +54,26 @@ class VendorSubmissionModuleTest extends TestCase
             ->assertDontSee('suggestDocumentType')
             ->assertDontSee('Upload ready files')
             ->assertDontSee('Retry');
+    }
+
+    public function test_submit_documents_page_waits_for_submit_before_uploading_queued_files(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        Vendor::factory()->for($user)->create();
+
+        $html = $this->actingAs($user)
+            ->get(route('vendor.submit'))
+            ->getContent();
+
+        $this->assertStringContainsString(
+            "status: validType && validSize ? 'queued' : 'invalid'",
+            $html,
+        );
+        $this->assertStringContainsString('this.uploadFileAt(0, payload)', $html);
+        $this->assertStringContainsString("this.files.every((file) => file.valid && file.type !== '')", $html);
+        $this->assertStringNotContainsString('this.syncUpload()', $html);
     }
 
     public function test_my_submissions_shows_display_only_fallback_rows_when_vendor_has_no_submissions(): void
@@ -80,7 +100,7 @@ class VendorSubmissionModuleTest extends TestCase
         $this->assertSame(0, $vendor->submissions()->count());
 
         // The showcase demo submission bundles three documents (Business
-        // Permit + BIR Permit + DTI Registration) under a single batch,
+        // Permit + BIR Registration + DTI Registration) under a single batch,
         // mirroring the real Submission → hasMany(Document) model.
         $this->actingAs($user)
             ->get(route('vendor.submissions'))
@@ -113,7 +133,7 @@ class VendorSubmissionModuleTest extends TestCase
             ])
             ->call('submitBatch', [[
                 'name' => 'bir_certificate.pdf',
-                'type' => 'BIR Permit',
+                'type' => 'BIR Registration',
                 'extension' => 'pdf',
                 'sizeBytes' => 2_048_000,
             ], [
@@ -164,6 +184,36 @@ class VendorSubmissionModuleTest extends TestCase
         $this->assertDatabaseHas('notifications', [
             'user_id' => $user->id,
             'type' => Notification::TYPE_SUBMISSION_RECEIVED,
+        ]);
+    }
+
+    public function test_submit_batch_accepts_bir_permit_as_a_legacy_alias(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $user = User::factory()->role(User::ROLE_VENDOR)->create();
+        $vendor = Vendor::factory()->for($user)->create();
+        $content = "%PDF-1.4\n%legacy BIR alias\n%%EOF";
+
+        Livewire::actingAs($user)
+            ->test('vendor.submit')
+            ->set('uploadedFiles', [UploadedFile::fake()->createWithContent('legacy-bir.pdf', $content)])
+            ->call('submitBatch', [[
+                'name' => 'legacy-bir.pdf',
+                'type' => 'BIR Permit',
+                'extension' => 'pdf',
+                'sizeBytes' => 1_024,
+            ]])
+            ->assertRedirect(route('vendor.submissions'));
+
+        $birCertificateId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+
+        $this->assertDatabaseHas('documents', [
+            'vendor_id' => $vendor->id,
+            'document_type_id' => $birCertificateId,
+            'original_filename' => 'legacy-bir.pdf',
         ]);
     }
 

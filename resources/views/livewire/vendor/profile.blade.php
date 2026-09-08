@@ -51,10 +51,12 @@ new class extends Component {
                             <dd class="mt-0.5 text-sm">{{ $vendor->sec_registration_number }}</dd>
                         </div>
                     @endif
-                    <div>
-                        <dt class="text-xs text-cu-muted">{{ __('Business Permit No.') }}</dt>
-                        <dd class="mt-0.5 text-sm">{{ $vendor->business_permit_number ?? '—' }}</dd>
-                    </div>
+                    @if ($vendor->business_permit_number)
+                        <div>
+                            <dt class="text-xs text-cu-muted">{{ __('Business Permit No.') }}</dt>
+                            <dd class="mt-0.5 text-sm">{{ $vendor->business_permit_number }}</dd>
+                        </div>
+                    @endif
                     <div>
                         <dt class="text-xs text-cu-muted">{{ __('Nature of business') }}</dt>
                         <dd class="mt-0.5 text-sm">{{ $vendor->nature_of_business ?? '—' }}</dd>
@@ -84,17 +86,23 @@ new class extends Component {
                             <dt class="text-xs text-cu-muted">{{ __('Contact number') }}</dt>
                             <dd class="mt-0.5 text-sm">{{ $vendor->representative->contact_number }}</dd>
                         </div>
-                        <div>
-                            <dt class="text-xs text-cu-muted">{{ __('Government ID') }}</dt>
-                            <dd class="mt-0.5 text-sm">
-                                {{ \App\Models\VendorRepresentative::GOVERNMENT_ID_TYPES[$vendor->representative->government_id_type] ?? '—' }}
-                                · {{ $vendor->representative->government_id_number }}
-                            </dd>
-                        </div>
-                        <div class="sm:col-span-2">
-                            <dt class="text-xs text-cu-muted">{{ __('Home address') }}</dt>
-                            <dd class="mt-0.5 text-sm">{{ $vendor->representative->home_address }}</dd>
-                        </div>
+                        @if ($vendor->representative->government_id_type || $vendor->representative->government_id_number)
+                            <div>
+                                <dt class="text-xs text-cu-muted">{{ __('Government ID') }}</dt>
+                                <dd class="mt-0.5 text-sm">
+                                    {{ \App\Models\VendorRepresentative::GOVERNMENT_ID_TYPES[$vendor->representative->government_id_type] ?? '—' }}
+                                    @if ($vendor->representative->government_id_number)
+                                        · {{ $vendor->representative->government_id_number }}
+                                    @endif
+                                </dd>
+                            </div>
+                        @endif
+                        @if ($vendor->representative->home_address)
+                            <div class="sm:col-span-2">
+                                <dt class="text-xs text-cu-muted">{{ __('Home address') }}</dt>
+                                <dd class="mt-0.5 text-sm">{{ $vendor->representative->home_address }}</dd>
+                            </div>
+                        @endif
                     </dl>
                 @endif
             </div>

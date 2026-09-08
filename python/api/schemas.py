@@ -7,7 +7,7 @@ verdict) — re-declaring those here would just drift from the source of truth.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModelStatus(BaseModel):
@@ -97,6 +97,15 @@ class StampEmbedResponse(BaseModel):
     crop_png_base64: str | None = None
 
 
+class StampReferenceMatch(BaseModel):
+    key: str
+    label: str
+    source: str
+    city: str | None = None
+    similarity_score: float
+    match: bool
+
+
 class StampVerifyResponse(BaseModel):
     match: bool
     similarity_score: float | None = None
@@ -108,3 +117,6 @@ class StampVerifyResponse(BaseModel):
     # stamp_classifier.pkl is not loaded (the check could not run at all).
     stamp_tampered: bool | None = None
     genuine_probability: float | None = None
+    reference_source: str | None = None
+    best_reference_key: str | None = None
+    reference_matches: list[StampReferenceMatch] = Field(default_factory=list)

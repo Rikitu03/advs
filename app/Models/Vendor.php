@@ -92,26 +92,28 @@ class Vendor extends Model
     }
 
     /**
-     * Whether the given entity type registers with the SEC.
-     */
-    public static function entityRequiresSec(?string $entityType): bool
-    {
-        return in_array($entityType, ['partnership', 'corporation'], true);
-    }
-
-    /**
      * The composed, human-readable business address from its structured parts.
      */
     protected function businessAddress(): Attribute
     {
         return Attribute::make(
-            get: fn (): string => collect([
-                $this->business_street,
-                $this->business_barangay,
-                $this->business_city,
-                $this->business_province,
-                $this->business_postal_code,
-            ])->filter()->implode(', '),
+            get: function (): ?string {
+                $parts = [
+                    $this->business_street,
+                    $this->business_barangay,
+                    $this->business_city,
+                    $this->business_province,
+                    $this->business_postal_code,
+                ];
+
+                foreach ($parts as $part) {
+                    if ($part === null || trim((string) $part) === '') {
+                        return null;
+                    }
+                }
+
+                return implode(', ', $parts);
+            },
         );
     }
 

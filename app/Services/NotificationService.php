@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Notification;
 use App\Models\Submission;
 use App\Models\User;
+use App\Support\SubmissionPresenter;
 use Illuminate\Support\Collection;
 
 /**
@@ -43,6 +44,7 @@ class NotificationService
     {
         $vendorUser = $submission->vendor?->user;
         $company = $submission->vendor?->company_name ?? 'a vendor';
+        $flagLabels = array_map(SubmissionPresenter::flagLabel(...), $flags);
 
         if ($vendorUser !== null) {
             Notification::create([
@@ -65,10 +67,10 @@ class NotificationService
                     $company,
                 ),
             ],
-            $flags !== [] => [
+            $flagLabels !== [] => [
                 Notification::TYPE_DOCUMENT_FLAGGED,
                 'Submission flagged',
-                sprintf('Submission from %s has been flagged: %s.', $company, implode('; ', array_slice($flags, 0, 3))),
+                sprintf('Submission from %s has been flagged: %s.', $company, implode('; ', array_slice($flagLabels, 0, 3))),
             ],
             default => [
                 Notification::TYPE_GENERAL,

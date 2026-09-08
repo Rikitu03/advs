@@ -54,7 +54,7 @@ See `.env.api.example` for the full annotated surface. Highlights:
 | `MODEL_MANIFEST_PATH` | `MODEL_DIR/manifest.json` | artifact versions, SHA-256 hashes, shapes, classes, metrics, training dates, and calibrated thresholds used by `/ready` |
 | `CLASSIFIER_MODEL_PATH` | `MODEL_DIR/resnet50_best.keras` | trained ✔ |
 | `DETECTOR_MODEL_PATH` | `MODEL_DIR/yolov8_nano_moredata_best.pt` | trained YOLOv8 signature/stamp detector |
-| `SIGNATURE_ENROLL_DETECTOR_MODEL_PATH` | unset | optional dedicated detector for blank-paper registration photos; falls back to `DETECTOR_MODEL_PATH` |
+| `SIGNATURE_ENROLL_DETECTOR_MODEL_PATH` | `MODEL_DIR/signature_detector_best_raw.pt` | dedicated detector for blank-paper registration photos; falls back to `DETECTOR_MODEL_PATH` only when unset or unavailable |
 | `SIAMESE_MODEL_PATH` | `MODEL_DIR/siamese_encoder.h5` | the encoder train_signature.py saves (the API only embeds) |
 | `STAMP_MODEL_PATH` | `MODEL_DIR/efficientnet_feature_extractor.h5` | what train_stamp.py saves |
 | `CLASSIFICATION_CONFIDENCE_THRESHOLD` | `0.70` | §9 |

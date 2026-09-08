@@ -627,7 +627,7 @@ def test_stamp_verify_matches_genuine_and_rejects_mismatch(tmp_path, jpeg_bytes)
 
         same = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
-            data={"reference_vector": json.dumps(vector), "document_type": "bir_certificate"},
+            data={"reference_vector": json.dumps(vector), "document_type": "sec_registration"},
         ).json()
         opposite = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
@@ -637,7 +637,7 @@ def test_stamp_verify_matches_genuine_and_rejects_mismatch(tmp_path, jpeg_bytes)
     assert same["match"] is True
     assert same["similarity_score"] == pytest.approx(1.0)
     assert same["threshold"] == pytest.approx(0.85)  # §9 default
-    assert same["document_type"] == "bir_certificate"
+    assert same["document_type"] == "sec_registration"
     assert opposite["match"] is False
     assert opposite["similarity_score"] < 0.85
 
@@ -650,13 +650,13 @@ def test_stamp_verify_without_reference_flags_unreferenced_logo(tmp_path, jpeg_b
         app.state.registry._models["stamp"] = _StubEmbedderModel()
         body = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
-            data={"document_type": "business_permit", "city": "Makati"},
+            data={"document_type": "business_permit", "city": "Pasig"},
         ).json()
 
     assert body["match"] is False
     assert body["reason"] == "unreferenced_logo"
     assert body["similarity_score"] is None
-    assert body["city"] == "Makati"
+    assert body["city"] == "Pasig"
     # No stamp_classifier loaded -> the check could not run; not "clean".
     assert body["stamp_tampered"] is None
 
@@ -673,7 +673,7 @@ def test_stamp_verify_runs_the_tamper_check_without_a_reference(tmp_path, jpeg_b
 
         body = client.post(
             "/v1/stamp/verify", headers=AUTH, files=_upload(jpeg_bytes),
-            data={"document_type": "business_permit", "city": "Makati"},
+            data={"document_type": "business_permit", "city": "Pasig"},
         ).json()
 
     assert body["reason"] == "unreferenced_logo"      # unchanged
@@ -787,6 +787,85 @@ class _StubDetector:
         return [_StubResult(self.names, [_StubBox(1, 0.9, [5.0, 5.0, 60.0, 60.0])])]
 
 
+class _TwoSignatureDetector(_StubDetector):
+    def predict(self, source=None, conf=0.0, verbose=False):
+        return [_StubResult(self.names, [
+            _StubBox(0, 0.92, [5.0, 5.0, 60.0, 60.0]),
+            _StubBox(0, 0.81, [100.0, 100.0, 180.0, 180.0]),
+        ])]
+
+
+class _TwoStampDetector(_StubDetector):
+    def predict(self, source=None, conf=0.0, verbose=False):
+        return [_StubResult(self.names, [
+            _StubBox(1, 0.92, [5.0, 5.0, 60.0, 60.0]),
+            _StubBox(1, 0.81, [100.0, 100.0, 180.0, 180.0]),
+        ])]
+
+
+def test_validate_compares_every_detected_signature(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path, signature_distance_threshold=0.5))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _TwoSignatureDetector()
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        reference = client.post(
+            "/v1/signature/embed", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()["embedding"]
+
+        response = client.post(
+            "/v1/validate",
+            headers=AUTH,
+            files=_upload(jpeg_bytes),
+            data={"signature_reference": json.dumps(reference)},
+        )
+
+    assert response.status_code == 200
+    signature = response.json()["stages"]["signature"]
+    assert len(signature["comparisons"]) == 2
+    assert [comparison["box"] for comparison in signature["comparisons"]] == [
+        [5.0, 5.0, 60.0, 60.0],
+        [100.0, 100.0, 180.0, 180.0],
+    ]
+    assert all("distance" in comparison for comparison in signature["comparisons"])
+
+
+def test_validate_compares_every_detected_stamp_and_selects_best_pair(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path, stamp_similarity_threshold=0.5))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = _TwoStampDetector()
+        app.state.registry._models["stamp"] = _StubEmbedderModel()
+        reference = client.post(
+            "/v1/stamp/embed", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()["vector"]
+
+        response = client.post(
+            "/v1/validate",
+            headers=AUTH,
+            files=_upload(jpeg_bytes),
+            data={
+                "document_type": "unsupported_national",
+                "issuer_scope": "national",
+                "stamp_references": json.dumps({"": reference}),
+            },
+        )
+
+    assert response.status_code == 200
+    stamp = response.json()["stages"]["stamp"]
+    assert len(stamp["comparisons"]) == 2
+    assert [comparison["box"] for comparison in stamp["comparisons"]] == [
+        [5.0, 5.0, 60.0, 60.0],
+        [100.0, 100.0, 180.0, 180.0],
+    ]
+    best = max(stamp["comparisons"], key=lambda comparison: comparison["similarity_score"])
+    assert stamp["box"] == best["box"]
+    assert stamp["best_reference_key"] == "enrolled-reference"
+    assert stamp["similarity_score"] == pytest.approx(best["similarity_score"])
+
+
 def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
     """A reproduction detected on the crop must reach the officer as a flag even
     though the issuer has no reference logo yet (§5 Stage 4b)."""
@@ -811,10 +890,19 @@ def test_validate_flags_a_tampered_stamp(tmp_path, jpeg_bytes):
 def test_canonical_city_matches_the_form_laravel_stores():
     from api.routers.validate import canonical_city
 
-    assert canonical_city("CITY OF DIGOS") == "City Of Digos"
-    assert canonical_city("City of  Digos ") == "City Of Digos"
+    assert canonical_city("CITY OF DIGOS") == "Digos"
+    assert canonical_city("City of  Digos ") == "Digos"
     assert canonical_city("") is None
     assert canonical_city(None) is None
+
+
+def test_canonical_city_resolves_reviewed_business_permit_aliases():
+    from api.routers.validate import canonical_city
+
+    assert canonical_city("LUNGSOD NG MAKATI") == "Makati"
+    assert canonical_city("Maynila City") == "Manila"
+    assert canonical_city("CITY OF MARIKINA") == "Marikina"
+    assert canonical_city("TAGUIG CITY") == "Taguig"
 
 
 def test_resolve_issuer_reference_uses_the_national_sentinel():
@@ -1200,6 +1288,57 @@ def test_validate_aggregates_two_pages_and_forwards_page_context(
     assert "page_two_tamper" in body["flags"]
     assert [context["issue_date"] for context in tamper_contexts] == ["2025-01-01", "2025-02-02"]
     assert all(context["hard_confidence"] == 0.75 for context in tamper_contexts)
+
+
+def test_business_permit_aggregate_preserves_field_provenance_and_conflicts(monkeypatch, tmp_path, jpeg_bytes):
+    import api.routers.validate as module
+
+    pages = [
+        {
+            "status": "completed",
+            "business_permit": {
+                "issuer_city_raw": "MAYNILA",
+                "issuer_city_canonical": "Manila",
+                "layout_key": "manila",
+                "fields": {
+                    "permit_no": {"value": "BP-1", "matched": True, "confidence": 70},
+                    "trade_name": {"value": "ALPHA", "matched": True, "confidence": 80},
+                },
+            },
+            "fields": {
+                "permit_no": {"value": "BP-1", "matched": True, "confidence": 70},
+                "trade_name": {"value": "ALPHA", "matched": True, "confidence": 80},
+            },
+            "text": "MAYNILA BP-1 ALPHA",
+            "words": [],
+            "quality": {"required_total": 2, "text_validation_score": 1.0, "mean_confidence": 80, "flags": []},
+        },
+        {
+            "status": "completed",
+            "business_permit": {
+                "issuer_city_raw": "CITY OF MANILA",
+                "issuer_city_canonical": "Manila",
+                "layout_key": "manila",
+                "fields": {
+                    "permit_no": {"value": "BP-2", "matched": True, "confidence": 95},
+                },
+            },
+            "fields": {
+                "permit_no": {"value": "BP-2", "matched": True, "confidence": 95},
+            },
+            "text": "CITY OF MANILA BP-2",
+            "words": [],
+            "quality": {"required_total": 2, "text_validation_score": 1.0, "mean_confidence": 95, "flags": []},
+        },
+    ]
+
+    aggregate, flags = module._aggregate_ocr(pages)
+
+    assert aggregate["business_permit"]["issuer_city_canonical"] == "Manila"
+    assert aggregate["business_permit"]["fields"]["permit_no"]["value"] == "BP-2"
+    assert aggregate["business_permit"]["fields"]["permit_no"]["source_page"] == 2
+    assert aggregate["business_permit"]["conflicts"]["permit_no"] == ["BP-1", "BP-2"]
+    assert "ocr_field_conflict" in flags
 
 
 def test_no_issuer_scope_emits_only_no_issuer_logo(tmp_path, jpeg_bytes):

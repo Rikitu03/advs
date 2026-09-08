@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property float|null $signature_score
  * @property bool|null $stamp_detected
  * @property float|null $stamp_score
+ * @property array<int, array<string, mixed>>|null $stamp_comparisons
  * @property float|null $document_risk_score
  * @property array<string, array<string, mixed>>|null $ocr_fields
  * @property array<int, string>|null $flags
@@ -58,9 +59,11 @@ class ValidationResult extends Model
         'signature_score',
         'signature_distance',
         'signature_passed',
+        'signature_comparisons',
         'stamp_score',
         'stamp_similarity',
         'stamp_passed',
+        'stamp_comparisons',
         'stamp_tampered',
         'logo_reference_id',
         'document_risk_score',
@@ -83,11 +86,13 @@ class ValidationResult extends Model
             'signature_score' => 'float',
             'signature_distance' => 'float',
             'signature_passed' => 'boolean',
+            'signature_comparisons' => 'array',
             'stamp_detected' => 'boolean',
             'stamp_bbox' => 'array',
             'stamp_score' => 'float',
             'stamp_similarity' => 'float',
             'stamp_passed' => 'boolean',
+            'stamp_comparisons' => 'array',
             'stamp_tampered' => 'boolean',
             'logo_reference_id' => 'integer',
             'document_risk_score' => 'float',

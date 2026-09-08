@@ -83,9 +83,12 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
         "api_token": TOKEN,
         "model_dir": tmp_path / "models",
         "threshold_store_path": tmp_path / "thresholds.json",
+        # Keep endpoint tests on the shared stub detector unless a test is
+        # specifically exercising the dedicated enrollment detector.
+        "signature_enroll_detector_model_path": None,
     }
     values.update(overrides)
-    return Settings(_env_file=None, **values)
+    return Settings.model_validate(values)
 
 
 @pytest.fixture(scope="module")
@@ -196,7 +199,7 @@ def test_enroll_counts_embeds_and_scores_three_signatures(tmp_path, jpeg_bytes):
     assert body["count"] == 3
     assert len(body["signatures"]) == 3
     assert detector.calls[0]["conf"] == pytest.approx(0.20)
-    assert detector.calls[0]["imgsz"] == 1280
+    assert detector.calls[0]["imgsz"] == 640
     for sample in body["signatures"]:
         assert len(sample["box"]) == 4
         assert 0.0 <= sample["confidence"] <= 1.0
@@ -217,6 +220,30 @@ def test_enroll_counts_embeds_and_scores_three_signatures(tmp_path, jpeg_bytes):
     assert forensics["hard_flag"] is False
 
 
+def test_enroll_normalizes_exif_orientation_before_detection(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+    from PIL import Image, ImageOps
+
+    source = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
+    exif = source.getexif()
+    exif[274] = 6
+    output = io.BytesIO()
+    source.save(output, format="JPEG", exif=exif.tobytes())
+
+    app = create_app(_settings(tmp_path))
+    detector = _three_signature_detector()
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        response = client.post(
+            "/v1/signature/enroll", headers=AUTH, files=_upload(output.getvalue())
+        )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 3
+    assert detector.calls[0]["source"].size == ImageOps.exif_transpose(source).size
+
+
 def test_enroll_prefers_a_dedicated_detector_when_configured(tmp_path, jpeg_bytes):
     pytest.importorskip("tensorflow")
 
@@ -233,7 +260,38 @@ def test_enroll_prefers_a_dedicated_detector_when_configured(tmp_path, jpeg_byte
 
     assert body["count"] == 3
     assert shared_detector.calls == []
-    assert enrollment_detector.calls[0]["imgsz"] == 1280
+    assert enrollment_detector.calls[0]["imgsz"] == 640
+
+
+def test_enroll_uses_request_confidence_override(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    app = create_app(_settings(tmp_path))
+    detector = _three_signature_detector()
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        response = client.post(
+            "/v1/signature/enroll",
+            headers=AUTH,
+            files=_upload(jpeg_bytes),
+            data={"signature_enroll_detection_confidence": "0.35"},
+        )
+
+    assert response.status_code == 200
+    assert detector.calls[0]["conf"] == pytest.approx(0.35)
+
+
+def test_enroll_uses_the_default_dedicated_detector_path(tmp_path):
+    settings = Settings(
+        api_token=TOKEN,
+        model_dir=tmp_path / "models",
+        threshold_store_path=tmp_path / "thresholds.json",
+    )
+
+    assert settings.signature_enroll_detector_model_path == (
+        PY_ROOT / "models" / "signature_detector_best_raw.pt"
+    )
 
 
 def test_enroll_counts_only_signatures_not_stamps(tmp_path, jpeg_bytes):
@@ -253,6 +311,26 @@ def test_enroll_counts_only_signatures_not_stamps(tmp_path, jpeg_bytes):
 
     assert body["count"] == 1
     assert body["consistency"] is None  # <2 signatures -> no pairwise score
+
+
+def test_enroll_deduplicates_overlapping_signature_boxes(tmp_path, jpeg_bytes):
+    pytest.importorskip("tensorflow")
+
+    detector = _StubDetector([
+        _StubBox(cls=1, conf=0.95, xyxy=[10, 10, 120, 100]),
+        _StubBox(cls=1, conf=0.90, xyxy=[15, 15, 115, 95]),
+        _StubBox(cls=1, conf=0.88, xyxy=[150, 10, 260, 100]),
+    ])
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        app.state.registry._models["detector"] = detector
+        app.state.registry._models["siamese"] = _StubEmbedderModel()
+        body = client.post(
+            "/v1/signature/enroll", headers=AUTH, files=_upload(jpeg_bytes)
+        ).json()
+
+    assert body["count"] == 2
+    assert [sample["confidence"] for sample in body["signatures"]] == [0.95, 0.88]
 
 
 def test_enroll_rejects_unreadable_image(tmp_path):

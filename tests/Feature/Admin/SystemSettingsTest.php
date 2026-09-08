@@ -208,6 +208,7 @@ class SystemSettingsTest extends TestCase
         $this->assertSame(3, $snapshot['MAX_PDF_PAGES']);
         $this->assertSame(0.2, $snapshot['RISK_WEIGHT_TAMPER']);
         $this->assertSame(0.5, $snapshot['STAMP_TAMPER_THRESHOLD']);
+        $this->assertSame(0.2, $snapshot['SIGNATURE_ENROLL_DETECTION_CONFIDENCE']);
         $this->assertSame($service->pipelineSnapshotHash($snapshot), $service->pipelineSnapshotHash(array_reverse($snapshot, true)));
     }
 

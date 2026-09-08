@@ -33,7 +33,7 @@ class VendorDemoData
                 'note' => 'Your documents are being prepared for validation.',
                 'documents' => [
                     ['type' => 'Business Permit', 'file_name' => 'business_permit_2026.pdf', 'size' => '2.4 MB'],
-                    ['type' => 'BIR Permit', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
+                    ['type' => 'BIR Registration', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
                     ['type' => 'DTI Registration', 'file_name' => 'dti_business_name_registration_2026.png', 'size' => '1.4 MB'],
                 ],
             ],
@@ -56,7 +56,7 @@ class VendorDemoData
                 'status_tone' => 'approved',
                 'note' => 'This submission was accepted and added to your vendor record.',
                 'documents' => [
-                    ['type' => 'BIR Permit', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
+                    ['type' => 'BIR Registration', 'file_name' => 'bir_certificate_registration.pdf', 'size' => '980 KB'],
                 ],
             ],
             [
@@ -118,7 +118,7 @@ class VendorDemoData
                 'icon' => 'check-circle',
                 'color' => 'emerald',
                 'title' => 'Accreditation document approved',
-                'body' => 'Your BIR Permit submission was approved and added to your vendor record.',
+                'body' => 'Your BIR Registration submission was approved and added to your vendor record.',
                 'at' => Carbon::now()->subDays(9),
                 'read' => true,
             ],
@@ -142,7 +142,7 @@ class VendorDemoData
         return collect([
             ['icon' => 'document-check', 'color' => 'sky', 'text' => 'Business Permit uploaded as SUB-2004.', 'at' => Carbon::now()->subHours(3)],
             ['icon' => 'arrow-path', 'color' => 'amber', 'text' => 'PDF-to-PNG conversion finished for SUB-2004.', 'at' => Carbon::now()->subHours(2)->subMinutes(42)],
-            ['icon' => 'check-circle', 'color' => 'emerald', 'text' => 'BIR Permit approved by Compliance Officer.', 'at' => Carbon::now()->subDays(9)],
+            ['icon' => 'check-circle', 'color' => 'emerald', 'text' => 'BIR Registration approved by Compliance Officer.', 'at' => Carbon::now()->subDays(9)],
         ]);
     }
 

@@ -129,4 +129,23 @@ class SubmissionFinalizerTest extends TestCase
             'type' => Notification::TYPE_HIGH_RISK_ALERT,
         ]);
     }
+
+    public function test_stamp_texture_notification_does_not_describe_the_stamp_as_tampered(): void
+    {
+        $officer = User::factory()->role(User::ROLE_COMPLIANCE_OFFICER)->create();
+        $submission = $this->makeSubmission();
+        $document = $this->addDocument($submission, Document::STATUS_COMPLETED, 15.0);
+        $document->validationResult()->update(['flags' => ['stamp_tampered']]);
+
+        app(SubmissionFinalizer::class)->finalize($submission);
+
+        $notification = Notification::query()
+            ->where('user_id', $officer->id)
+            ->where('type', Notification::TYPE_DOCUMENT_FLAGGED)
+            ->firstOrFail();
+
+        $this->assertStringContainsString('Stamp has scan/copy texture', $notification->body);
+        $this->assertStringNotContainsString('stamp_tampered', $notification->body);
+        $this->assertStringNotContainsString('Stamp tampered', $notification->body);
+    }
 }

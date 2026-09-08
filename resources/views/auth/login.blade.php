@@ -39,8 +39,6 @@
                 @endif
             </div>
 
-            <flux:checkbox name="remember" value="1" :label="__('Remember me')" />
-
             <x-auth.submit class="mt-1">{{ __('Log in') }}</x-auth.submit>
         </form>
 

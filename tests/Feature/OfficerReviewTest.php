@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\Document;
+use App\Models\PipelinePageResult;
+use App\Models\PipelineRun;
 use App\Models\Submission;
 use App\Models\User;
 use App\Models\ValidationResult;
 use App\Models\Vendor;
+use App\Models\VendorRepresentative;
 use App\Support\SubmissionPresenter;
 use Database\Seeders\DemoDataSeeder;
 use Database\Seeders\DocumentTypeSeeder;
@@ -61,7 +64,9 @@ class OfficerReviewTest extends TestCase
             ->assertOk()
             ->assertSee(SubmissionPresenter::reference($submission))
             ->assertSee('Risk score breakdown')
-            ->assertSee('Officer decision');
+            ->assertSee('Officer decision')
+            ->assertDontSee('Raw OCR text')
+            ->assertDontSee('<pre');
     }
 
     public function test_unknown_submission_returns_not_found(): void
@@ -118,7 +123,7 @@ class OfficerReviewTest extends TestCase
             'document_type_id' => $birTypeId,
         ]);
         ValidationResult::factory()->for($flagged)->create([
-            'flags' => ['missing_required_fields:form_no,tin,rdo_code', 'no_signature_detected'],
+            'flags' => ['missing_required_fields:form_no,tin,rdo_code', 'no_signature_detected', 'stamp_tampered'],
         ]);
 
         // A clean document must not create an empty group in the panel.
@@ -133,7 +138,7 @@ class OfficerReviewTest extends TestCase
         $this->assertCount(1, $detail['flags_by_document']);
         $this->assertSame('northern-star-bir-certificate.png', $detail['flags_by_document'][0]['document']);
         $this->assertSame(
-            ['Missing required fields: Form No, TIN, RDO Code', 'No signature detected'],
+            ['Missing required fields: Form No, TIN, RDO Code', 'No signature detected', 'Stamp has scan/copy texture'],
             $detail['flags_by_document'][0]['flags'],
         );
 
@@ -141,7 +146,10 @@ class OfficerReviewTest extends TestCase
             ->get(route('admin.submissions.show', $submission->id))
             ->assertOk()
             ->assertSee('Missing required fields: Form No, TIN, RDO Code')
-            ->assertSee('No signature detected');
+            ->assertSee('No signature detected')
+            ->assertSee('Stamp has scan/copy texture')
+            ->assertDontSee('Stamp tampered')
+            ->assertDontSee('stamp_tampered');
     }
 
     public function test_flag_humaniser_renders_per_type_field_acronyms(): void
@@ -157,6 +165,7 @@ class OfficerReviewTest extends TestCase
             ['Missing required fields: OCN, TRN, Certificate No, Business Name, Registered Activities'],
             SubmissionPresenter::flags($submission->fresh()),
         );
+        $this->assertSame('Stamp texture check unavailable', SubmissionPresenter::flagLabel('stamp_tamper_unavailable'));
     }
 
     /**
@@ -214,6 +223,118 @@ class OfficerReviewTest extends TestCase
             ->assertSee(route('admin.documents.show', $document->id));
     }
 
+    public function test_drill_down_renders_each_signature_comparison_row(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'mime_type' => 'image/png',
+        ]);
+
+        ValidationResult::factory()->for($document)->create([
+            'signature_detected' => true,
+            'signature_bbox' => [50, 60, 70, 80],
+            'signature_score' => 0.4374,
+            'signature_distance' => 1.4,
+            'signature_passed' => false,
+            'signature_comparisons' => [
+                [
+                    'page_index' => 1,
+                    'box' => [10, 20, 30, 40],
+                    'confidence' => 0.91,
+                    'match' => true,
+                    'distance' => 0.7,
+                    'similarity' => 0.7186,
+                    'threshold' => 1.243976,
+                    'score' => 0.7186,
+                ],
+                [
+                    'page_index' => 1,
+                    'box' => [50, 60, 70, 80],
+                    'confidence' => 0.84,
+                    'match' => false,
+                    'distance' => 1.4,
+                    'similarity' => 0.416,
+                    'threshold' => 1.243976,
+                    'score' => 0.4374,
+                ],
+            ],
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertCount(2, $components['signature']['comparisons']);
+        $this->assertSame([10, 20, 30, 40], $components['signature']['comparisons'][0]['crop']['box']);
+        $this->assertSame([50, 60, 70, 80], $components['signature']['comparisons'][1]['crop']['box']);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('Signature 1')
+            ->assertSee('Signature 2')
+            ->assertSee('91% detected')
+            ->assertSee('84% detected');
+    }
+
+    public function test_business_permit_issuer_evidence_panel_remains_removed(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+        $permitTypeId = (int) DB::table('document_types')->where('code', 'business_permit')->value('id');
+        $vendor = Vendor::factory()->create([
+            'company_name' => 'Acme Foods Inc',
+            'business_city' => 'Makati',
+            'business_permit_number' => 'BP-2026-99',
+        ]);
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create(['document_type_id' => $permitTypeId]);
+
+        ValidationResult::factory()->for($document)->create([
+            'classification_label' => 'business_permit',
+            'classification_confidence' => 0.997,
+            'detected_city' => 'Makati',
+            'ocr_fields' => [
+                '__business_permit' => [
+                    'issuer_city_raw' => 'LUNGSOD NG MAKATI',
+                    'issuer_city_canonical' => 'Makati',
+                    'layout_key' => 'makati',
+                    'layout_version' => '2026-08-24',
+                    'fields' => [
+                        'permit_no' => [
+                            'value' => 'BP/2026/99',
+                            'normalized_value' => 'BP/2026/99',
+                            'source_page' => 1,
+                            'bbox' => [1, 2, 3, 4],
+                            'confidence' => 94,
+                            'source' => 'tesseract',
+                        ],
+                    ],
+                    'identity' => [
+                        'score' => 1.0,
+                        'validity' => 'valid',
+                        'checks' => [
+                            'permit_number' => [
+                                'field' => 'permit_no',
+                                'available' => true,
+                                'matched' => true,
+                                'expected' => 'BP-2026-99',
+                            ],
+                        ],
+                        'flags' => [],
+                    ],
+                ],
+            ],
+            'flags' => ['unreferenced_logo'],
+        ]);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('OCR extracted fields')
+            ->assertDontSee('Business permit issuer evidence')
+            ->assertDontSee('Makati layout')
+            ->assertDontSee('bbox 1, 2, 3, 4');
+    }
+
     /**
      * A region detected on a PDF upload has no accurate crop preview (its box
      * is relative to the 300-DPI rendered page, not the PDF bytes an <img>
@@ -241,7 +362,7 @@ class OfficerReviewTest extends TestCase
         $this->assertNull($components['signature']['crop']);
     }
 
-    public function test_drill_down_uses_private_reference_images_for_signature_and_logo_comparisons(): void
+    public function test_drill_down_prefers_curated_references_and_keeps_private_reference_routes_protected(): void
     {
         Storage::fake('local');
         $this->seed(DocumentTypeSeeder::class);
@@ -275,6 +396,7 @@ class OfficerReviewTest extends TestCase
         ValidationResult::factory()->for($document)->create([
             'submission_id' => $submission->id,
             'logo_reference_id' => $logoReferenceId,
+            'stamp_bbox' => [50, 60, 70, 80],
         ]);
 
         $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
@@ -284,9 +406,25 @@ class OfficerReviewTest extends TestCase
             $components['signature']['reference_image_url'],
         );
         $this->assertSame(
-            route('admin.logo-references.show', $logoReferenceId),
+            route('admin.issuer-logo-references.show', 'bir-permit-logo'),
             $components['stamp']['reference_image_url'],
         );
+        $this->assertSame(['bir-permit-logo'], array_column($components['stamp']['references'], 'key'));
+        $this->assertSame(['curated'], array_column($components['stamp']['references'], 'source'));
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Query (this submission)',
+                'Detected signature',
+                'Reference (enrolled)',
+                'Enrolled signature reference',
+            ])
+            ->assertSeeHtml('data-issuer-reference-card="bir-permit-logo"')
+            ->assertDontSeeHtml('data-issuer-reference-card="bir-seal"')
+            ->assertSee('BIR Permit Logo')
+            ->assertDontSee('BIR Seal');
 
         $this->actingAs($this->officer)
             ->get(route('admin.signature.show', $vendor->id))
@@ -301,6 +439,124 @@ class OfficerReviewTest extends TestCase
             ->assertHeader('content-type', 'image/png')
             ->assertHeader('cache-control', 'max-age=0, no-store, private')
             ->assertHeader('x-content-type-options', 'nosniff');
+    }
+
+    public function test_drill_down_falls_back_to_a_database_reference_when_the_catalog_has_none(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $documentTypeId = (int) DB::table('document_types')->where('code', 'sec_registration')->value('id');
+        $document = Document::factory()->for($vendor)->for($submission)->create(['document_type_id' => $documentTypeId]);
+        $logoReferenceId = DB::table('logo_references')->insertGetId([
+            'document_type_id' => $documentTypeId,
+            'city' => '',
+            'label' => 'SEC enrolled seal',
+            'feature_vector' => json_encode([0.1, 0.2]),
+            'reference_image_path' => 'logo_references/sec/national.png',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        Storage::put('logo_references/sec/national.png', 'issuer-logo');
+        ValidationResult::factory()->for($document)->create([
+            'submission_id' => $submission->id,
+            'logo_reference_id' => $logoReferenceId,
+            'stamp_bbox' => [10, 20, 30, 40],
+        ]);
+
+        $references = SubmissionPresenter::detail($submission->fresh())['component_sets']['all']['stamp']['references'];
+
+        $this->assertCount(1, $references);
+        $this->assertSame('enrolled-reference', $references[0]['key']);
+        $this->assertSame('enrolled', $references[0]['source']);
+        $this->assertSame('SEC enrolled seal', $references[0]['label']);
+        $this->assertSame(route('admin.logo-references.show', $logoReferenceId), $references[0]['url']);
+    }
+
+    public function test_curated_reference_route_streams_only_manifest_listed_files_to_officers(): void
+    {
+        $this->get(route('admin.issuer-logo-references.show', 'bir-seal'))
+            ->assertRedirect(route('login'));
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.issuer-logo-references.show', 'bir-seal'))
+            ->assertOk()
+            ->assertHeader('cache-control', 'max-age=0, no-store, private')
+            ->assertHeader('x-content-type-options', 'nosniff');
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.issuer-logo-references.show', 'unknown-reference'))
+            ->assertNotFound();
+    }
+
+    public function test_detected_logo_without_a_usable_reference_keeps_both_panels(): void
+    {
+        $documentTypeId = DB::table('document_types')->insertGetId([
+            'name' => 'Unsupported National Certificate',
+            'code' => 'unsupported_national',
+            'issuer_scope' => 'national',
+            'is_required' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'document_type_id' => $documentTypeId,
+            'mime_type' => 'image/png',
+        ]);
+        ValidationResult::factory()->for($document)->create([
+            'submission_id' => $submission->id,
+            'stamp_detected' => false,
+            'stamp_bbox' => [10, 20, 30, 40],
+            'stamp_passed' => null,
+        ]);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Query (this submission)',
+                'Issuer references',
+                'No references currently available',
+            ]);
+    }
+
+    public function test_presenter_merges_per_candidate_scores_in_manifest_order(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $documentTypeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $document = Document::factory()->for($vendor)->for($submission)->create(['document_type_id' => $documentTypeId]);
+        ValidationResult::factory()->for($document)->create(['submission_id' => $submission->id]);
+        $run = PipelineRun::factory()->create([
+            'document_id' => $document->id,
+            'submission_id' => $submission->id,
+        ]);
+        PipelinePageResult::factory()->create([
+            'pipeline_run_id' => $run->id,
+            'document_id' => $document->id,
+            'submission_id' => $submission->id,
+            'stages' => [
+                'stamp' => [
+                    'best_reference_key' => 'bir-seal',
+                    'reference_matches' => [
+                        ['key' => 'bir-seal', 'similarity_score' => 0.94, 'match' => true],
+                        ['key' => 'bir-permit-logo', 'similarity_score' => 0.71, 'match' => false],
+                    ],
+                ],
+            ],
+        ]);
+
+        $references = SubmissionPresenter::detail($submission->fresh())['component_sets']['all']['stamp']['references'];
+
+        $this->assertSame(['bir-seal'], array_column($references, 'key'));
+        $this->assertSame([94], array_column($references, 'similarity'));
+        $this->assertTrue($references[0]['best']);
     }
 
     public function test_reference_image_routes_return_not_found_for_stale_storage_paths(): void
@@ -379,7 +635,32 @@ class OfficerReviewTest extends TestCase
         $this->assertSame('No stamp/logo region detected.', $components['stamp']['detail']);
     }
 
-    public function test_drill_down_provides_per_document_ocr_text_with_filters(): void
+    public function test_drill_down_describes_stamp_texture_as_scan_copy_without_claiming_tampering(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'stamp_tampered' => true,
+            'stamp_bbox' => [10, 10, 80, 80],
+        ]);
+
+        $components = SubmissionPresenter::detail($submission->fresh())['component_sets']['all'];
+
+        $this->assertTrue($components['stamp']['texture_checked']);
+        $this->assertTrue($components['stamp']['scan_copy_texture']);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSee('Issuer References Matching')
+            ->assertSee('Scan/copy texture detected')
+            ->assertSee('does not mean the stamp artwork was altered')
+            ->assertDontSee('Stamp tampered')
+            ->assertDontSee('stamp_tampered');
+    }
+
+    public function test_drill_down_provides_per_document_ocr_filters_without_raw_text(): void
     {
         $vendor = Vendor::factory()->create();
         $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
@@ -407,11 +688,10 @@ class OfficerReviewTest extends TestCase
             ],
             $detail['ocr_filters'],
         );
-        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $bir->id]);
-        $this->assertSame('CITY OF DIGOS BUSINESS PERMIT', $detail['ocr_by_document'][(string) $permit->id]);
+        $this->assertArrayNotHasKey('ocr_by_document', $detail);
     }
 
-    public function test_drill_down_ocr_text_falls_back_when_ocr_not_yet_available(): void
+    public function test_drill_down_does_not_expose_raw_ocr_when_ocr_fields_are_unavailable(): void
     {
         $vendor = Vendor::factory()->create();
         $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
@@ -420,10 +700,8 @@ class OfficerReviewTest extends TestCase
 
         $detail = SubmissionPresenter::detail($submission->fresh());
 
-        $this->assertSame(
-            'OCR stage not yet available — no extracted text for this document.',
-            $detail['ocr_by_document'][(string) $document->id],
-        );
+        $this->assertArrayNotHasKey('ocr_by_document', $detail);
+        $this->assertSame([], $detail['ocr_fields_by_document'][(string) $document->id]);
     }
 
     public function test_drill_down_builds_ocr_field_rows_from_the_persisted_field_map(): void
@@ -446,6 +724,257 @@ class OfficerReviewTest extends TestCase
         $this->assertNull($rows[0]['warning']);
         $this->assertNull($rows[1]['value']);
         $this->assertNull($rows[1]['warning']);
+    }
+
+    public function test_bir_ocr_profile_renders_only_the_seven_review_fields_in_order(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $documentTypeId = (int) DB::table('document_types')->where('code', 'bir_certificate')->value('id');
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'document_type_id' => $documentTypeId,
+            'original_filename' => 'misleading-dti-name.pdf',
+        ]);
+        ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'tin' => ['name' => 'TIN', 'value' => '009-028-463-000'],
+                'registered_name' => ['name' => 'Registered Name', 'value' => 'ACME FOODS'],
+                'trade_name' => ['name' => 'Trade Name', 'value' => 'ACME'],
+                'line_of_business' => ['name' => 'Line of Business / PSIC', 'value' => 'Food retail'],
+                'registration_date' => ['name' => 'Registration Date', 'value' => '01/02/2020'],
+                'date_issued' => ['name' => 'Date Issued', 'value' => 'JAN 02 2020'],
+                'rdo_code' => ['name' => 'Revenue District No. (RDO)', 'value' => '47'],
+                'tax_types' => ['name' => 'Registered Activity(ies)', 'value' => 'VAT'],
+            ],
+        ]);
+
+        $rows = SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id];
+
+        $this->assertSame([
+            'tin',
+            'registered_name',
+            'registered_address',
+            'trade_name',
+            'line_of_business',
+            'registration_date',
+            'date_issued',
+        ], array_column($rows, 'key'));
+        $this->assertSame([
+            'TIN',
+            'Registered Name',
+            'Registered Address',
+            'Trade Name',
+            'Line of Business / PSIC',
+            'Registration Date',
+            'Date Issued',
+        ], array_column($rows, 'label'));
+        $this->assertNull($rows[2]['value']);
+        $this->assertNull($rows[2]['comparison']);
+    }
+
+    public function test_dti_ocr_profile_renders_only_the_six_review_fields_in_order(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $documentTypeId = (int) DB::table('document_types')->where('code', 'dti_registration')->value('id');
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'document_type_id' => $documentTypeId,
+            'original_filename' => 'looks-like-bir.pdf',
+        ]);
+        ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'business_name' => ['name' => 'Business Name', 'value' => 'ACME MERCANTILE'],
+                'business_address' => ['name' => 'Business Address', 'value' => '123 RIZAL STREET'],
+                'owner_representative_name' => ['name' => 'Owner / Representative Name', 'value' => 'JUAN DELA CRUZ'],
+                'date_issued' => ['name' => 'Valid Date', 'value' => '01/02/2026'],
+                'expiry_date' => ['name' => 'Expiration Date', 'value' => '01/02/2031'],
+                'certificate_no' => ['name' => 'Certificate Number', 'value' => 'BN 1234567'],
+                'trn_no' => ['name' => 'TRN', 'value' => 'DTI-2026-12345678'],
+            ],
+        ]);
+
+        $rows = SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id];
+
+        $this->assertSame([
+            'owner_representative_name',
+            'business_name',
+            'business_address',
+            'date_issued',
+            'expiry_date',
+            'trn_no',
+        ], array_column($rows, 'key'));
+        $this->assertSame([
+            'Owner / Representative Name',
+            'Business Name',
+            'Business Address',
+            'Valid Date',
+            'Expiration Date',
+            'Transaction Reference Number (TRN)',
+        ], array_column($rows, 'label'));
+        $this->assertNotContains('certificate_no', array_column($rows, 'key'));
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.submissions.show', $submission->id))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Owner / Representative Name',
+                'Business Name',
+                'Business Address',
+                'Valid Date',
+                'Expiration Date',
+                'Transaction Reference Number (TRN)',
+            ])
+            ->assertDontSee('Certificate Number');
+    }
+
+    public function test_drill_down_compares_ocr_fields_with_vendor_registration_details(): void
+    {
+        $vendor = Vendor::factory()->create([
+            'company_name' => 'Northern Star Finance Inc.',
+            'trade_name' => 'Barporating Solutions',
+            'tin' => '388-063-009-0000',
+            'dti_registration_number' => null,
+            'registration_number' => null,
+        ]);
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'registered_name' => ['name' => 'Registered Name', 'value' => 'NORTHERN STAR FINANCE INC.', 'warnings' => []],
+                'trade_name' => ['name' => 'Trade Name', 'value' => 'BARPORATING SOLUTIONS', 'warnings' => []],
+                'tin' => ['name' => 'TIN', 'value' => 'X388-063-009-0000Y', 'warnings' => []],
+                'certificate_no' => ['name' => 'Certificate Number', 'value' => 'BN-99', 'warnings' => []],
+            ],
+        ]);
+
+        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
+            ->keyBy('key');
+
+        $this->assertTrue($rows['registered_name']['comparison']);
+        $this->assertTrue($rows['trade_name']['comparison']);
+        $this->assertFalse($rows['tin']['comparison']);
+        $this->assertNull($rows['certificate_no']['comparison']);
+        $this->assertSame('388-063-009-0000', $rows['tin']['registration_value']);
+    }
+
+    public function test_drill_down_matches_dti_owner_names_against_representative_variants(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        VendorRepresentative::factory()->for($vendor)->create([
+            'first_name' => 'Maria',
+            'middle_name' => 'Santos',
+            'last_name' => 'Dela Cruz',
+            'suffix' => 'Jr.',
+        ]);
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'document_type_id' => DB::table('document_types')->where('code', 'dti_registration')->value('id'),
+        ]);
+        $result = ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'owner_representative_name' => ['value' => 'MARIA SANTOS DELA CRUZ JR.'],
+            ],
+        ]);
+
+        foreach ([
+            'MARIA SANTOS DELA CRUZ JR.',
+            'Maria-Dela Cruz',
+            'Dela Cruz, Maria Santos, Jr.',
+        ] as $ocrName) {
+            $result->update([
+                'ocr_fields' => [
+                    'owner_representative_name' => ['value' => $ocrName],
+                ],
+            ]);
+
+            $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
+                ->keyBy('key');
+
+            $this->assertTrue($rows['owner_representative_name']['comparison']);
+            $this->assertStringContainsString('Maria Santos Dela Cruz Jr.', $rows['owner_representative_name']['registration_value']);
+        }
+    }
+
+    public function test_drill_down_marks_owner_fields_unavailable_without_a_representative_and_mismatched_when_one_differs(): void
+    {
+        $this->seed(DocumentTypeSeeder::class);
+
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create([
+            'document_type_id' => DB::table('document_types')->where('code', 'dti_registration')->value('id'),
+        ]);
+        $result = ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'owner_representative_name' => ['value' => 'Maria Santos'],
+            ],
+        ]);
+
+        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
+            ->keyBy('key');
+        $this->assertNull($rows['owner_representative_name']['comparison']);
+        $this->assertNull($rows['owner_representative_name']['registration_value']);
+
+        VendorRepresentative::factory()->for($vendor)->create([
+            'first_name' => 'Ana',
+            'middle_name' => null,
+            'last_name' => 'Reyes',
+            'suffix' => null,
+        ]);
+        $result->update([
+            'ocr_fields' => [
+                'owner_representative_name' => ['value' => 'Maria Santos'],
+            ],
+        ]);
+
+        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
+            ->keyBy('key');
+        $this->assertFalse($rows['owner_representative_name']['comparison']);
+        $this->assertSame('Ana Reyes / Reyes Ana', $rows['owner_representative_name']['registration_value']);
+    }
+
+    public function test_drill_down_resolves_business_and_registration_candidates_when_present(): void
+    {
+        $vendor = Vendor::factory()->create([
+            'company_name' => 'North Star Trading',
+            'trade_name' => 'North Star',
+            'tin' => '123-456-789-000',
+            'dti_registration_number' => 'DTI-2026-123456',
+            'nature_of_business' => 'Food Retail',
+            'business_street' => '123 Main Street',
+            'business_barangay' => 'Barangay San Antonio',
+            'business_city' => 'Pasig City',
+            'business_province' => 'Metro Manila',
+            'business_postal_code' => '1605',
+        ]);
+        $submission = Submission::factory()->for($vendor)->create(['status' => Submission::STATUS_PENDING_REVIEW]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create([
+            'ocr_fields' => [
+                'business_name' => ['value' => 'NORTH STAR TRADING'],
+                'name_of_proprietor' => ['value' => 'NORTH STAR TRADING'],
+                'business_owner' => ['value' => 'NORTH STAR TRADING'],
+                'tin' => ['value' => '123 456 789 000'],
+                'trn_no' => ['value' => 'DTI/2026.123456'],
+                'business_location' => ['value' => '123 MAIN ST., BRGY. SAN ANTONIO, PASIG CITY, METRO MANILA 1605'],
+                'city_issued' => ['value' => 'PASIG CITY'],
+                'kind_of_business' => ['value' => 'Food-Retail'],
+                'line_of_business' => ['value' => 'FOOD RETAIL'],
+            ],
+        ]);
+
+        $rows = collect(SubmissionPresenter::detail($submission->fresh())['ocr_fields_by_document'][(string) $document->id])
+            ->keyBy('key');
+
+        foreach (['business_name', 'name_of_proprietor', 'business_owner', 'tin', 'trn_no', 'business_location', 'city_issued', 'kind_of_business', 'line_of_business'] as $key) {
+            $this->assertTrue($rows[$key]['comparison'], $key.' should resolve a matching vendor candidate.');
+        }
     }
 
     public function test_drill_down_marks_suspect_ocr_values_with_a_warning(): void
@@ -476,11 +1005,11 @@ class OfficerReviewTest extends TestCase
     public function test_drill_down_has_no_ocr_field_rows_when_the_field_map_is_absent(): void
     {
         // Results written before the ocr_fields column existed keep only their
-        // raw text; the panel falls back to it rather than rendering nothing.
+        // raw text in storage, but the presenter must not expose it.
         $detail = $this->detailForOcrFields(null, $document);
 
         $this->assertSame([], $detail['ocr_fields_by_document'][(string) $document->id]);
-        $this->assertSame('BUREAU OF INTERNAL REVENUE', $detail['ocr_by_document'][(string) $document->id]);
+        $this->assertArrayNotHasKey('ocr_by_document', $detail);
     }
 
     /**
@@ -607,6 +1136,25 @@ class OfficerReviewTest extends TestCase
             ->assertSee('Document tampering suspected')
             ->assertSee('Signature verification unavailable')
             ->assertSee('Santos Trading Corp.');
+    }
+
+    public function test_risk_logs_present_stamp_scan_copy_texture_separately_from_tampering(): void
+    {
+        $vendor = Vendor::factory()->create();
+        $submission = Submission::factory()->for($vendor)->create([
+            'status' => Submission::STATUS_PENDING_REVIEW,
+            'risk_level' => 'low',
+        ]);
+        $document = Document::factory()->for($vendor)->for($submission)->create();
+        ValidationResult::factory()->for($document)->create(['flags' => ['stamp_tampered']]);
+
+        $this->actingAs($this->officer)
+            ->get(route('admin.risk-logs'))
+            ->assertOk()
+            ->assertSee('Stamp has scan/copy texture')
+            ->assertSee('Stamp scan/copy texture')
+            ->assertDontSee('stamp_tampered')
+            ->assertDontSee('Stamp tampered');
     }
 
     public function test_officer_can_view_the_notifications(): void

@@ -241,27 +241,92 @@ KEYWORD_LIST = [spec["key"] for spec in FIELD_SPECS]
 # never drift.
 # ---------------------------------------------------------------------------
 BUSINESS_PERMIT_FIELD_SPECS: list[dict] = [
-    {"key": "city_issued", "name": "City Issued", "scope": "global",
+    {"key": "city_issued", "name": "City Issued", "scope": "global", "custom": "business_city",
      # The issuing city prints in the header as "CITY OF <NAME>". Keep the
      # separator to spaces/tabs (not \s, which would run the match across the
      # newline into the following caption lines).
-     "regex": r"CITY OF ([A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*)",
+     "regex": r"(?i)((?:CITY OF\s+[A-Z][A-Za-z]+|DIGOS CITY|MAKATI CITY|MANILA CITY|MAYNILA(?: CITY)?|MARIKINA CITY|TAGUIG CITY|LUNGSOD NG\s+[A-Z][A-Za-z]+))",
      "value_regex": r"[A-Z][A-Za-z]+(?:[ \t]+[A-Z][A-Za-z]+)*", "required": True},
-    {"key": "name_of_proprietor", "name": "Name of Proprietor", "scope": "line",
-     "labels": ["NAME OF PROPRIETOR", "PROPRIETOR"], "value_above": True, "required": True},
+    {"key": "name_of_proprietor", "name": "Name of Proprietor", "scope": "line", "custom": "business_owner",
+     "labels": ["NAME OF PROPRIETOR", "PROPRIETOR", "BUSINESS OWNER", "NAME OF CORPORATION", "NAME OF ENTITY", "NA SI/ANG"], "value_above": True, "required": True},
     {"key": "trade_name", "name": "Trade Name", "scope": "line",
-     "labels": ["TRADE NAME"], "value_above": True, "required": True},
-    {"key": "business_location", "name": "Business Address / Location", "scope": "line",
-     "labels": ["BUSINESS LOCATION", "BUSINESS ADDRESS", "LOCATION"],
+     "labels": ["TRADE NAME", "BUSINESS NAME", "BUSINESS TRADE NAME"], "value_above": True, "required": True},
+    {"key": "business_location", "name": "Business Address / Location", "scope": "line", "custom": "business_address",
+     "labels": ["BUSINESS LOCATION", "BUSINESS ADDRESS", "BUSINESS LOCATION/ADDRESS", "POSTAL ADDRESS", "ADDRESS", "LOCATION"],
      "value_above": True, "required": True},
-    {"key": "kind_of_business", "name": "Kind of Business", "scope": "line",
-     "labels": ["KIND OF BUSINESS", "NATURE OF BUSINESS"], "value_above": True, "required": True},
+    {"key": "kind_of_business", "name": "Kind of Business", "scope": "line", "custom": "business_nature",
+     "labels": ["KIND OF BUSINESS", "NATURE OF BUSINESS", "BUSINESS TRADE NAME / NATURE OF BUSINESS"], "value_above": True, "required": True},
     {"key": "date_issued", "name": "Issued Date", "scope": "global",
      # "Issued this 26th day of AUGUST , 2012, at ..." — capture day + month + year.
-     "regex": r"(?i)issued this\s+(\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2})",
-     "value_regex": r"(?i)\d{1,2}(?:st|nd|rd|th)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2}",
+     "regex": r"(?i)((?:issued this\s+\d{1,2}(?:st|nd|rd|th|sth|nth|rth|dth)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2}|(?:date\s+issued|issued\s+date|date)\s*[:\-]?\s*[A-Za-z]{3,9}\s+\d{1,2},?\s+(?:19|20)\d{2}|on\s*[:\-]?\s*\d{1,2}(?:st|nd|rd|th|sth|nth|rth|dth)?\s+[A-Za-z]+\s+(?:19|20)\d{2}|\d{1,2}(?:st|nd|rd|th|sth|nth|rth|dth)?\s+[A-Za-z]+\s+(?:19|20)\d{2}))",
+     "value_regex": r"(?i)\d{1,2}(?:st|nd|rd|th|sth|nth|rth|dth)?\s+day of\s+[A-Za-z]+\s*,?\s*(?:19|20)\d{2}|(?:\d{1,2}(?:st|nd|rd|th|sth|nth|rth|dth)?\s+)?[A-Za-z]{3,9}\s+\d{1,2},?\s+(?:19|20)\d{2}|\d{1,2}(?:st|nd|rd|th|sth|nth|rth|dth)?\s+[A-Za-z]+\s+(?:19|20)\d{2}",
      "required": True},
 ]
+
+# LGU permits are not one template with cosmetic city branding.  These aliases
+# intentionally live beside the extraction rules so every OCR caller resolves
+# the same issuer key before it chooses a layout or an ROI profile.
+BUSINESS_PERMIT_CITY_ALIASES = {
+    "Digos": ("CITY OF DIGOS", "DIGOS CITY", "LUNGSOD NG DIGOS"),
+    "Makati": ("CITY OF MAKATI", "MAKATI CITY", "LUNGSOD NG MAKATI"),
+    "Manila": ("CITY OF MANILA", "MANILA CITY", "MAYNILA", "MAYNILA CITY", "LUNGSOD NG MAYNILA"),
+    "Marikina": ("CITY OF MARIKINA", "MARIKINA CITY", "LUNGSOD NG MARIKINA"),
+    "Taguig": ("CITY OF TAGUIG", "TAGUIG CITY", "LUNGSOD NG TAGUIG"),
+}
+
+BUSINESS_PERMIT_LAYOUT_VERSION = "2026-08-24"
+
+
+def canonical_business_permit_city(value: str | None) -> str | None:
+    """Resolve a reviewed OCR/header alias to the issuer key used by ADVS."""
+    if not value:
+        return None
+    normalized = re.sub(r"[^A-Z0-9]+", " ", value.upper()).strip()
+    for city, aliases in BUSINESS_PERMIT_CITY_ALIASES.items():
+        if any(re.sub(r"[^A-Z0-9]+", " ", alias).strip() in normalized for alias in aliases):
+            return city
+    return None
+
+
+def business_permit_field_specs(city: str | None) -> list[dict]:
+    """Return the canonical permit fields with only form-present fields required."""
+    required = {
+        "Digos": {"city_issued", "name_of_proprietor", "trade_name", "business_location", "kind_of_business", "date_issued"},
+        "Makati": {"city_issued", "name_of_proprietor", "trade_name", "business_location", "kind_of_business", "date_issued", "valid_until", "or_no"},
+        "Manila": {"city_issued", "name_of_proprietor", "trade_name", "business_location", "kind_of_business", "permit_no", "or_no"},
+        "Marikina": {"city_issued", "name_of_proprietor", "trade_name", "business_location", "kind_of_business", "permit_no", "date_issued", "valid_until"},
+        "Taguig": {"city_issued", "name_of_proprietor", "trade_name", "business_location", "kind_of_business", "date_issued", "valid_until", "lcn_or_account_no"},
+    }.get(city or "", {"city_issued", "trade_name", "business_location"})
+
+    # Digos and Marikina print values above their captions. Manila and Taguig
+    # print values after captions on the same ruled line. Makati's prose fields
+    # use custom extractors and its trade name is normally recovered by ROI.
+    value_above = city in {"Digos", "Makati", "Marikina"}
+    specs = [
+        {
+            **spec,
+            "required": spec["key"] in required,
+            **({"value_above": value_above} if "value_above" in spec else {}),
+        }
+        for spec in BUSINESS_PERMIT_FIELD_SPECS
+    ]
+    specs.extend([
+        {"key": "permit_no", "name": "Permit Number", "scope": "global",
+         "regex": r"(?i)(?:PERMIT[ \t]*(?:NO\.?|NUMBER)|\bB\.?I\.?N\.?\b|BUSINESS[ \t]+IDENTIFICATION[ \t]+NO\.?)[ \t]*[:#-]?[ \t]*([A-Z0-9/-]{4,})",
+         "value_regex": r"[A-Z0-9/-]{4,}", "required": "permit_no" in required},
+        {"key": "or_no", "name": "O.R. Number", "scope": "global",
+         "regex": r"(?i)\bO\.?R\.?[ \t]*(?:NO\.?|NUMBER)[ \t]*[:#-]?[ \t]*([A-Z0-9/-]{4,})",
+         "value_regex": r"[A-Z0-9/-]{4,}", "required": "or_no" in required},
+        {"key": "valid_until", "name": "Valid Until", "scope": "global",
+         "regex": r"(?i)(?:VALID(?:ITY)?\s*(?:UNTIL|THRU|THROUGH|UP TO)|(?:THIS\s+PERMIT\s+)?EXPIRES?\s+ON|EXPIRY\s+DATE)[\s\S]{0,100}?([A-Z]+\s+\d{1,2},?\s+(?:19|20)\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:19|20)?\d{2})",
+         "value_regex": r".+", "required": "valid_until" in required},
+        {"key": "tax_year", "name": "Tax Year", "scope": "global",
+         "regex": r"(?i)TAX\s+YEAR\s*[:#-]?\s*((?:19|20)\d{2})", "value_regex": r"(?:19|20)\d{2}", "required": False},
+        {"key": "lcn_or_account_no", "name": "LCN / Account Number", "scope": "global",
+         "regex": r"(?i)(?:LCN|ACCOUNT[ \t]*(?:NO\.?|NUMBER))[ \t]*[:#-]?[ \t]*([A-Z0-9/-]{4,})",
+         "value_regex": r"[A-Z0-9/-]{4,}", "required": "lcn_or_account_no" in required},
+    ])
+    return specs
 
 BUSINESS_PERMIT_KEYWORDS = [
     "BUSINESS PERMIT", "PROPRIETOR", "TRADE NAME", "KIND OF BUSINESS", "CITY OF",
@@ -293,7 +358,7 @@ DTI_FIELD_SPECS: list[dict] = [
      "labels": ["CERTIFICATE NO", "CERTIFICATE NUMBER"],
      "regex": r"((?:BN\s*)?\d{5,})", "value_regex": r"(?:BN\s*)?\d{5,}",
      "same_line": True, "required": True},
-    {"key": "trn_no", "name": "TRN", "scope": "line",
+    {"key": "trn_no", "name": "Transaction Reference Number (TRN)", "scope": "line",
      "labels": ["TRN"], "regex": r"(DTI-\d{4}-\d+|[A-Z0-9-]{6,})",
      "value_regex": r"DTI-\d{4}-\d+|[A-Z0-9-]{6,}",
      "same_line": True, "required": True},
@@ -597,6 +662,18 @@ def _find_by_label_above(lines: list[str], labels: list[str]):
     return None
 
 
+def _business_permit_label_value(lines: list[str], spec: dict) -> str | None:
+    """Read an LGU field from the side of its caption used by this layout."""
+    if spec.get("value_above"):
+        return _find_by_label_above(lines, spec["labels"])
+
+    return _find_by_label(
+        lines,
+        spec["labels"],
+        allow_next_line=not spec.get("same_line", False),
+    )
+
+
 def _dti_certified_block(lines: list[str]) -> list[str]:
     """The value lines inside a DTI "This certifies that ..." block: the business
     name followed by its address, stopping at the boilerplate that follows."""
@@ -672,7 +749,30 @@ def extract_fields(text: str, token_conf: dict, specs: list[dict] | None = None)
     for spec in specs:
         raw_value = None
         custom = spec.get("custom")
-        if custom == "header_table_name":
+        if custom == "business_city":
+            m = re.search(spec["regex"], text)
+            raw_value = m.group(0) if m else None
+        elif custom == "business_address":
+            m = re.search(r"(?is)\(with postal address at\)\s*([^\n]+)", text)
+            if m is None:
+                m = re.search(r"(?is)na matatagpuan[^\n]*\n(?:\(with postal address at\)\s*)?([^\n]+)", text)
+            raw_value = m.group(1).strip() if m else None
+            if raw_value is None:
+                raw_value = _business_permit_label_value(lines, spec)
+        elif custom == "business_owner":
+            m = re.search(r"(?is)NA\s*SI/?ANG\s*:?\s*(?:\(?THAT\)?\s*)?(.+?)(?=\n|na matatagpuan|with postal address)", text)
+            raw_value = m.group(1) if m else None
+            if raw_value is None:
+                raw_value = _business_permit_label_value(lines, spec)
+        elif custom == "business_nature":
+            m = re.search(r"(?im)(?:permit to operate as\)?|mangalakal bilang)\s*$\s*([^\n]+)", text)
+            raw_value = m.group(1).strip() if m else None
+            if raw_value:
+                raw_value = re.sub(r"^(?:[^A-Z\n]*|(?:[A-Z]{1,3}\s+){1,3})(?=[A-Z]{4})", "", raw_value).strip()
+                raw_value = re.sub(r"(?i)^(?:A\s+MAY|MAY)\s+(?=[A-Z])", "", raw_value).strip()
+            if raw_value is None:
+                raw_value = _business_permit_label_value(lines, spec)
+        elif custom == "header_table_name":
             raw_value = _extract_registered_name(lines)
         elif custom == "dti_business_name":
             raw_value = _dti_certified_line(lines, 0)
@@ -701,6 +801,7 @@ def extract_fields(text: str, token_conf: dict, specs: list[dict] | None = None)
         out[spec["key"]] = {
             "name": spec["name"],
             "value": value,
+            "raw_value": raw_value,
             "required": spec["required"],
             "matched": value is not None,
             "confidence": _field_confidence(value, token_conf) if value else None,
@@ -710,11 +811,16 @@ def extract_fields(text: str, token_conf: dict, specs: list[dict] | None = None)
 
 def _normalise_value(key: str, value: str) -> str:
     value = value.strip(" :.-–—").strip()
+    if key == "city_issued":
+        value = re.sub(r"(?i)^CITY OF\s+|\s+CITY$|^LUNGSOD NG\s+", "", value).strip()
     if key == "tin":
         digits = re.sub(r"\D", "", value)
         if len(digits) >= 12:
             return f"{digits[0:3]}-{digits[3:6]}-{digits[6:9]}-{digits[9:13]}"
     if key == "date_issued":
+        value = re.sub(r"(?i)^(?:DATE\s+ISSUED|ISSUED\s+DATE|DATE)\s*[:\-]?\s*", "", value)
+        value = re.sub(r"(?i)^ON\s*[:\-]?\s*", "", value)
+        value = re.sub(r"(?i)\b(\d{1,2})(?:STH|NTH|RTH|DTH)\b", r"\1", value)
         return re.sub(r"\s+", " ", value)  # collapse stray OCR gaps: "DEC  12   2020"
     return value
 

@@ -389,6 +389,21 @@ class OfficerWorkflowTest extends TestCase
             ->assertDontSee('Santos Trading Corp.');
     }
 
+    public function test_pending_queue_total_ignores_active_filters(): void
+    {
+        $this->makePendingSubmission('Santos Trading Corp.', 78.0, 'high');
+        $this->makePendingSubmission('Mendoza Pharma', 12.0, 'low');
+        $this->makePendingSubmission('Garcia Textiles', 42.0, 'medium');
+
+        $this->actingAs($this->officer);
+
+        $component = Volt::test('admin.pending')
+            ->set('risk', 'high');
+
+        $this->assertSame(1, $component->viewData('rows')->count());
+        $this->assertSame(3, $component->viewData('total'));
+    }
+
     public function test_archived_reports_filter_by_decision(): void
     {
         $approved = $this->makePendingSubmission('Garcia Textiles', 15.0, 'low');

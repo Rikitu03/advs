@@ -36,7 +36,11 @@ php artisan key:generate
 Create a MySQL database named `advs`, then update `.env`:
 
 ```dotenv
-APP_URL=http://127.0.0.1:8000
+APP_URL=http://localhost:8000
+
+# WebAuthn requires a hostname. Do not open the app at 127.0.0.1.
+PASSKEYS_RELYING_PARTY_ID=localhost
+PASSKEYS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:8100
 
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
@@ -75,13 +79,10 @@ TESSERACT_CMD=C:/Program Files/Tesseract-OCR/tesseract.exe
 Build the database and frontend assets:
 
 ```powershell
-php artisan migrate:fresh --seed --no-interaction
+php artisan migrate --no-interaction
 php artisan storage:link
 npm.cmd run build
 ```
-
-`migrate:fresh` deletes existing application data. For an existing database,
-use `php artisan migrate --no-interaction` instead.
 
 ## Start the Application
 
@@ -100,8 +101,20 @@ This starts:
 
 - Laravel at `http://127.0.0.1:8000`
 - Vite development assets
-- Queue worker for `document-processing`, `mail`, and `default` with a
-  360-second job timeout
+- Dedicated mail queue worker for `mail` with a 60-second job timeout
+- Dedicated document queue worker for `document-processing` with a 360-second
+  job timeout
+
+Startup first checks the configured database connection. If MySQL is stopped
+or the `DB_*` settings are invalid, the command fails before the other
+processes start with an actionable error. The queue process is also restarted
+automatically by the queue-only `scripts/queue-worker.ps1` supervisor after a
+transient database disconnect. Each queue worker has its own restart loop, so
+slow OCR/ML jobs cannot block authentication email delivery. Laravel normally
+exits a database worker with status 0 when it detects a lost connection, so
+the queue-only restart loops are required for a local multi-process development
+command. Non-zero worker exits are still propagated so application errors
+remain visible.
 
 ### Terminal 2: Python ML API
 
@@ -126,7 +139,7 @@ curl.exe http://127.0.0.1:7860/ready
 
 ## Open ADVS
 
-Visit `http://127.0.0.1:8000`.
+Visit `http://localhost:8000`.
 
 Seeded accounts use password `password`:
 
@@ -193,8 +206,9 @@ php artisan optimize:clear
 
 ### Documents stay queued
 
-Confirm Terminal 1 is running and includes the queue worker. The required
-queue is `document-processing`.
+Confirm Terminal 1 is running and includes the dedicated document queue worker.
+The required queue is `document-processing`; the mail worker does not process
+document jobs.
 
 ### ML API is unreachable
 

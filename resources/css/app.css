@@ -55,6 +55,7 @@
     --color-cu-pink: #c1503a;
     --color-cu-blue: #8a7a63;
     --color-cu-yellow: #c6902e;
+    --color-cu-success: #2d8653;
 
     /* Dashboard semantic surfaces — light defaults; dark overrides live in
        `@layer theme { .dark { … } }` below so every `cu-*` utility flips

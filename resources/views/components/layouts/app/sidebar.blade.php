@@ -1,4 +1,5 @@
 @php($user = auth()->user())
+@php($unreadNotificationCount = once(fn (): int => $user->notifications()->unread()->count()))
 
 <!DOCTYPE html>
 {{-- Server-side theme guard: render `class="dark"` from the 7-day `theme`
@@ -23,7 +24,7 @@
                         <flux:navlist.item icon="home" :href="route('vendor.dashboard')" :current="request()->routeIs('vendor.dashboard')" wire:navigate>Dashboard</flux:navlist.item>
                         <flux:navlist.item icon="arrow-up-tray" :href="route('vendor.submit')" :current="request()->routeIs('vendor.submit')" wire:navigate>Submit Documents</flux:navlist.item>
                         <flux:navlist.item icon="document-text" :href="route('vendor.submissions')" :current="request()->routeIs('vendor.submissions')" wire:navigate>My Submissions</flux:navlist.item>
-                        <flux:navlist.item icon="bell" :href="route('vendor.notifications')" :current="request()->routeIs('vendor.notifications')" :badge="$user->notifications()->unread()->count() ?: null" wire:navigate>Notifications</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('vendor.notifications')" :current="request()->routeIs('vendor.notifications')" :badge="$unreadNotificationCount ?: null" wire:navigate>Notifications</flux:navlist.item>
                         <flux:navlist.item icon="user-circle" :href="route('vendor.profile')" :current="request()->routeIs('vendor.profile')" wire:navigate>Profile</flux:navlist.item>
                     </flux:navlist.group>
                 @else
@@ -33,7 +34,7 @@
                         <flux:navlist.item icon="archive-box" :href="route('admin.archived')" :current="request()->routeIs('admin.archived')" wire:navigate>Archived Reports</flux:navlist.item>
                         <flux:navlist.item icon="identification" :href="route('admin.vendors')" :current="request()->routeIs('admin.vendors') || request()->routeIs('admin.vendors.*')" wire:navigate>Vendor Profiles</flux:navlist.item>
                         <flux:navlist.item icon="clipboard-document-list" :href="route('admin.risk-logs')" :current="request()->routeIs('admin.risk-logs')" wire:navigate>Risk Logs</flux:navlist.item>
-                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" :badge="$user->notifications()->unread()->count() ?: null" wire:navigate>Notifications</flux:navlist.item>
+                        <flux:navlist.item icon="bell" :href="route('admin.notifications')" :current="request()->routeIs('admin.notifications')" :badge="$unreadNotificationCount ?: null" wire:navigate>Notifications</flux:navlist.item>
                     </flux:navlist.group>
 
                     @if ($user->hasRole(\App\Models\User::ROLE_ADMIN))
@@ -147,6 +148,16 @@
         </flux:header>
 
         {{ $slot }}
+
+        <flux:toast />
+
+        @if ($toast = session()->pull('toast'))
+            <x-flux-toast
+                :heading="$toast['heading'] ?? ''"
+                :text="$toast['text'] ?? ''"
+                :variant="$toast['variant'] ?? 'info'"
+            />
+        @endif
 
         @fluxScripts
     </body>

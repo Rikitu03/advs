@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("image", help="Path to enrollment photo (JPG/PNG)")
     ap.add_argument("--save-overlay", action="store_true", help="Save detection overlay")
     ap.add_argument("--confidence", type=float, default=0.20, help="Detection confidence threshold")
-    ap.add_argument("--imgsz", type=int, default=1280, help="Inference image size")
+    ap.add_argument("--imgsz", type=int, default=640, help="Inference image size")
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     image_path = Path(args.image)

@@ -221,7 +221,12 @@ class MlPipelineService
      */
     public function mapStages(array $stages, array $context = []): array
     {
-        $columns = [];
+        $columns = [
+            'ocr_extracted_text' => null,
+            'ocr_confidence' => null,
+            'ocr_fields' => null,
+            'detected_city' => null,
+        ];
         $flags = [];
 
         // ── Stage 4 detection — bounding boxes for the drill-down ──────────────
@@ -244,21 +249,30 @@ class MlPipelineService
         if ($this->ran($ocr) && ! empty($ocr['pages'])) {
             $page = $ocr['pages'][0];
             $quality = $page['quality'] ?? [];
-            $columns['ocr_extracted_text'] = $page['text'] ?? null;
+            $sourcePages = is_array($ocr['source_pages'] ?? null) ? $ocr['source_pages'] : [];
+            $pages = $sourcePages !== [] ? $sourcePages : $ocr['pages'];
+            $columns['ocr_extracted_text'] = collect($pages)
+                ->pluck('text')
+                ->filter(fn (mixed $text): bool => is_string($text) && trim($text) !== '')
+                ->implode("\n\n");
             $columns['ocr_confidence'] = $this->float($quality['mean_confidence'] ?? null);
             // The structured key/value map the drill-down renders. Stored as the
             // API returns it — per-field warnings included — so the format
             // patterns that grade a value stay in the field specs that define it.
-            $columns['ocr_fields'] = $page['fields'] ?? null;
-            $columns['text_validation_score'] = $this->float($quality['text_validation_score'] ?? null);
-            $columns['text_fields_matched'] = $quality['required_matched'] ?? null;
-            $columns['text_fields_expected'] = $quality['required_total'] ?? null;
+            $fields = $page['fields'] ?? [];
+            $permitEvidence = $ocr['business_permit'] ?? null;
+            if (is_array($permitEvidence)) {
+                $fields['__business_permit'] = $permitEvidence;
+            }
+            $columns['ocr_fields'] = $fields === [] ? null : $fields;
 
             // The issuing city an LGU logo reference is keyed by (§5 Stage 4b). It is
             // knowable only here — the city prints on the document, so it does not
             // exist until Stage 2 has read it — which is why the pre-call lookup in
             // validate() can scope national issuers but never LGU ones.
-            $city = $this->detectedCity($page['fields'] ?? null);
+            $city = is_array($permitEvidence)
+                ? $this->normalizeIssuerCity($permitEvidence['issuer_city_canonical'] ?? null)
+                : $this->detectedCity($page['fields'] ?? null);
             if ($city !== null) {
                 $columns['detected_city'] = $city;
             }
@@ -273,6 +287,14 @@ class MlPipelineService
         if ($this->ran($signature)) {
             $distance = $this->float($signature['distance'] ?? null);
             $threshold = $this->float($signature['threshold'] ?? null);
+            $columns['signature_comparisons'] = $this->signatureComparisons($signature['comparisons'] ?? []);
+            $aggregateBox = $signature['box'] ?? collect($signature['comparisons'] ?? [])
+                ->filter(fn (mixed $comparison): bool => is_array($comparison) && is_array($comparison['box'] ?? null))
+                ->sortBy(fn (array $comparison): float => (float) ($comparison['similarity'] ?? 0.0))
+                ->value('box');
+            if (is_array($aggregateBox)) {
+                $columns['signature_bbox'] = $aggregateBox;
+            }
             $columns['signature_detected'] = true;
             $columns['signature_distance'] = $distance;
             $columns['signature_passed'] = $signature['match'] ?? null;
@@ -281,6 +303,7 @@ class MlPipelineService
                 $flags[] = 'signature_mismatch';
             }
         } elseif ($signature !== null) {
+            $columns['signature_comparisons'] = [];
             $columns['signature_detected'] = false;
             if (($signature['reason'] ?? null) === 'no_reference_embedding') {
                 // Distinct from a genuine detection miss: the region may well have
@@ -299,19 +322,28 @@ class MlPipelineService
         if ($this->ran($stamp) && ($stamp['stamp_tampered'] ?? null) !== null) {
             $columns['stamp_tampered'] = (bool) $stamp['stamp_tampered'];
         }
+        if ($this->ran($stamp)) {
+            $columns['stamp_comparisons'] = $this->stampComparisons($stamp['comparisons'] ?? []);
+        }
         if ($this->ran($stamp) && ($stamp['reason'] ?? null) === null) {
+            if (is_array($stamp['box'] ?? null)) {
+                $columns['stamp_bbox'] = $stamp['box'];
+            }
             $similarity = $this->float($stamp['similarity_score'] ?? null);
             $columns['stamp_detected'] = true;
             $columns['stamp_similarity'] = $similarity;
             $columns['stamp_score'] = $similarity;
             $columns['stamp_passed'] = $stamp['match'] ?? null;
-            $columns['logo_reference_id'] = $this->matchedLogoReferenceId(
-                $context['logo_reference_ids'] ?? [], $issuerScope, $stamp['city'] ?? null
-            );
+            $columns['logo_reference_id'] = ($stamp['reference_source'] ?? 'enrolled') === 'enrolled'
+                ? $this->matchedLogoReferenceId(
+                    $context['logo_reference_ids'] ?? [], $issuerScope, $stamp['city'] ?? null
+                )
+                : null;
             if (($stamp['match'] ?? null) === false) {
                 $flags[] = 'stamp_mismatch';
             }
         } elseif ($stamp !== null) {
+            $columns['stamp_comparisons'] ??= [];
             $columns['stamp_detected'] = false;
             $reason = $stamp['reason'] ?? null;
             if ($issuerScope === null) {
@@ -324,6 +356,72 @@ class MlPipelineService
         }
 
         return ['columns' => $columns, 'flags' => array_values(array_unique($flags))];
+    }
+
+    /**
+     * Normalize every detected issuer-logo comparison without storing vectors.
+     * Aggregate stamp fields remain mapped separately for risk scoring.
+     *
+     * @param  array<int, mixed>  $comparisons
+     * @return list<array<string, mixed>>
+     */
+    private function stampComparisons(array $comparisons): array
+    {
+        return collect($comparisons)
+            ->filter(fn (mixed $comparison): bool => is_array($comparison))
+            ->map(fn (array $comparison): array => [
+                'page_index' => isset($comparison['page_index']) ? (int) $comparison['page_index'] : null,
+                'box' => $comparison['box'] ?? null,
+                'confidence' => $this->float($comparison['confidence'] ?? null),
+                'match' => $comparison['match'] ?? null,
+                'similarity_score' => $this->float($comparison['similarity_score'] ?? null),
+                'threshold' => $this->float($comparison['threshold'] ?? null),
+                'stamp_tampered' => isset($comparison['stamp_tampered'])
+                    ? (bool) $comparison['stamp_tampered']
+                    : null,
+                'genuine_probability' => $this->float($comparison['genuine_probability'] ?? null),
+                'reference_source' => $comparison['reference_source'] ?? null,
+                'best_reference_key' => $comparison['best_reference_key'] ?? null,
+                'reference_matches' => collect($comparison['reference_matches'] ?? [])
+                    ->filter(fn (mixed $match): bool => is_array($match))
+                    ->map(fn (array $match): array => [
+                        'key' => $match['key'] ?? null,
+                        'label' => $match['label'] ?? null,
+                        'source' => $match['source'] ?? null,
+                        'city' => $match['city'] ?? null,
+                        'similarity_score' => $this->float($match['similarity_score'] ?? null),
+                        'match' => $match['match'] ?? null,
+                    ])
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $comparisons
+     * @return list<array<string, mixed>>
+     */
+    private function signatureComparisons(array $comparisons): array
+    {
+        return collect($comparisons)
+            ->filter(fn (mixed $comparison): bool => is_array($comparison))
+            ->map(fn (array $comparison): array => [
+                'page_index' => isset($comparison['page_index']) ? (int) $comparison['page_index'] : null,
+                'box' => $comparison['box'] ?? null,
+                'confidence' => $this->float($comparison['confidence'] ?? null),
+                'match' => $comparison['match'] ?? null,
+                'distance' => $this->float($comparison['distance'] ?? null),
+                'similarity' => $this->float($comparison['similarity'] ?? null),
+                'threshold' => $this->float($comparison['threshold'] ?? null),
+                'score' => $this->calibratedSignatureScore(
+                    $this->float($comparison['distance'] ?? null),
+                    $this->float($comparison['threshold'] ?? null),
+                ),
+            ])
+            ->values()
+            ->all();
     }
 
     /**
@@ -403,9 +501,12 @@ class MlPipelineService
             return null;
         }
 
-        $city = Str::title(Str::squish((string) ($field['value'] ?? '')));
+        return $this->normalizeIssuerCity($field['value'] ?? null);
+    }
 
-        return $city === '' ? null : $city;
+    private function normalizeIssuerCity(mixed $value): ?string
+    {
+        return IssuerCity::canonical(is_string($value) ? $value : null);
     }
 
     /**
@@ -471,8 +572,14 @@ class MlPipelineService
             if (! is_array($vector) || $vector === []) {
                 continue;
             }
-            $vectors[$row->city] = $vector;
-            $ids[$row->city] = (int) $row->id;
+            $key = $issuerScope === 'national'
+                ? ''
+                : (IssuerCity::canonical((string) $row->city) ?? Str::title(Str::squish((string) $row->city)));
+            if ($key === null) {
+                continue;
+            }
+            $vectors[$key] = $vector;
+            $ids[$key] = (int) $row->id;
         }
 
         return [$vectors === [] ? null : json_encode($vectors, JSON_THROW_ON_ERROR), $ids];
@@ -490,9 +597,23 @@ class MlPipelineService
             return $ids[''] ?? null;
         }
 
-        $key = Str::title(Str::squish((string) $city));
+        $key = $this->normalizeIssuerCity($city);
 
-        return $key === '' ? null : ($ids[$key] ?? null);
+        if ($key === null) {
+            return null;
+        }
+
+        if (isset($ids[$key])) {
+            return $ids[$key];
+        }
+
+        foreach ($ids as $storedCity => $id) {
+            if ($this->normalizeIssuerCity((string) $storedCity) === $key) {
+                return $id;
+            }
+        }
+
+        return null;
     }
 
     /**

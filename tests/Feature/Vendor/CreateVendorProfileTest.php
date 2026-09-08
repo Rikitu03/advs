@@ -22,8 +22,6 @@ class CreateVendorProfileTest extends TestCase
             'business_entity_type' => 'sole_proprietorship',
             'tin' => '123-456-789-000',
             'dti_registration_number' => 'DTI-2026001',
-            'sec_registration_number' => '',
-            'business_permit_number' => 'BP-2026-555',
             'nature_of_business' => 'Food retail',
             'business_street' => '12 Ortigas Ave',
             'business_barangay' => 'Barangay San Antonio',
@@ -37,9 +35,6 @@ class CreateVendorProfileTest extends TestCase
             'date_of_birth' => '1990-06-19',
             'gender' => 'male',
             'contact_number' => '+63 917 000 0000',
-            'government_id_type' => 'national_id',
-            'government_id_number' => '1234-5678-9012',
-            'home_address' => '37 Real St, Calamba',
         ], $overrides);
     }
 
@@ -53,26 +48,30 @@ class CreateVendorProfileTest extends TestCase
         $this->assertSame('sole_proprietorship', $vendor->business_entity_type);
         $this->assertSame('DTI-2026001', $vendor->dti_registration_number);
         $this->assertNull($vendor->sec_registration_number);
+        $this->assertNull($vendor->business_permit_number);
         $this->assertNull($vendor->trade_name);
         $this->assertSame('Jose', $vendor->representative->first_name);
         $this->assertNull($vendor->representative->middle_name);
+        $this->assertNull($vendor->representative->government_id_type);
+        $this->assertNull($vendor->representative->government_id_number);
+        $this->assertNull($vendor->representative->home_address);
         $this->assertTrue($user->refresh()->hasCompletedVendorProfile());
         $this->assertDatabaseCount('vendors', 1);
         $this->assertDatabaseCount('vendor_representatives', 1);
     }
 
-    public function test_it_nullifies_dti_number_for_a_corporation(): void
+    public function test_it_leaves_legacy_registration_values_empty_for_new_profiles(): void
     {
         $user = User::factory()->withoutVendorProfile()->create();
 
         $vendor = app(CreateVendorProfile::class)->execute($user, $this->payload([
             'business_entity_type' => 'corporation',
             'dti_registration_number' => 'DTI-LEFTOVER',
-            'sec_registration_number' => 'SEC-CS202600123',
         ]));
 
         $this->assertNull($vendor->dti_registration_number);
-        $this->assertSame('SEC-CS202600123', $vendor->sec_registration_number);
+        $this->assertNull($vendor->sec_registration_number);
+        $this->assertNull($vendor->business_permit_number);
     }
 
     public function test_it_is_idempotent_and_does_not_duplicate_rows(): void
@@ -86,5 +85,43 @@ class CreateVendorProfileTest extends TestCase
         $this->assertDatabaseCount('vendors', 1);
         $this->assertDatabaseCount('vendor_representatives', 1);
         $this->assertSame('Renamed Trading', $user->vendor->refresh()->company_name);
+    }
+
+    public function test_it_preserves_legacy_representative_fields_when_updating_a_profile(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->create();
+        $action = app(CreateVendorProfile::class);
+
+        $vendor = $action->execute($user, $this->payload());
+        $vendor->representative->update([
+            'government_id_type' => 'national_id',
+            'government_id_number' => '1234-5678-9012',
+            'home_address' => '37 Real St, Calamba',
+        ]);
+
+        $action->execute($user, $this->payload(['company_name' => 'Renamed Trading']));
+
+        $representative = $user->vendor->representative->refresh();
+        $this->assertSame('national_id', $representative->government_id_type);
+        $this->assertSame('1234-5678-9012', $representative->government_id_number);
+        $this->assertSame('37 Real St, Calamba', $representative->home_address);
+    }
+
+    public function test_it_preserves_legacy_registration_values_when_updating_a_profile(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->create();
+        $action = app(CreateVendorProfile::class);
+
+        $vendor = $action->execute($user, $this->payload());
+        $vendor->update([
+            'sec_registration_number' => 'SEC-CS202600123',
+            'business_permit_number' => 'BP-2026-555',
+        ]);
+
+        $updated = $action->execute($user, $this->payload(['company_name' => 'Renamed Trading']));
+
+        $this->assertSame('Renamed Trading', $updated->company_name);
+        $this->assertSame('SEC-CS202600123', $updated->sec_registration_number);
+        $this->assertSame('BP-2026-555', $updated->business_permit_number);
     }
 }

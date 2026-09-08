@@ -3,11 +3,14 @@
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\SystemSettingsController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Auth\MfaChallengeController;
 use App\Models\Document;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Support\IssuerLogoCatalog;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
@@ -18,6 +21,12 @@ use Livewire\Volt\Volt;
 |--------------------------------------------------------------------------
 */
 Route::view('/', 'welcome')->name('home');
+
+Route::middleware('guest')->group(function () {
+    Route::get('mfa-challenge', [MfaChallengeController::class, 'show'])->name('mfa-challenge');
+    Route::post('mfa-challenge', [MfaChallengeController::class, 'verify'])->middleware('throttle:email-otp-verify')->name('mfa-challenge.verify');
+    Route::post('mfa-challenge/resend', [MfaChallengeController::class, 'resend'])->middleware('throttle:email-otp-resend')->name('mfa-challenge.resend');
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -120,6 +129,23 @@ Route::middleware(['auth', 'verified'])->group(function () {
             ]);
         })->name('admin.logo-references.show');
 
+        Route::get('admin/issuer-logo-references/{reference}', function (string $reference, IssuerLogoCatalog $catalog) {
+            $path = $catalog->pathFor($reference);
+
+            abort_unless($path !== null, 404);
+
+            $response = response()->file($path, [
+                'Content-Type' => File::mimeType($path) ?: 'application/octet-stream',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+            $response->setPrivate();
+            $response->setMaxAge(0);
+            $response->headers->addCacheControlDirective('no-store');
+
+            return $response;
+        })->where('reference', '[A-Za-z0-9._-]+')->name('admin.issuer-logo-references.show');
+
         // Archived Reports — searchable archive of decided submissions (§4).
         Volt::route('admin/archived', 'admin.archived')->name('admin.archived');
 
@@ -200,6 +226,12 @@ Route::middleware(['auth'])->group(function () {
 
     Volt::route('settings/profile', 'settings.profile')->name('settings.profile');
     Volt::route('settings/password', 'settings.password')->name('settings.password');
+    Volt::route('settings/security', 'settings.security')->name('settings.security')->middleware('verified');
     Volt::route('settings/preference', 'settings.preference')->name('settings.preference');
     Volt::route('settings/appearance', 'settings.appearance')->name('settings.appearance');
+});
+
+Route::get('/test-debugbar', function () {
+    \Debugbar::enable();
+    return view('welcome'); // or any existing view
 });

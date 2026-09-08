@@ -107,17 +107,21 @@ new class extends Component {
 
     private function documentTypeIdFor(string $type): ?int
     {
-        $aliases = match ($type) {
-            'BIR Permit' => ['bir_certificate', 'bir_permit', 'BIR Certificate of Registration', 'BIR Permit'],
-            'Business Permit' => ['business_permit', 'Business Permit'],
-            'Financial Statement' => ['financial_statement', 'Financial Statement'],
-            default => [$type],
+        [$codes, $names] = match ($type) {
+            'BIR Registration', 'BIR Permit' => [
+                ['bir_certificate'],
+                ['BIR Certificate of Registration', 'BIR Registration', 'BIR Permit'],
+            ],
+            'Business Permit' => [['business_permit'], ['Business Permit']],
+            'DTI Registration' => [['dti_registration'], ['DTI Business Name Registration', 'DTI Registration']],
+            default => [[$type], [$type]],
         };
 
         $id = DB::table('document_types')
-            ->where(function ($query) use ($aliases): void {
-                $query->whereIn('code', $aliases)->orWhereIn('name', $aliases);
+            ->where(function ($query) use ($codes, $names): void {
+                $query->whereIn('code', $codes)->orWhereIn('name', $names);
             })
+            ->orderByRaw('case when code = ? then 0 else 1 end', [$codes[0]])
             ->value('id');
 
         return $id !== null ? (int) $id : null;
@@ -138,14 +142,13 @@ new class extends Component {
         @keydown.escape.window="closeInvalidModal()"
         x-data="{
             files: [],
-            timers: {},
             rejectedFiles: [],
             allowed: ['pdf', 'png', 'jpg', 'jpeg'],
             maxBytes: 10 * 1024 * 1024,
+            maxBatchBytes: 50 * 1024 * 1024,
             dragActive: false,
             submitted: false,
             submitting: false,
-            stagingUploads: false,
             invalidModalOpen: false,
             readFiles(fileList) {
                 if (this.submitting) {
@@ -174,7 +177,6 @@ new class extends Component {
 
                 if (accepted.length > 0) {
                     this.files.push(...accepted);
-                    this.syncUpload();
                 }
 
                 if (rejected.length > 0) {
@@ -201,7 +203,7 @@ new class extends Component {
                         ? 'File must be a PDF, PNG, JPG, or JPEG.'
                         : (! validSize ? 'File is larger than the 10 MB per-file limit.' : ''),
                     type: '',
-                    status: validType && validSize ? 'staging' : 'invalid',
+                    status: validType && validSize ? 'ready' : 'invalid',
                     progress: 0,
                 };
             },
@@ -220,54 +222,9 @@ new class extends Component {
 
                 return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
             },
-            syncUpload() {
-                const validLanes = this.files.filter((lane) => lane.valid);
-
-                if (validLanes.length === 0) {
-                    this.stagingUploads = false;
-                    this.$wire.set('uploadedFiles', []);
-                    return;
-                }
-
-                this.stagingUploads = true;
-                validLanes.forEach((lane) => {
-                    lane.status = 'staging';
-                    lane.progress = 0;
-                    lane.error = '';
-                });
-
-                this.$wire.uploadMultiple(
-                    'uploadedFiles',
-                    validLanes.map((lane) => lane.file),
-                    () => {
-                        validLanes.forEach((lane) => {
-                            lane.status = 'ready';
-                            lane.progress = 0;
-                        });
-                        this.stagingUploads = false;
-                    },
-                    () => {
-                        validLanes.forEach((lane) => {
-                            lane.status = 'failed';
-                            lane.progress = 0;
-                            lane.error = 'Upload failed. Remove or replace this file.';
-                        });
-                        this.stagingUploads = false;
-                    },
-                    () => {
-                        validLanes.forEach((lane) => {
-                            lane.progress = 0;
-                        });
-                    },
-                );
-            },
             statusLabel(file) {
                 if (file.status === 'failed') {
                     return 'Upload Failed';
-                }
-
-                if (file.status === 'staging') {
-                    return 'Preparing';
                 }
 
                 if (file.status === 'uploading') {
@@ -289,11 +246,11 @@ new class extends Component {
                     return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
                 }
 
-                if (file.status === 'failed') {
+                if (file.status === 'failed' || file.status === 'invalid') {
                     return 'bg-rose-500/15 text-rose-700 dark:text-rose-300';
                 }
 
-                if (file.status === 'uploading' || file.status === 'staging') {
+                if (file.status === 'uploading') {
                     return 'bg-cu-blue/10 text-sky-700 dark:text-sky-300';
                 }
 
@@ -325,69 +282,68 @@ new class extends Component {
                     sizeBytes: file.sizeBytes ?? 0,
                 }));
 
-                this.files.forEach((file) => {
-                    window.clearInterval(this.timers[file.id]);
-                    file.status = 'uploading';
-                    file.progress = 0;
-                    file.error = '';
-
-                    this.timers[file.id] = window.setInterval(() => {
-                        const nextProgress = Math.min(100, file.progress + Math.floor(Math.random() * 16) + 8);
-                        file.progress = nextProgress;
-
-                        if (nextProgress < 100) {
-                            return;
-                        }
-
-                        window.clearInterval(this.timers[file.id]);
-                        file.status = 'completed';
-                        file.progress = 100;
-                        this.submitWhenProgressCompletes(payload);
-                    }, 220);
-                });
+                this.uploadFileAt(0, payload);
             },
-            submitWhenProgressCompletes(payload) {
-                if (! this.files.every((file) => file.status === 'completed')) {
+            uploadFileAt(index, payload) {
+                if (index >= this.files.length) {
+                    this.$wire.submitBatch(payload).then(() => {
+                        this.submitting = false;
+                    }).catch(() => {
+                        this.submitting = false;
+                        this.submitted = false;
+                    });
                     return;
                 }
 
-                this.$wire.submitBatch(payload).then(() => {
-                    this.files.forEach((file) => {
-                        file.status = 'ready';
-                        file.progress = 0;
-                    });
-                    this.submitting = false;
-                    this.submitted = false;
-                });
+                const lane = this.files[index];
+
+                lane.status = 'uploading';
+                lane.progress = 0;
+                lane.error = '';
+
+                this.$wire.uploadMultiple(
+                    'uploadedFiles',
+                    [lane.file],
+                    () => {
+                        lane.status = 'completed';
+                        lane.progress = 100;
+                        this.uploadFileAt(index + 1, payload);
+                    },
+                    () => {
+                        lane.status = 'failed';
+                        lane.progress = 0;
+                        lane.error = 'Upload failed. Please try submitting again.';
+                        this.submitted = false;
+                        this.submitting = false;
+                    },
+                    (event) => {
+                        lane.progress = event?.detail?.progress ?? 0;
+                    },
+                );
             },
             removeFile(file) {
                 if (this.submitting) {
                     return;
                 }
 
-                window.clearInterval(this.timers[file.id]);
                 this.files = this.files.filter((lane) => lane.id !== file.id);
                 this.submitted = false;
-                this.syncUpload();
             },
             clearFiles() {
                 if (this.submitting) {
                     return;
                 }
 
-                this.files.forEach((file) => window.clearInterval(this.timers[file.id]));
                 this.files = [];
-                this.timers = {};
                 this.$refs.upload.value = '';
                 this.submitted = false;
-                this.stagingUploads = false;
                 this.$wire.set('uploadedFiles', []);
             },
             get hasFiles() {
                 return this.files.length > 0;
             },
             get readyCount() {
-                return this.files.filter((file) => file.type !== '' && file.status === 'ready').length;
+                return this.files.filter((file) => file.valid && file.type !== '' && (file.status === 'ready' || file.status === 'completed')).length;
             },
             get completedCount() {
                 return this.files.filter((file) => file.status === 'completed').length;
@@ -396,10 +352,10 @@ new class extends Component {
                 return this.submitted && this.hasFiles && this.completedCount === this.files.length;
             },
             get canSubmit() {
-                return ! this.stagingUploads
-                    && ! this.submitting
+                return ! this.submitting
                     && this.hasFiles
-                    && this.files.every((file) => file.valid && file.type !== '' && file.status === 'ready');
+                    && this.files.reduce((total, file) => total + (file.sizeBytes ?? 0), 0) <= this.maxBatchBytes
+                    && this.files.every((file) => file.valid && file.type !== '' && (file.status === 'ready' || file.status === 'completed'));
             },
         }"
     >
@@ -597,14 +553,14 @@ new class extends Component {
                                         <select
                                             x-model="file.type"
                                             @change="handleTypeChange(file)"
-                                            :disabled="submitting || file.status === 'staging' || file.status === 'uploading' || file.status === 'completed'"
+                                            :disabled="submitting || file.status === 'uploading' || file.status === 'completed'"
                                             aria-label="Document type"
                                             class="h-10 w-56 shrink-0 rounded-lg border border-cu-border bg-cu-surface px-3 text-sm text-cu-text outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-cu-purple focus:ring-2 focus:ring-cu-purple/20"
                                         >
                                             <option value="">Select type</option>
                                             <option>Business Permit</option>
-                                            <option>BIR Permit</option>
-                                            <option>Financial Statement</option>
+                                            <option>BIR Registration</option>
+                                            <option>DTI Registration</option>
                                         </select>
 
                                         <span class="w-28 shrink-0 rounded-full px-2.5 py-1 text-center text-xs font-medium" :class="statusClasses(file)" x-text="statusLabel(file)"></span>
@@ -652,7 +608,7 @@ new class extends Component {
                         </div>
                         <div class="flex items-start gap-3">
                             <x-activity-icon icon="check-circle" color="sky" />
-                            <p class="text-cu-muted">Assign Business Permit, BIR Permit, or Financial Statement per file.</p>
+                            <p class="text-cu-muted">Assign Business Permit, BIR Registration, or DTI Registration per file.</p>
                         </div>
                     </div>
                 </div>

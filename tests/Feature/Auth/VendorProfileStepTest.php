@@ -47,7 +47,6 @@ class VendorProfileStepTest extends TestCase
             ->set('business_entity_type', 'sole_proprietorship')
             ->set('tin', '123-456-789-000')
             ->set('dti_registration_number', 'DTI-2026001')
-            ->set('business_permit_number', 'BP-2026-555')
             ->set('nature_of_business', 'Food retail')
             ->set('business_street', '12 Ortigas Ave')
             ->set('business_barangay', 'Barangay San Antonio')
@@ -59,9 +58,6 @@ class VendorProfileStepTest extends TestCase
             ->set('date_of_birth', '1990-06-19')
             ->set('gender', 'male')
             ->set('contact_number', '+63 917 000 0000')
-            ->set('government_id_type', 'national_id')
-            ->set('government_id_number', '1234-5678-9012')
-            ->set('home_address', '37 Real St, Calamba')
             ->call('save')
             ->assertHasNoErrors()
             ->assertRedirect(route('signature.create'));
@@ -69,6 +65,25 @@ class VendorProfileStepTest extends TestCase
         $user->refresh();
         $this->assertTrue($user->hasCompletedVendorProfile());
         $this->assertSame('Negofood Trading', $user->vendor->company_name);
+        $this->assertNull($user->vendor->sec_registration_number);
+        $this->assertNull($user->vendor->business_permit_number);
+        $this->assertNull($user->vendor->representative->government_id_type);
+        $this->assertNull($user->vendor->representative->government_id_number);
+        $this->assertNull($user->vendor->representative->home_address);
+    }
+
+    public function test_business_step_does_not_render_legacy_identity_or_home_address_fields(): void
+    {
+        $user = User::factory()->withoutVendorProfile()->unverified()->create();
+
+        $this->actingAs($user)
+            ->get(route('business.create'))
+            ->assertOk()
+            ->assertDontSee('Government ID type')
+            ->assertDontSee('Government ID number')
+            ->assertDontSee('Home address (complete)')
+            ->assertDontSee('SEC Registration Number')
+            ->assertDontSee('Business Permit Number');
     }
 
     public function test_business_step_requires_core_fields(): void
@@ -88,23 +103,19 @@ class VendorProfileStepTest extends TestCase
         Volt::actingAs($user)
             ->test('auth.business-details')
             ->set('business_entity_type', 'sole_proprietorship')
-            ->set('sec_registration_number', '')
             ->set('dti_registration_number', '')
             ->call('save')
             ->assertHasErrors(['dti_registration_number']);
     }
 
-    public function test_corporation_requires_a_sec_number(): void
+    public function test_corporation_is_not_asked_for_a_legacy_sec_number(): void
     {
         $user = User::factory()->withoutVendorProfile()->unverified()->create();
 
-        Volt::actingAs($user)
-            ->test('auth.business-details')
-            ->set('business_entity_type', 'corporation')
-            ->set('dti_registration_number', '')
-            ->set('sec_registration_number', '')
-            ->call('save')
-            ->assertHasErrors(['sec_registration_number']);
+        $this->actingAs($user)
+            ->get(route('business.create'))
+            ->assertOk()
+            ->assertDontSee('SEC Registration Number');
     }
 
     public function test_malformed_tin_is_rejected(): void

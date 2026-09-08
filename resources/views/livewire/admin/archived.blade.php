@@ -2,10 +2,13 @@
 
 use App\Models\Submission;
 use App\Support\SubmissionPresenter;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     public string $search = '';
 
     public string $decision = 'all';
@@ -27,6 +30,7 @@ new class extends Component {
      *
      * @return Collection<int, array<string, mixed>>
      */
+    #[Computed]
     public function filtered(): Collection
     {
         $term = mb_strtolower(trim($this->search));
@@ -48,7 +52,7 @@ new class extends Component {
             ->values();
     }
 
-    private function archivedQuery(): \Illuminate\Database\Eloquent\Builder
+    private function archivedQuery(): Builder
     {
         return Submission::query()
             ->whereIn('status', [Submission::STATUS_APPROVED, Submission::STATUS_RESUBMISSION_REQUESTED]);
@@ -59,9 +63,12 @@ new class extends Component {
      */
     public function with(): array
     {
+        $archivedData = $this->filtered;
+        $total = $archivedData->count();
+
         return [
-            'rows' => $this->filtered(),
-            'total' => $this->archivedQuery()->count(),
+            'rows' => $archivedData,
+            'total' => $total,
         ];
     }
 }; ?>

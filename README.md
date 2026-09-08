@@ -17,7 +17,7 @@ read models.
 
 Implemented:
 
-- Fortify session authentication, email verification, password reset, and
+- Fortify session authentication with email OTP required for every password login, email verification, password reset, and
   reference-signature enrollment during registration.
 - Role-based access for `vendor`, `compliance_officer`, and `admin`.
 - Vendor document intake with MIME, size, and batch validation.
@@ -86,15 +86,19 @@ Operational gaps:
 2. **Preprocessing** renders up to two PDF pages at 300 DPI and prepares images
    for OCR and model inference.
 3. **OCR** extracts text and document-specific fields. Multi-page conflicts are
-   retained as flags instead of aborting processing.
+   retained as flags instead of aborting processing. Laravel computes the text
+   risk component by matching aggregate OCR text against the vendor's non-empty
+   registration fields (including the complete, unified business address); the Python template-quality score is not used for risk.
 4. **Classification** predicts the document class and exposes authenticity as
    `1 - P(fake)` so a confident fake prediction increases risk.
 5. **Detection** locates signature, stamp, and logo regions with YOLOv8.
 6. **Signature verification** compares a detected crop with the vendor's
    registration-time 128-D reference embedding.
-7. **Stamp/logo verification** runs a texture tamper check and compares the
-   feature vector with an issuer reference. National references use document
-   type; LGU references use document type plus OCR-detected city.
+7. **Stamp/logo verification** classifies the crop as wet-ink-like or having
+   scan/copy texture, then compares its feature vector with an issuer reference.
+   A scan/copy texture result indicates a digital or scanned reproduction; it
+   does not by itself mean the stamp artwork was altered. National references
+   use document type; LGU references use document type plus OCR-detected city.
 8. **Forensic analysis** blends metadata, ELA, copy-move, font, and OCR
    cross-reference signals across the document.
 9. **Risk scoring** combines available authenticity signals, applies missing
@@ -192,6 +196,8 @@ Laravel environment:
 - `ML_API_URL`: normally `http://127.0.0.1:7860` locally.
 - `ML_API_TOKEN`: must match FastAPI `API_TOKEN`.
 - `ML_API_TIMEOUT`: must remain below the queue connection `retry_after`.
+- `composer run dev` launches separate `mail` and `document-processing` queue
+  workers so long OCR/ML jobs cannot delay authentication email delivery.
 
 Python environment:
 
@@ -231,4 +237,3 @@ The Python API contract and deployment details are documented in
 [python/README.md](python/README.md). Model-training status and remaining
 evaluation work are in
 [python/DEVELOPMENT_PHASES.md](python/DEVELOPMENT_PHASES.md).
-

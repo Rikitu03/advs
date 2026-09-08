@@ -4,13 +4,19 @@ use App\Models\AuditLog;
 use App\Models\Submission;
 use App\Support\SubmissionPresenter;
 use Illuminate\Support\Collection;
+use Livewire\Attributes\Computed;
 use Livewire\Volt\Component;
 
-new class extends Component {
+new class extends Component
+{
     /**
+     * Dashboard data is computed once per component request, even if Volt
+     * evaluates the `with()` data provider more than once while rendering.
+     *
      * @return array<string, mixed>
      */
-    public function with(): array
+    #[Computed]
+    public function dashboardData(): array
     {
         $typeNames = SubmissionPresenter::typeNames();
 
@@ -41,6 +47,17 @@ new class extends Component {
             'urgent' => $pending->take(5)->values(),
             'activity' => $this->activity(),
         ];
+    }
+
+    /**
+     * Keep the existing Blade data contract while delegating the work to the
+     * cached computed property above.
+     *
+     * @return array<string, mixed>
+     */
+    public function with(): array
+    {
+        return $this->dashboardData;
     }
 
     /**

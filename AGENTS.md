@@ -112,6 +112,9 @@ aggregate/per-page stages, flags, model provenance, settings hash, and timings.
 
 ## Laravel Conventions
 
+- Never run `php artisan migrate:fresh`, `migrate:refresh`, or any command that
+  drops application tables unless the user explicitly requests a destructive
+  database reset. Preserve the existing local database by default.
 - Use Artisan `make:* --no-interaction` for Laravel boilerplate.
 - Before any model, migration, factory, seeder, relationship, or
   column-dependent query change, inspect migrations and run the applicable
@@ -196,8 +199,13 @@ This application is a Laravel application and its main Laravel ecosystems packag
 - laravel/pail (PAIL) - v1
 - laravel/pint (PINT) - v1
 - laravel/sail (SAIL) - v1
+- laravel/telescope (TELESCOPE) - v5
 - phpunit/phpunit (PHPUNIT) - v11
 - tailwindcss (TAILWINDCSS) - v4
+
+## Skills Activation
+
+This project has domain-specific skills available in `**/skills/**`. You MUST activate the relevant skill whenever you work in that domain—don't wait until you're stuck.
 
 ## Conventions
 

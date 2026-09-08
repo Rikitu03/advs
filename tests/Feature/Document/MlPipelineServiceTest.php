@@ -71,8 +71,8 @@ class MlPipelineServiceTest extends TestCase
                 'matched' => true, 'confidence' => 96.0, 'warnings' => []],
             $columns['ocr_fields']['tin'],
         );
-        $this->assertEqualsWithDelta(1.0, $columns['text_validation_score'], 1e-6);
-        $this->assertSame(3, $columns['text_fields_matched']);
+        $this->assertArrayNotHasKey('text_validation_score', $columns);
+        $this->assertArrayNotHasKey('text_fields_matched', $columns);
         $this->assertSame([10, 20, 30, 40], $columns['signature_bbox']);
         $this->assertSame([50, 60, 70, 80], $columns['stamp_bbox']);
 
@@ -85,6 +85,145 @@ class MlPipelineServiceTest extends TestCase
         $this->assertEqualsWithDelta(0.95, $columns['stamp_score'], 1e-6);
         $this->assertSame(42, $columns['logo_reference_id']);
         $this->assertSame([], $mapped['flags']);
+    }
+
+    public function test_maps_every_signature_comparison_and_keeps_the_aggregate_result(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'detection' => ['detections' => [
+                ['label' => 'signature', 'confidence' => 0.91, 'box' => [10, 20, 30, 40]],
+                ['label' => 'signature', 'confidence' => 0.84, 'box' => [50, 60, 70, 80]],
+            ]],
+            'signature' => [
+                'match' => false,
+                'distance' => 1.4,
+                'threshold' => 1.243976,
+                'similarity' => 0.416,
+                'comparisons' => [
+                    [
+                        'page_index' => 1,
+                        'box' => [10, 20, 30, 40],
+                        'confidence' => 0.91,
+                        'match' => true,
+                        'distance' => 0.7,
+                        'threshold' => 1.243976,
+                        'similarity' => 0.588,
+                    ],
+                    [
+                        'page_index' => 1,
+                        'box' => [50, 60, 70, 80],
+                        'confidence' => 0.84,
+                        'match' => false,
+                        'distance' => 1.4,
+                        'threshold' => 1.243976,
+                        'similarity' => 0.416,
+                    ],
+                ],
+            ],
+        ])['columns'];
+
+        $this->assertCount(2, $mapped['signature_comparisons']);
+        $this->assertSame([50, 60, 70, 80], $mapped['signature_comparisons'][1]['box']);
+        $this->assertEqualsWithDelta(0.4374, $mapped['signature_comparisons'][1]['score'], 0.0005);
+        $this->assertSame([50, 60, 70, 80], $mapped['signature_bbox']);
+        $this->assertFalse($mapped['signature_passed']);
+    }
+
+    public function test_curated_stamp_match_does_not_claim_a_database_reference_id(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'stamp' => [
+                'match' => true,
+                'similarity_score' => 0.95,
+                'reason' => null,
+                'reference_source' => 'curated',
+                'best_reference_key' => 'bir-seal',
+            ],
+        ], [
+            'issuer_scope' => 'national',
+            'logo_reference_ids' => ['' => 42],
+        ]);
+
+        $this->assertNull($mapped['columns']['logo_reference_id']);
+    }
+
+    public function test_maps_every_stamp_comparison_and_keeps_the_aggregate_result(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'detection' => ['detections' => [
+                ['label' => 'stamp', 'confidence' => 0.91, 'box' => [10, 20, 30, 40]],
+                ['label' => 'stamp', 'confidence' => 0.84, 'box' => [50, 60, 70, 80]],
+            ]],
+            'stamp' => [
+                'match' => false,
+                'similarity_score' => 0.63,
+                'threshold' => 0.85,
+                'reason' => null,
+                'box' => [50, 60, 70, 80],
+                'reference_source' => 'enrolled',
+                'best_reference_key' => 'bir-seal',
+                'comparisons' => [
+                    [
+                        'page_index' => 1,
+                        'box' => [10, 20, 30, 40],
+                        'confidence' => 0.91,
+                        'match' => true,
+                        'similarity_score' => 0.91,
+                        'threshold' => 0.85,
+                        'reference_source' => 'enrolled',
+                        'best_reference_key' => 'bir-seal',
+                        'reference_matches' => [
+                            ['key' => 'bir-seal', 'label' => 'BIR Seal', 'source' => 'enrolled', 'similarity_score' => 0.91, 'match' => true],
+                        ],
+                    ],
+                    [
+                        'page_index' => 1,
+                        'box' => [50, 60, 70, 80],
+                        'confidence' => 0.84,
+                        'match' => false,
+                        'similarity_score' => 0.63,
+                        'threshold' => 0.85,
+                        'reference_source' => 'enrolled',
+                        'best_reference_key' => 'bir-seal',
+                        'reference_matches' => [
+                            ['key' => 'bir-seal', 'label' => 'BIR Seal', 'source' => 'enrolled', 'similarity_score' => 0.63, 'match' => false],
+                        ],
+                    ],
+                ],
+            ],
+        ], ['issuer_scope' => 'national', 'logo_reference_ids' => ['' => 42]])['columns'];
+
+        $this->assertCount(2, $mapped['stamp_comparisons']);
+        $this->assertSame([10, 20, 30, 40], $mapped['stamp_comparisons'][0]['box']);
+        $this->assertSame([50, 60, 70, 80], $mapped['stamp_comparisons'][1]['box']);
+        $this->assertSame(0.84, $mapped['stamp_comparisons'][1]['confidence']);
+        $this->assertSame([50, 60, 70, 80], $mapped['stamp_bbox']);
+        $this->assertFalse($mapped['stamp_passed']);
+        $this->assertSame(42, $mapped['logo_reference_id']);
+    }
+
+    public function test_maps_stamp_comparisons_when_issuer_reference_is_missing(): void
+    {
+        $mapped = $this->service()->mapStages([
+            'stamp' => [
+                'match' => false,
+                'reason' => 'unreferenced_logo',
+                'comparisons' => [[
+                    'page_index' => 1,
+                    'box' => [10, 20, 30, 40],
+                    'confidence' => 0.91,
+                    'match' => false,
+                    'similarity_score' => null,
+                    'threshold' => null,
+                    'reference_matches' => [],
+                ]],
+            ],
+        ], ['issuer_scope' => 'national']);
+
+        $this->assertCount(1, $mapped['columns']['stamp_comparisons']);
+        $this->assertSame([10, 20, 30, 40], $mapped['columns']['stamp_comparisons'][0]['box']);
+        $this->assertFalse($mapped['columns']['stamp_detected']);
+        $this->assertContains('unreferenced_logo', $mapped['flags']);
     }
 
     public function test_maps_classification_authenticity_separately_from_confidence(): void
@@ -141,7 +280,7 @@ class MlPipelineServiceTest extends TestCase
             'matched' => false, 'confidence' => 0.0, 'warnings' => [],
         ]));
 
-        $this->assertArrayNotHasKey('detected_city', $mapped['columns']);
+        $this->assertNull($mapped['columns']['detected_city']);
     }
 
     public function test_a_document_type_with_no_city_field_sets_no_detected_city(): void
@@ -150,7 +289,7 @@ class MlPipelineServiceTest extends TestCase
             'text' => 'BUREAU OF INTERNAL REVENUE', 'fields' => [], 'quality' => [],
         ]]]]);
 
-        $this->assertArrayNotHasKey('detected_city', $mapped['columns']);
+        $this->assertNull($mapped['columns']['detected_city']);
     }
 
     /**
